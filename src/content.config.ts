@@ -26,7 +26,7 @@ const lessons = defineCollection({
     title: z.string(),
     course: z.string(),
     lessonNumber: z.number(),
-    estimatedTime: z.string(),
+    estimatedTime: z.coerce.string(),
     beatCount: z.number(),
     description: z.string(),
     audioSrc: z.string().optional(),

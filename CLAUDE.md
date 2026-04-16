@@ -1,7 +1,7 @@
 # Zeemish v2 — Claude Code Context
 
 ## Current stage
-**Stage 4 — Agent Team** (weeks 7-11 complete). 9 agents, full pipeline, quality gates, auto-publishing, observer dashboard. Ready for Stage 5.
+**Stage 5 — First Real Course** (complete). 12-lesson "The body you live in" course produced by agent team. Ready for Stage 6.
 
 ## What was last worked on
 - Stage 4 weeks 10-11: ObserverAgent, dashboard page, event logging
