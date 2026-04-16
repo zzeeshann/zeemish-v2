@@ -1,9 +1,10 @@
 # Zeemish v2 — Claude Code Context
 
 ## Current stage
-**Stage 3 — Reader Accounts & Progress** (complete). Ready for Stage 4 — Agent Team.
+**Stage 4 — Agent Team** (week 7 complete). Director + Curator + Drafter working. Next: quality gates (Voice-Auditor, Structure-Editor, Integrator).
 
 ## What was last worked on
+- Stage 4 week 7: agents/ Worker, DirectorAgent, CuratorAgent, DrafterAgent, manual trigger endpoint
 - Stage 3: anonymous-first auth, D1 database, progress API, account/login pages
 - Stage 2: lesson Web Components, beat navigation, content collections, course pages
 - Stage 1: repo skeleton, Astro + Tailwind + MDX, Cloudflare deploy, GitHub Actions CI/CD

@@ -1,0 +1,36 @@
+#:schema node_modules/wrangler/config-schema.json
+
+name = "zeemish-agents"
+main = "src/server.ts"
+compatibility_date = "2026-04-16"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+# Durable Object bindings — one per agent class
+[[durable_objects.bindings]]
+name = "DIRECTOR"
+class_name = "DirectorAgent"
+
+[[durable_objects.bindings]]
+name = "CURATOR"
+class_name = "CuratorAgent"
+
+[[durable_objects.bindings]]
+name = "DRAFTER"
+class_name = "DrafterAgent"
+
+# SQLite storage for agent state
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["DirectorAgent", "CuratorAgent", "DrafterAgent"]
+
+# D1 for shared data (tasks log, audit results)
+[[d1_databases]]
+binding = "DB"
+database_name = "zeemish"
+database_id = "f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4"
+
+# Secrets (set via: wrangler secret put ANTHROPIC_API_KEY)
+# ANTHROPIC_API_KEY — required for Claude API calls

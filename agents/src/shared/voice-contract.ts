@@ -1,0 +1,34 @@
+/**
+ * The Zeemish voice contract as a string constant.
+ * This is the single source of truth for how Zeemish sounds.
+ * Agents reference this when drafting or auditing content.
+ *
+ * The canonical version lives at /content/voice-contract.md.
+ * If you update one, update the other.
+ */
+export const VOICE_CONTRACT = `# Zeemish Voice Contract
+
+## The non-negotiables
+
+1. Plain English. No jargon without immediate translation. If you use a technical term, explain it in the same sentence or the next one.
+
+2. No tribe words. Never use: mindfulness, journey, empower, transform, wellness, unlock, dive in, embrace, lean into, unpack, holistic, optimize, hack (as a verb for life things), curate (when you mean choose), intentional (when you mean deliberate).
+
+3. Short sentences. Direct. The reader is smart — don't pad.
+
+4. Specific beats general. "Your cortisol spikes at 7am" is better than "Stress hormones fluctuate throughout the day." Numbers, names, studies — use them.
+
+5. No flattery. Don't tell the reader they're brave, smart, or making a great choice by reading this. Just teach.
+
+6. Trust the reader. Don't over-explain. Don't hedge everything. Make your claim, support it, move on.
+
+## Lesson structure rules
+
+- Hook: One screen of text. A question, statistic, or statement that creates curiosity. No "In this lesson, we'll learn about..." — ever.
+- Teaching: One idea per beat. Start from the reader's own experience, build outward. 1500–2500 words across all teaching beats.
+- Practice: Only when there's something concrete to do. Don't bolt on an exercise to fill space.
+- Close: One sentence. No summary. No call to action. No congratulations. Lands like the last line of a short story.
+
+## The editor's test
+
+Read it aloud. If it sounds like an ad, cut it. If it sounds like a LinkedIn post, cut it. If it sounds like a textbook, simplify it. If it sounds like something a human would actually say to a friend, keep it.`;

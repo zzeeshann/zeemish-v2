@@ -41,3 +41,18 @@ Append-only. Never edit old entries.
 **Context:** Stage 3 — Astro middleware was crashing on prerendered pages.
 **Decision:** Auth middleware checks the URL path and only runs on `/api/`, `/account`, `/login` routes.
 **Reason:** Prerendered pages don't have access to D1 at build time. The middleware creates anonymous users in D1, which can only run on server-rendered routes. Lesson pages call the API from the client side instead.
+
+## 2026-04-16: Agents as a separate Worker
+**Context:** Stage 4 — setting up the agent team.
+**Decision:** The agents live in `agents/` as a separate Cloudflare Worker, not inside the Astro site.
+**Reason:** The Astro adapter manages its own fetch handler. Agents need Durable Object bindings with their own wrangler.toml. Separate Workers with separate concerns. Zero cost when agents are hibernated.
+
+## 2026-04-16: getAgentByName for RPC instead of stub.fetch()
+**Context:** Stage 4 — routing HTTP requests to Durable Objects.
+**Decision:** Use `getAgentByName()` from the agents SDK for typed RPC calls from the main fetch handler.
+**Reason:** The Agent base class's `fetch()` method expects specific SDK headers (namespace/room). Direct RPC via `getAgentByName` gives typed method calls and avoids header confusion.
+
+## 2026-04-16: Voice contract as TypeScript string, not .md import
+**Context:** Stage 4 — agents need the voice contract text.
+**Decision:** Duplicate the voice contract as a string constant in `agents/src/shared/voice-contract.ts`.
+**Reason:** Wrangler's bundler has no loader for `.md` files. The canonical version stays at `content/voice-contract.md`; the TS copy is kept in sync manually.

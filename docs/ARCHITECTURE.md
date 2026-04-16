@@ -30,9 +30,23 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Security headers (_headers file)
 - [x] lesson-shell POSTs progress to API (fire-and-forget, offline-safe)
 
+### Stage 4 — Agent Team, Week 7 (in progress)
+- [x] Separate `agents/` Worker with Cloudflare Agents SDK
+- [x] DirectorAgent (supervisor, manual trigger, status)
+- [x] CuratorAgent (lesson planning via Claude API)
+- [x] DrafterAgent (MDX generation via Claude API)
+- [x] Voice contract and subject values files
+- [x] Manual trigger endpoint: POST /trigger?course=slug&lesson=number
+- [x] Status endpoint: GET /status
+- [x] Tested end-to-end: Curator + Drafter produce lesson MDX
+- [ ] Voice-Auditor, Structure-Editor, Integrator (quality gates)
+- [ ] Fact-Checker, Publisher (end-to-end publishing)
+- [ ] Audio-Producer, Audio-Auditor (ElevenLabs)
+- [ ] Observer + dashboard
+
 ## What's not yet built
-- Stage 4: Agent team (Cloudflare Agents SDK)
-- Stage 5: First real course
+- Stage 4 weeks 8-11: Quality gates, publisher, audio, observer
+- Stage 5: First real course (agent-produced)
 - Stage 6: Self-improvement loop
 - Stage 7: Zita
 
