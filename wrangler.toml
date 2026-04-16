@@ -1,0 +1,8 @@
+#:schema node_modules/wrangler/config-schema.json
+
+name = "zeemish-v2"
+compatibility_date = "2026-04-16"
+
+# Serve Astro's static build output
+[assets]
+directory = "./dist"
