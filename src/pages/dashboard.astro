@@ -1,0 +1,166 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+// Fetch digest from the agents worker
+const AGENTS_URL = 'https://zeemish-agents.zzeeshann.workers.dev';
+
+let digest = { published: 0, escalated: 0, errors: 0, events: [] as any[] };
+let directorStatus = { status: 'unknown', currentTask: null, lastLesson: null, error: null };
+
+try {
+  const [digestRes, statusRes] = await Promise.all([
+    fetch(`${AGENTS_URL}/digest`),
+    fetch(`${AGENTS_URL}/status`),
+  ]);
+  if (digestRes.ok) digest = await digestRes.json();
+  if (statusRes.ok) directorStatus = await statusRes.json();
+} catch {
+  // Agents worker might be unavailable
+}
+---
+
+<BaseLayout title="Dashboard — Zeemish">
+  <h1 class="text-2xl md:text-3xl font-bold mb-2">Agent Dashboard</h1>
+  <p class="text-zee-muted mb-8">What the agent team has been doing.</p>
+
+  <!-- Director Status -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Director Status</h2>
+    <div class="p-5 rounded-xl border border-zee-border">
+      <div class="flex items-center gap-3 mb-3">
+        <span class={`w-2.5 h-2.5 rounded-full ${
+          directorStatus.status === 'idle' ? 'bg-green-500' :
+          directorStatus.status === 'error' ? 'bg-red-500' :
+          'bg-yellow-500 animate-pulse'
+        }`}></span>
+        <span class="font-medium capitalize">{directorStatus.status}</span>
+      </div>
+      {directorStatus.currentTask && (
+        <p class="text-sm text-zee-muted">Working on: {directorStatus.currentTask}</p>
+      )}
+      {directorStatus.lastLesson && (
+        <p class="text-sm text-zee-muted">
+          Last lesson: {(directorStatus.lastLesson as any).title}
+          ({(directorStatus.lastLesson as any).courseSlug}/{(directorStatus.lastLesson as any).lessonNumber})
+        </p>
+      )}
+      {directorStatus.error && (
+        <p class="text-sm text-red-600 mt-2">{directorStatus.error}</p>
+      )}
+    </div>
+  </section>
+
+  <!-- 24-Hour Summary -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Last 24 Hours</h2>
+    <div class="grid grid-cols-3 gap-4">
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{digest.published}</div>
+        <div class="text-sm text-zee-muted">Published</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-yellow-600">{digest.escalated}</div>
+        <div class="text-sm text-zee-muted">Escalated</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-red-600">{digest.errors}</div>
+        <div class="text-sm text-zee-muted">Errors</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Event Log -->
+  <section>
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Recent Events</h2>
+    {digest.events.length === 0 ? (
+      <p class="text-zee-muted italic">No events yet. Trigger a lesson to see activity here.</p>
+    ) : (
+      <div class="space-y-3">
+        {digest.events.map((event: any) => (
+          <div class={`p-4 rounded-xl border ${
+            event.severity === 'info' ? 'border-zee-primary/20 bg-zee-primary/5' :
+            event.severity === 'escalation' ? 'border-yellow-500/20 bg-yellow-50' :
+            'border-red-500/20 bg-red-50'
+          }`}>
+            <div class="flex items-center gap-2 mb-1">
+              <span class={`text-xs font-medium uppercase px-2 py-0.5 rounded ${
+                event.severity === 'info' ? 'bg-zee-primary/10 text-zee-primary' :
+                event.severity === 'escalation' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-red-100 text-red-700'
+              }`}>
+                {event.severity}
+              </span>
+              <span class="text-xs text-zee-muted">
+                {new Date(event.created_at).toLocaleString()}
+              </span>
+            </div>
+            <h3 class="font-medium text-sm">{event.title}</h3>
+            <p class="text-sm text-zee-muted mt-1">{event.body}</p>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <!-- Manual Trigger -->
+  <section class="mt-12 pt-8 border-t border-zee-border">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Manual Trigger</h2>
+    <form id="trigger-form" class="flex flex-wrap gap-3 items-end">
+      <div>
+        <label for="course" class="block text-sm mb-1">Course</label>
+        <select id="course" class="px-3 py-2 rounded-lg border border-zee-border bg-white text-sm">
+          <option value="body">body</option>
+          <option value="attention">attention</option>
+          <option value="systems-thinking">systems-thinking</option>
+        </select>
+      </div>
+      <div>
+        <label for="lesson" class="block text-sm mb-1">Lesson #</label>
+        <input type="number" id="lesson" value="2" min="1" max="12"
+          class="w-20 px-3 py-2 rounded-lg border border-zee-border bg-white text-sm" />
+      </div>
+      <button type="submit" id="trigger-btn"
+        class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
+        Trigger Lesson
+      </button>
+      <span id="trigger-status" class="text-sm text-zee-muted"></span>
+    </form>
+  </section>
+</BaseLayout>
+
+<script>
+  const form = document.getElementById('trigger-form');
+  const statusEl = document.getElementById('trigger-status');
+  const btn = document.getElementById('trigger-btn') as HTMLButtonElement;
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const course = (document.getElementById('course') as HTMLSelectElement).value;
+    const lesson = (document.getElementById('lesson') as HTMLInputElement).value;
+
+    btn.disabled = true;
+    statusEl!.textContent = 'Running pipeline (this may take 60-120s)...';
+
+    try {
+      const res = await fetch(
+        `https://zeemish-agents.zzeeshann.workers.dev/trigger?course=${course}&lesson=${lesson}`,
+        { method: 'POST' },
+      );
+      const data = await res.json();
+
+      if (data.passed) {
+        statusEl!.textContent = `✅ Published: ${data.brief?.title}`;
+      } else if (data.brief) {
+        statusEl!.textContent = `⚠️ Audit failed: ${data.brief?.title}`;
+      } else {
+        statusEl!.textContent = `❌ Error: ${data.error}`;
+      }
+    } catch {
+      statusEl!.textContent = '❌ Network error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>

@@ -54,6 +54,14 @@ new_sqlite_classes = ["VoiceAuditorAgent", "StructureEditorAgent", "FactCheckerA
 tag = "v3"
 new_sqlite_classes = ["PublisherAgent"]
 
+[[durable_objects.bindings]]
+name = "OBSERVER"
+class_name = "ObserverAgent"
+
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["ObserverAgent"]
+
 # D1 for shared data (tasks log, audit results)
 [[d1_databases]]
 binding = "DB"

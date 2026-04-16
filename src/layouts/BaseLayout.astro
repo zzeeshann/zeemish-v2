@@ -23,9 +23,14 @@ const { title, description } = Astro.props;
       <a href="/" class="text-lg font-bold tracking-tight text-zee-primary hover:opacity-80 transition-opacity">
         zeemish
       </a>
-      <a href="/account/" class="text-sm text-zee-muted hover:text-zee-primary transition-colors">
-        Account
-      </a>
+      <nav class="flex items-center gap-4">
+        <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary transition-colors">
+          Dashboard
+        </a>
+        <a href="/account/" class="text-sm text-zee-muted hover:text-zee-primary transition-colors">
+          Account
+        </a>
+      </nav>
     </header>
 
     <main class="flex-1 w-full max-w-3xl mx-auto px-6 py-6">

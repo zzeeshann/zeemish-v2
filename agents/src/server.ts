@@ -4,6 +4,7 @@ import type { Env } from './types';
 import { DirectorAgent } from './director';
 import { CuratorAgent } from './curator';
 import { DrafterAgent } from './drafter';
+import { ObserverAgent } from './observer';
 
 // Re-export for Durable Object bindings
 export { DirectorAgent, CuratorAgent, DrafterAgent };
@@ -12,6 +13,7 @@ export { StructureEditorAgent } from './structure-editor';
 export { FactCheckerAgent } from './fact-checker';
 export { IntegratorAgent } from './integrator';
 export { PublisherAgent } from './publisher';
+export { ObserverAgent } from './observer';
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -84,6 +86,39 @@ export default {
           JSON.stringify({ error: message }),
           { status: 500, headers: { 'Content-Type': 'application/json' } },
         );
+      }
+    }
+
+    // Dashboard digest: GET /digest
+    if (url.pathname === '/digest' && request.method === 'GET') {
+      try {
+        const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
+        const digest = await observer.getDailyDigest();
+        return new Response(JSON.stringify(digest), {
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // Recent events: GET /events?limit=20
+    if (url.pathname === '/events' && request.method === 'GET') {
+      try {
+        const limit = parseInt(url.searchParams.get('limit') ?? '20', 10);
+        const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
+        const events = await observer.getRecentEvents(limit);
+        return new Response(JSON.stringify({ events }), {
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: { 'Content-Type': 'application/json' },
+        });
       }
     }
 

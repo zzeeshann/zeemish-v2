@@ -1,9 +1,10 @@
 # Zeemish v2 — Claude Code Context
 
 ## Current stage
-**Stage 4 — Agent Team** (weeks 7-9 complete). Full pipeline with quality gates + auto-publishing working. Ready for Stage 5.
+**Stage 4 — Agent Team** (weeks 7-11 complete). 9 agents, full pipeline, quality gates, auto-publishing, observer dashboard. Ready for Stage 5.
 
 ## What was last worked on
+- Stage 4 weeks 10-11: ObserverAgent, dashboard page, event logging
 - Stage 4 week 9: PublisherAgent, end-to-end publishing (first agent-authored lesson committed to repo)
 - Stage 4 week 8: VoiceAuditor, StructureEditor, FactChecker, Integrator, revision loop
 - Stage 4 week 7: agents/ Worker, DirectorAgent, CuratorAgent, DrafterAgent, manual trigger endpoint

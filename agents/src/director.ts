@@ -6,6 +6,7 @@ import { StructureEditorAgent } from './structure-editor';
 import { FactCheckerAgent } from './fact-checker';
 import { IntegratorAgent } from './integrator';
 import { PublisherAgent } from './publisher';
+import { ObserverAgent } from './observer';
 import type { Env, DirectorState, LessonBrief, DraftResult } from './types';
 import type { PublishResult } from './publisher';
 import type { VoiceAuditResult } from './voice-auditor';
@@ -123,8 +124,27 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         published = await publisher.publish(brief, currentMdx);
       }
 
-      // Log to D1
+      // Log to D1 and Observer
       await this.logTask(courseSlug, lessonNumber, brief, draft, audits, passed);
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      const lastVoiceScore = audits[audits.length - 1]?.voice?.score ?? 0;
+
+      if (passed && published) {
+        await observer.logPublished(
+          courseSlug, lessonNumber, brief.title,
+          lastVoiceScore, audits.length - 1, published.commitUrl,
+        );
+      } else {
+        const failedGates: string[] = [];
+        const last = audits[audits.length - 1];
+        if (!last.voice.passed) failedGates.push('voice');
+        if (!last.structure.passed) failedGates.push('structure');
+        if (!last.facts.passed) failedGates.push('facts');
+        await observer.logEscalation(
+          courseSlug, lessonNumber, brief.title,
+          lastVoiceScore, audits.length, failedGates,
+        );
+      }
 
       this.setState({
         status: 'idle',
@@ -144,6 +164,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
+      try {
+        const observer = await this.subAgent(ObserverAgent, 'observer');
+        await observer.logError(courseSlug, lessonNumber, message);
+      } catch { /* observer failure shouldn't mask the real error */ }
       this.setState({
         status: 'error',
         currentTask: taskId,

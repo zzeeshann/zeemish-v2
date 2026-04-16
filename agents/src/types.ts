@@ -14,6 +14,7 @@ export interface Env {
   FACT_CHECKER: DurableObjectNamespace;
   INTEGRATOR: DurableObjectNamespace;
   PUBLISHER: DurableObjectNamespace;
+  OBSERVER: DurableObjectNamespace;
   GITHUB_TOKEN: string;
 }
 
