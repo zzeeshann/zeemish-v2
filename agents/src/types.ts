@@ -23,6 +23,7 @@ export interface Env {
   GITHUB_TOKEN: string;
   ADMIN_SECRET: string;
   ELEVENLABS_API_KEY: string;
+  MAX_LESSONS_PER_DAY?: string;
 }
 
 /** A lesson brief produced by the Curator */

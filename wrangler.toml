@@ -9,6 +9,10 @@ main = "./dist/_worker.js/index.js"
 directory = "./dist"
 binding = "ASSETS"
 
+# When you verify zeemish.io on Resend, change this:
+[vars]
+EMAIL_FROM = "Zeemish <onboarding@resend.dev>"
+
 [observability]
 enabled = true
 

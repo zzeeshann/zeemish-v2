@@ -21,7 +21,6 @@ import { VOICE_CONTRACT } from './shared/voice-contract';
 import subjectValuesJson from '../../content/subject-values.json';
 
 const MAX_REVISIONS = 3;
-const MAX_LESSONS_PER_DAY = 2; // spending cap — don't produce more than this per scheduled run
 
 /** Full pipeline result with audit trail */
 export interface PipelineResult {
@@ -78,7 +77,8 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     let produced = 0;
 
     for (const subject of sorted) {
-      if (produced >= MAX_LESSONS_PER_DAY) break;
+      const maxPerDay = parseInt(this.env.MAX_LESSONS_PER_DAY ?? '2', 10);
+      if (produced >= maxPerDay) break;
 
       // Find how many lessons exist for this course
       const existing = await this.getExistingLessons(subject.slug);

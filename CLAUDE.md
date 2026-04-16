@@ -37,7 +37,7 @@
 
 ## Known gaps (honest list)
 - Voice contract duplicated in .md and .ts (drift risk)
-- Resend email uses test domain (onboarding@resend.dev) — needs verified sending domain for production
+- Resend email uses test domain — change EMAIL_FROM in wrangler.toml after verifying zeemish.io on Resend
 
 ## Completed (previously gaps)
 - ✅ Cloudflare Workflows v2 (PublishLessonWorkflow with durable steps)

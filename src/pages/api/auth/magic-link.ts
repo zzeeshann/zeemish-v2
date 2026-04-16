@@ -53,7 +53,9 @@ export const POST: APIRoute = async ({ locals, request }) => {
     .run();
 
   // Send email via Resend
-  const RESEND_API_KEY = (locals.runtime.env as Record<string, string>).RESEND_API_KEY;
+  const env = locals.runtime.env as Record<string, string>;
+  const RESEND_API_KEY = env.RESEND_API_KEY;
+  const EMAIL_FROM = env.EMAIL_FROM ?? 'Zeemish <onboarding@resend.dev>';
   const siteUrl = new URL(request.url).origin;
   const magicUrl = `${siteUrl}/auth/verify?token=${token}`;
 
@@ -66,7 +68,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: 'Zeemish <onboarding@resend.dev>',
+          from: EMAIL_FROM,
           to: [normalizedEmail],
           subject: 'Your Zeemish login link',
           html: `
