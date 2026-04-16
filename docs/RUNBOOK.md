@@ -47,17 +47,13 @@ cd agents
 wrangler deploy
 # Deploys to https://zeemish-agents.zzeeshann.workers.dev
 ```
-**Note:** Agents are NOT auto-deployed by GitHub Actions. Must deploy manually.
+Also auto-deploys on every push to `main` via GitHub Actions (same as site).
 
 ## Secrets
 
 ### Site worker
 ```bash
-wrangler secret put ANTHROPIC_API_KEY   # For Zita chat
-```
-
-### Site worker
-```bash
+wrangler secret put ANTHROPIC_API_KEY    # For Zita chat
 wrangler secret put AGENTS_ADMIN_SECRET  # For dashboard trigger proxy
 ```
 
@@ -89,9 +85,10 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events OR
 
 ## Trigger a lesson (agent pipeline)
 
-### Via curl
+### Via curl (requires ADMIN_SECRET)
 ```bash
-curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/trigger?course=body&lesson=3"
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/trigger?course=body&lesson=3" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
 
 ### Via dashboard
@@ -160,7 +157,7 @@ zeemish-v2/
 │   ├── voice-contract.md   Voice rules for agents
 │   └── subject-values.json Subject priorities
 ├── agents/                 Separate Cloudflare Worker
-│   ├── src/                Agent code (11 agents)
+│   ├── src/                Agent code (13 agents)
 │   └── wrangler.toml       Agent worker config
 ├── migrations/             D1 schema migrations
 ├── docs/                   Living documentation

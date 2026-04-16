@@ -131,8 +131,24 @@ Cross-agent learnings database — patterns that work or don't.
 
 Migration: `0003_engagement_learnings.sql`
 
-## Missing tables (not yet created)
+### audit_results
+One row per audit pass per draft — durable audit trail. Written by DirectorAgent after each audit round.
 
-### audit_results (planned)
-One row per audit pass per draft — provides a durable audit trail.
-See architecture doc Section 7.2. Needs a migration to create.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| task_id | TEXT FK→agent_tasks | Which pipeline run |
+| draft_id | TEXT | e.g. "body/lesson-3-r1" (task + round) |
+| auditor | TEXT | voice, structure, or fact |
+| passed | INTEGER | 0 or 1 |
+| score | INTEGER | 0-100 for voice auditor, null for others |
+| notes | TEXT | JSON: violations, issues, or claims |
+| created_at | INTEGER | |
+
+Migration: `0004_audit_results.sql`
+
+## Migrations summary
+- `0001_init.sql` — users, progress, submissions, zita_messages
+- `0002_observer_events.sql` — agent_tasks, observer_events
+- `0003_engagement_learnings.sql` — engagement, learnings
+- `0004_audit_results.sql` — audit_results + idx_tasks_parent index

@@ -25,7 +25,7 @@
 - Agents: Cloudflare Agents SDK v0.11.1 (Durable Objects) — separate Worker
 - AI: Anthropic Claude (Sonnet 4.5)
 - Audio: ElevenLabs (Frederick Surrey voice, saves to R2)
-- Deploy: GitHub Actions → Cloudflare (site only; agents deployed manually)
+- Deploy: GitHub Actions → Cloudflare (both site and agents worker)
 
 ## Key architecture notes
 - Single Astro Worker serves static pages + API routes
@@ -33,7 +33,7 @@
 - Auth middleware only runs on /api/, /account, /login routes
 - D1 database `zeemish` with 9 tables (see `docs/SCHEMA.md`)
 - Passwords hashed with PBKDF2 via Web Crypto API
-- Pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Publish
+- Pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Audio → Publish
 
 ## Known gaps (honest list)
 - No Cloudflare Workflows v2 (pipeline is synchronous RPC — works but not durable)
