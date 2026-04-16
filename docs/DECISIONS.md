@@ -56,3 +56,23 @@ Append-only. Never edit old entries.
 **Context:** Stage 4 — agents need the voice contract text.
 **Decision:** Duplicate the voice contract as a string constant in `agents/src/shared/voice-contract.ts`.
 **Reason:** Wrangler's bundler has no loader for `.md` files. The canonical version stays at `content/voice-contract.md`; the TS copy is kept in sync manually.
+
+## 2026-04-16: Agent-chosen lesson topics instead of following course spine
+**Context:** Stage 5 — producing the first 12-lesson course.
+**Decision:** Let the Curator agent choose lesson topics freely rather than following the original 12-lesson spine from the brief.
+**Reason:** The Curator produces better, more engaging titles when given creative freedom. The original spine ("20,000 breaths", "The nose knows") was a planning guide, not a requirement. The agents produced titles like "Why you can't tickle yourself" which are more compelling and still cover the body course subject.
+
+## 2026-04-16: Synchronous RPC instead of Cloudflare Workflows v2
+**Context:** Stage 4 — implementing the publishing pipeline.
+**Decision:** Use synchronous sub-agent RPC calls instead of Cloudflare Workflows v2.
+**Reason:** Faster to ship. The pipeline works end-to-end as synchronous calls. Trade-off: no durable checkpoints, pipeline cannot survive Worker restarts mid-execution. Workflows v2 can be added later without changing the agent logic — just wrap the existing calls in `step.do()`.
+
+## 2026-04-16: Zita API in Astro site worker, not agents worker
+**Context:** Stage 7 — building the Zita chat guide.
+**Decision:** Zita's API endpoint lives in the Astro site (`/api/zita/chat`) not in the agents worker.
+**Reason:** Zita needs the user's session cookie (from the auth middleware) and their conversation history from D1. The Astro site already has both. Putting Zita in the agents worker would require cross-worker auth, adding complexity.
+
+## 2026-04-16: Coerce estimatedTime schema to handle agent output
+**Context:** Stage 5 — agent-authored lessons had `estimatedTime: 18` (number) instead of `"18 min"` (string).
+**Decision:** Changed Zod schema to `z.coerce.string()` for `estimatedTime`.
+**Reason:** Agent output varies. Coercing is more robust than trying to enforce exact format in agent prompts. Numbers become strings automatically.
