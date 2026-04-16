@@ -1,0 +1,112 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { getUser } from '../lib/db';
+import { getProgress } from '../lib/db';
+import { getCollection } from 'astro:content';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = await getUser(db, userId);
+
+const courses = await getCollection('courses');
+const progressBySlug: Record<string, Awaited<ReturnType<typeof getProgress>>> = {};
+for (const course of courses) {
+  progressBySlug[course.data.slug] = await getProgress(db, userId, course.data.slug);
+}
+
+const hasEmail = !!user?.email;
+---
+
+<BaseLayout title="Your account — Zeemish">
+  <h1 class="text-2xl md:text-3xl font-bold mb-8">Your account</h1>
+
+  <!-- Identity -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Identity</h2>
+    {hasEmail ? (
+      <p class="text-zee-text">
+        Signed in as <strong>{user!.email}</strong>
+      </p>
+    ) : (
+      <div>
+        <p class="text-zee-muted mb-4">
+          You're browsing anonymously. Add an email to save your progress across devices.
+        </p>
+        <a
+          href="/login/?upgrade=1"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+        >
+          Add email
+        </a>
+      </div>
+    )}
+  </section>
+
+  <!-- Progress -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Progress</h2>
+    {courses.map((course) => {
+      const progress = progressBySlug[course.data.slug] ?? [];
+      const completed = progress.filter((p) => p.completed_at).length;
+      const pct = course.data.lessonCount > 0 ? Math.round((completed / course.data.lessonCount) * 100) : 0;
+      const inProgress = progress.find((p) => !p.completed_at && p.current_beat);
+
+      return (
+        <div class="p-5 rounded-xl border border-zee-border mb-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-bold">{course.data.title}</h3>
+            <span class="text-sm text-zee-muted">{pct}%</span>
+          </div>
+          <div class="h-1.5 bg-zee-border rounded-full overflow-hidden mb-4">
+            <div class="h-full bg-zee-primary rounded-full transition-all" style={`width: ${pct}%`}></div>
+          </div>
+          <p class="text-sm text-zee-muted mb-3">
+            {completed} of {course.data.lessonCount} lessons complete
+          </p>
+          {inProgress ? (
+            <a
+              href={`/courses/${course.data.slug}/${inProgress.lesson_number}/`}
+              class="text-sm font-medium text-zee-primary hover:underline"
+            >
+              Continue lesson {inProgress.lesson_number} &rarr;
+            </a>
+          ) : completed < course.data.lessonCount ? (
+            <a
+              href={`/courses/${course.data.slug}/`}
+              class="text-sm font-medium text-zee-primary hover:underline"
+            >
+              Start course &rarr;
+            </a>
+          ) : (
+            <span class="text-sm text-zee-muted">Complete</span>
+          )}
+        </div>
+      );
+    })}
+  </section>
+
+  <!-- Actions -->
+  <section>
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Actions</h2>
+    <div class="flex flex-wrap gap-3">
+      {hasEmail && (
+        <button
+          id="logout-btn"
+          class="px-4 py-2 text-sm font-medium rounded-lg border border-zee-border hover:bg-zee-border/50 transition-colors"
+        >
+          Log out
+        </button>
+      )}
+    </div>
+  </section>
+</BaseLayout>
+
+<script>
+  const logoutBtn = document.getElementById('logout-btn');
+  logoutBtn?.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/';
+  });
+</script>

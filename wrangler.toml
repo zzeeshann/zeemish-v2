@@ -2,7 +2,17 @@
 
 name = "zeemish-v2"
 compatibility_date = "2026-04-16"
+compatibility_flags = ["nodejs_compat"]
+main = "./dist/_worker.js/index.js"
 
-# Serve Astro's static build output
 [assets]
 directory = "./dist"
+binding = "ASSETS"
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zeemish"
+database_id = "f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4"

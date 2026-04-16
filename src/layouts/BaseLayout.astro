@@ -19,9 +19,12 @@ const { title, description } = Astro.props;
     />
   </head>
   <body class="min-h-screen bg-zee-bg text-zee-text font-sans flex flex-col">
-    <header class="w-full max-w-3xl mx-auto px-6 pt-8 pb-4">
+    <header class="w-full max-w-3xl mx-auto px-6 pt-8 pb-4 flex items-center justify-between">
       <a href="/" class="text-lg font-bold tracking-tight text-zee-primary hover:opacity-80 transition-opacity">
         zeemish
+      </a>
+      <a href="/account/" class="text-sm text-zee-muted hover:text-zee-primary transition-colors">
+        Account
       </a>
     </header>
 

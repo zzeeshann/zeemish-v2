@@ -4,7 +4,7 @@ import tailwind from '@astrojs/tailwind';
 import cloudflare from '@astrojs/cloudflare';
 
 export default defineConfig({
-  output: 'static',
+  adapter: cloudflare(),
   integrations: [
     mdx(),
     tailwind(),

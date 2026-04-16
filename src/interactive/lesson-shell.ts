@@ -6,6 +6,8 @@
  * 2. Hides all but the active beat
  * 3. Renders prev/next buttons and a progress indicator
  * 4. Stores current beat in sessionStorage so refresh resumes
+ * 5. POSTs beat changes to /api/progress/beat (fire-and-forget)
+ * 6. POSTs lesson complete when reader finishes the last beat
  *
  * Progressive enhancement: without JS, all beats render as a
  * long scroll. This component adds the beat-switching behaviour.
@@ -17,6 +19,13 @@ class LessonShell extends HTMLElement {
 
   private get storageKey(): string {
     return `zeemish-beat:${window.location.pathname}`;
+  }
+
+  /** Extract course slug and lesson number from the URL: /courses/{course}/{lesson}/ */
+  private get lessonInfo(): { course_slug: string; lesson_number: number } | null {
+    const match = window.location.pathname.match(/\/courses\/([^/]+)\/(\d+)\/?/);
+    if (!match) return null;
+    return { course_slug: match[1], lesson_number: parseInt(match[2], 10) };
   }
 
   connectedCallback() {
@@ -63,8 +72,9 @@ class LessonShell extends HTMLElement {
       }
     }
 
-    // Save position
+    // Save position locally and to server
     sessionStorage.setItem(this.storageKey, this.currentIndex.toString());
+    this.saveProgressToServer();
 
     // Update navigation
     if (!this.nav) return;
@@ -109,6 +119,31 @@ class LessonShell extends HTMLElement {
     this.render();
     // Scroll to top of the shell so the reader starts at the top of the new beat
     this.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /** Fire-and-forget POST to save beat progress. Silently fails if offline. */
+  private saveProgressToServer() {
+    const info = this.lessonInfo;
+    if (!info) return;
+
+    const beat = this.beats[this.currentIndex]?.getAttribute('name') ?? `beat-${this.currentIndex}`;
+    const isLast = this.currentIndex === this.beats.length - 1;
+
+    // Save current beat position
+    fetch('/api/progress/beat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...info, beat }),
+    }).catch(() => {}); // silent fail
+
+    // If they reached the last beat, mark lesson complete
+    if (isLast) {
+      fetch('/api/progress/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(info),
+      }).catch(() => {});
+    }
   }
 }
 
