@@ -1,17 +1,27 @@
 import type { APIRoute } from 'astro';
 import { verifyPassword, sessionCookie } from '../../../lib/auth';
 import { getUserByEmail, mergeProgress } from '../../../lib/db';
+import { checkRateLimit } from '../../../lib/rate-limit';
 
 export const prerender = false;
 
 /**
  * Login with email + password.
- * On success, sets a session cookie for the authenticated user.
- * If the visitor had an anonymous session, merges their progress.
+ * Rate limited: 5 attempts per 15 minutes per IP.
  */
 export const POST: APIRoute = async ({ locals, request }) => {
+  // Rate limit by IP
+  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  const limit = checkRateLimit(`login:${ip}`, 5, 900);
+  if (!limit.allowed) {
+    return new Response(JSON.stringify({ error: 'Too many login attempts. Try again later.' }), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '900' },
+    });
+  }
+
   const db = locals.runtime.env.DB;
-  const anonymousId = locals.userId; // Current anonymous session
+  const anonymousId = locals.userId;
 
   const body = await request.json();
   const { email, password } = body;

@@ -18,6 +18,7 @@ export interface Env {
   ENGAGEMENT_ANALYST: DurableObjectNamespace;
   REVISER: DurableObjectNamespace;
   GITHUB_TOKEN: string;
+  ADMIN_SECRET: string;
 }
 
 /** A lesson brief produced by the Curator */

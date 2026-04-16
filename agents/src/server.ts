@@ -18,6 +18,16 @@ export { ObserverAgent } from './observer';
 export { EngagementAnalystAgent } from './engagement-analyst';
 export { ReviserAgent } from './reviser';
 
+/** Check admin auth — bearer token or query param */
+function checkAuth(request: Request, env: Env): boolean {
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7) === env.ADMIN_SECRET;
+  }
+  const url = new URL(request.url);
+  return url.searchParams.get('key') === env.ADMIN_SECRET;
+}
+
 /**
  * Entry point for the zeemish-agents Worker.
  *
@@ -29,6 +39,15 @@ export { ReviserAgent } from './reviser';
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // Admin endpoints require auth
+    const adminPaths = ['/trigger'];
+    if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Manual trigger: POST /trigger?course=body&lesson=2
     if (url.pathname === '/trigger' && request.method === 'POST') {

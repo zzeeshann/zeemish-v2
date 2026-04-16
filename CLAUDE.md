@@ -31,24 +31,27 @@
 - Single Astro Worker serves static pages + API routes
 - Separate agents/ Worker for the 11 AI agents
 - Auth middleware only runs on /api/, /account, /login routes
-- D1 database `zeemish` with 8 tables (see `docs/SCHEMA.md`)
+- D1 database `zeemish` with 9 tables (see `docs/SCHEMA.md`)
 - Passwords hashed with PBKDF2 via Web Crypto API
 - Pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Publish
 
 ## Known gaps (honest list)
-- Audio-Producer and Audio-Auditor agents NOT BUILT (no ElevenLabs)
+- Audio-Producer and Audio-Auditor agents NOT BUILT (waiting for ElevenLabs)
 - No R2 bucket configured for audio storage
-- No Cloudflare Workflows v2 (pipeline is synchronous RPC)
-- No auth on agents trigger endpoint (security risk)
-- No auth on dashboard page
-- No scheduled Director/EngagementAnalyst runs (manual only)
-- No rate limiting
+- No Cloudflare Workflows v2 (pipeline is synchronous RPC — works but not durable)
 - Fact-Checker has no web search (Claude reasoning only)
-- Passphrase auth not implemented
+- Passphrase auth not implemented (email+password works)
 - Magic link / password reset not built
-- `audit_results` D1 table not created
-- GitHub Actions does not deploy agents worker
 - Voice contract duplicated in .md and .ts (drift risk)
+
+## Fixed (previously gaps)
+- ✅ Auth on agents trigger endpoint (ADMIN_SECRET bearer token)
+- ✅ Auth on dashboard page (requires email account)
+- ✅ Scheduled Director runs (daily 8am UTC cron)
+- ✅ Rate limiting on login (5 attempts per 15 min per IP)
+- ✅ CSP security header added
+- ✅ audit_results D1 table created and populated by Director
+- ✅ GitHub Actions deploys both site and agents worker
 
 ## Key rules
 - TypeScript strict everywhere

@@ -2,9 +2,19 @@
 export const prerender = false;
 
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { getUser } from '../lib/db';
+
+// Auth check — only users with email can see dashboard
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+if (!user?.email) {
+  return Astro.redirect('/login/?redirect=/dashboard/');
+}
 
 // Fetch digest from the agents worker
 const AGENTS_URL = 'https://zeemish-agents.zzeeshann.workers.dev';
+const ADMIN_SECRET = (Astro.locals.runtime.env as Record<string, string>).AGENTS_ADMIN_SECRET ?? '';
 
 let digest = { published: 0, escalated: 0, errors: 0, events: [] as any[] };
 let directorStatus = { status: 'unknown', currentTask: null, lastLesson: null, error: null };
@@ -144,10 +154,11 @@ try {
     statusEl!.textContent = 'Running pipeline (this may take 60-120s)...';
 
     try {
-      const res = await fetch(
-        `https://zeemish-agents.zzeeshann.workers.dev/trigger?course=${course}&lesson=${lesson}`,
-        { method: 'POST' },
-      );
+      const res = await fetch('/api/agents/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ course, lesson }),
+      });
       const data = await res.json();
 
       if (data.passed) {

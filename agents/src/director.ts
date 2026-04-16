@@ -17,6 +17,7 @@ import { VOICE_CONTRACT } from './shared/voice-contract';
 import subjectValuesJson from '../../content/subject-values.json';
 
 const MAX_REVISIONS = 3;
+const MAX_LESSONS_PER_DAY = 2; // spending cap — don't produce more than this per scheduled run
 
 /** Full pipeline result with audit trail */
 export interface PipelineResult {
@@ -53,6 +54,44 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     lastLesson: null,
     error: null,
   };
+
+  /** Set up daily scheduled run on first activation */
+  async onStart() {
+    // Schedule daily autonomous run at 8am UTC
+    await this.schedule('0 8 * * *', 'autonomousRun', { type: 'daily' });
+  }
+
+  /**
+   * Autonomous run — called by daily schedule.
+   * Looks at subject-values and gap analysis, produces the next needed lesson.
+   */
+  async autonomousRun() {
+    const subjects = subjectValuesJson as Array<{ slug: string; title: string; lessons: number; priority: number }>;
+
+    // Sort by priority (lower = higher priority)
+    const sorted = [...subjects].sort((a, b) => a.priority - b.priority);
+
+    let produced = 0;
+
+    for (const subject of sorted) {
+      if (produced >= MAX_LESSONS_PER_DAY) break;
+
+      // Find how many lessons exist for this course
+      const existing = await this.getExistingLessons(subject.slug);
+      const nextLesson = existing.length + 1;
+
+      // If course is incomplete, produce the next lesson
+      if (nextLesson <= subject.lessons) {
+        try {
+          await this.triggerLesson(subject.slug, nextLesson);
+          produced++;
+        } catch {
+          // Log error via Observer (already wired in triggerLesson)
+          // Continue to next subject
+        }
+      }
+    }
+  }
 
   /**
    * Full pipeline: curate → draft → audit → revise → repeat.
@@ -98,6 +137,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
         const allPassed = voiceResult.passed && structureResult.passed && factResult.passed;
         audits.push({ round, voice: voiceResult, structure: structureResult, facts: factResult, allPassed });
+
+        // Persist audit results to D1
+        await this.saveAuditResults(taskId, round, voiceResult, structureResult, factResult);
 
         if (allPassed) {
           // All gates passed — done
@@ -276,5 +318,30 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         )
         .run();
     } catch { /* logging failure shouldn't break the pipeline */ }
+  }
+
+  /** Save audit results to D1 for durable audit trail */
+  private async saveAuditResults(
+    taskId: string,
+    round: number,
+    voice: VoiceAuditResult,
+    structure: StructureAuditResult,
+    facts: FactCheckResult,
+  ): Promise<void> {
+    const now = Date.now();
+    const draftId = `${taskId}-r${round}`;
+    try {
+      await this.env.DB.batch([
+        this.env.DB.prepare(
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'voice', voice.passed ? 1 : 0, voice.score, JSON.stringify(voice.violations), now),
+        this.env.DB.prepare(
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'structure', structure.passed ? 1 : 0, null, JSON.stringify(structure.issues), now),
+        this.env.DB.prepare(
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'fact', facts.passed ? 1 : 0, null, JSON.stringify(facts.claims), now),
+      ]);
+    } catch { /* audit logging shouldn't break the pipeline */ }
   }
 }
