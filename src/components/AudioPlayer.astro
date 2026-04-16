@@ -1,0 +1,28 @@
+---
+interface Props {
+  audioSrc?: string;
+}
+
+const { audioSrc } = Astro.props;
+const hasAudio = !!audioSrc;
+---
+
+<div class="flex items-center gap-3 px-4 py-3 rounded-lg border border-zee-border bg-white/50">
+  <button
+    class="w-10 h-10 flex items-center justify-center rounded-full bg-zee-primary text-white hover:opacity-90 transition-opacity disabled:opacity-30"
+    disabled={!hasAudio}
+    aria-label="Play audio"
+  >
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M4 3L13 8L4 13V3Z" />
+    </svg>
+  </button>
+  <div class="flex-1">
+    <div class="h-1.5 bg-zee-border rounded-full overflow-hidden">
+      <div class="h-full w-0 bg-zee-primary rounded-full"></div>
+    </div>
+  </div>
+  <span class="text-xs text-zee-muted whitespace-nowrap">
+    {hasAudio ? '0:00' : 'Coming soon'}
+  </span>
+</div>

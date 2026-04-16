@@ -1,0 +1,36 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import AudioPlayer from '../components/AudioPlayer.astro';
+
+interface Props {
+  title: string;
+  courseTitle: string;
+  courseSlug: string;
+  lessonNumber: number;
+  estimatedTime: string;
+  audioSrc?: string;
+}
+
+const { title, courseTitle, courseSlug, lessonNumber, estimatedTime, audioSrc } = Astro.props;
+---
+
+<BaseLayout title={`${title} — ${courseTitle} — Zeemish`}>
+  <nav class="text-sm text-zee-muted mb-6" aria-label="Breadcrumb">
+    <a href="/courses/" class="hover:text-zee-primary transition-colors">Courses</a>
+    <span class="mx-2">/</span>
+    <a href={`/courses/${courseSlug}/`} class="hover:text-zee-primary transition-colors">{courseTitle}</a>
+    <span class="mx-2">/</span>
+    <span class="text-zee-text">Lesson {lessonNumber}</span>
+  </nav>
+
+  <h1 class="text-2xl md:text-3xl font-bold mb-2 leading-tight">{title}</h1>
+  <p class="text-sm text-zee-muted mb-6">{estimatedTime}</p>
+
+  <div class="mb-8">
+    <AudioPlayer audioSrc={audioSrc} />
+  </div>
+
+  <article class="prose">
+    <slot />
+  </article>
+</BaseLayout>

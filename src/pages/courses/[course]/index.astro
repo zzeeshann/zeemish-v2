@@ -1,0 +1,60 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+
+export async function getStaticPaths() {
+  const courses = await getCollection('courses');
+  return courses.map((course) => ({
+    params: { course: course.data.slug },
+    props: { course },
+  }));
+}
+
+const { course } = Astro.props;
+const allLessons = await getCollection('lessons');
+const lessons = allLessons
+  .filter((l) => l.data.course === course.data.slug)
+  .sort((a, b) => a.data.lessonNumber - b.data.lessonNumber);
+---
+
+<BaseLayout title={`${course.data.title} — Zeemish`} description={course.data.description}>
+  <a href="/courses/" class="text-sm text-zee-muted hover:text-zee-primary transition-colors mb-6 inline-block">
+    &larr; All courses
+  </a>
+
+  <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight">{course.data.title}</h1>
+  <p class="text-lg text-zee-muted mb-2">{course.data.description}</p>
+  <p class="text-sm text-zee-muted mb-8">
+    {course.data.lessonCount} lessons &middot; {course.data.estimatedTotalTime}
+  </p>
+
+  <div class="h-px w-16 bg-zee-gold mb-10"></div>
+
+  <ol class="space-y-1">
+    {lessons.map((lesson) => (
+      <li>
+        <a
+          href={`/courses/${course.data.slug}/${lesson.data.lessonNumber}/`}
+          class="flex items-baseline gap-4 px-4 py-4 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
+        >
+          <span class="text-sm text-zee-muted font-medium w-6 shrink-0">
+            {lesson.data.lessonNumber}
+          </span>
+          <div class="flex-1">
+            <span class="font-medium group-hover:text-zee-primary transition-colors">
+              {lesson.data.title}
+            </span>
+            <p class="text-sm text-zee-muted mt-0.5">{lesson.data.description}</p>
+          </div>
+          <span class="text-xs text-zee-muted shrink-0">{lesson.data.estimatedTime}</span>
+        </a>
+      </li>
+    ))}
+  </ol>
+
+  {lessons.length < course.data.lessonCount && (
+    <p class="text-sm text-zee-muted mt-8 italic">
+      {course.data.lessonCount - lessons.length} more lessons coming soon.
+    </p>
+  )}
+</BaseLayout>

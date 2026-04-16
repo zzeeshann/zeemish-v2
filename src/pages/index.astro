@@ -1,34 +1,49 @@
 ---
-// Home page — placeholder while we build Zeemish v2
+import { getCollection } from 'astro:content';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const courses = await getCollection('courses');
 ---
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Zeemish</title>
-    <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
-  </head>
-  <body class="min-h-screen bg-zee-bg text-zee-text font-sans flex flex-col">
-    <header class="w-full max-w-2xl mx-auto px-6 pt-10">
-      <span class="text-lg font-bold tracking-tight text-zee-primary">zeemish</span>
-    </header>
+<BaseLayout title="Zeemish" description="Learn things that matter.">
+  <div class="py-16 md:py-24">
+    <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
+      Learn things that matter.
+    </h1>
+    <p class="text-lg text-zee-muted max-w-md leading-relaxed mb-8">
+      Short courses on subjects worth knowing. Plain language. No filler.
+    </p>
+    <a
+      href="/courses/"
+      class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity"
+    >
+      Browse courses
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </a>
+    <div class="mt-12 h-px w-16 bg-zee-gold"></div>
+  </div>
 
-    <main class="flex-1 flex flex-col justify-center max-w-2xl mx-auto px-6 py-20">
-      <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
-        Something new is coming.
-      </h1>
-      <p class="text-lg text-zee-muted max-w-md leading-relaxed">
-        Zeemish is being rebuilt from the ground up. A place to learn things that matter, made with care.
-      </p>
-      <div class="mt-8 h-px w-16 bg-zee-gold"></div>
-    </main>
-
-    <footer class="w-full max-w-2xl mx-auto px-6 pb-8 text-sm text-zee-muted">
-      &copy; 2026 Zeemish
-    </footer>
-  </body>
-</html>
+  {courses.length > 0 && (
+    <section>
+      <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Available now</h2>
+      <div class="grid grid-cols-1 gap-6">
+        {courses.map((course) => (
+          <a
+            href={`/courses/${course.data.slug}/`}
+            class="block p-6 rounded-xl border border-zee-border hover:border-zee-primary/30 hover:shadow-sm transition-all group"
+          >
+            <h3 class="text-xl font-bold mb-2 group-hover:text-zee-primary transition-colors">
+              {course.data.title}
+            </h3>
+            <p class="text-zee-muted mb-3">{course.data.description}</p>
+            <p class="text-sm text-zee-muted">
+              {course.data.lessonCount} lessons &middot; {course.data.estimatedTotalTime}
+            </p>
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+</BaseLayout>

@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Prose defaults for MDX content */
+  .prose {
+    @apply text-zee-text leading-relaxed;
+  }
+
+  .prose p {
+    @apply mb-5 text-base md:text-lg;
+  }
+
+  .prose h1 {
+    @apply text-3xl md:text-4xl font-bold mb-6 leading-tight;
+  }
+
+  .prose h2 {
+    @apply text-2xl md:text-3xl font-bold mb-4 mt-10 leading-tight;
+  }
+
+  .prose h3 {
+    @apply text-xl md:text-2xl font-semibold mb-3 mt-8;
+  }
+
+  .prose strong {
+    @apply font-semibold;
+  }
+
+  .prose em {
+    @apply italic;
+  }
+
+  .prose ul {
+    @apply list-disc pl-6 mb-5 space-y-2;
+  }
+
+  .prose ol {
+    @apply list-decimal pl-6 mb-5 space-y-2;
+  }
+
+  .prose blockquote {
+    @apply border-l-2 border-zee-primary pl-4 italic text-zee-muted my-6;
+  }
+}
+
+@layer components {
+  /* Beat containers — visible by default (progressive enhancement) */
+  lesson-beat {
+    display: block;
+    padding: 1rem 0;
+  }
+
+  /* When lesson-shell is active (JS loaded), hide inactive beats */
+  lesson-shell[data-active] lesson-beat {
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  lesson-shell[data-active] lesson-beat[data-visible] {
+    display: block;
+    opacity: 1;
+  }
+
+  /* Beat navigation bar */
+  .beat-nav {
+    @apply mt-8 pt-6 border-t border-zee-border;
+  }
+
+  .beat-nav-inner {
+    @apply flex items-center justify-between;
+  }
+
+  .beat-nav-btn {
+    @apply flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
+    @apply text-zee-text bg-transparent hover:bg-zee-border;
+  }
+
+  .beat-nav-btn:disabled {
+    @apply opacity-30 cursor-not-allowed hover:bg-transparent;
+  }
+
+  .beat-nav-next:not(:disabled) {
+    @apply bg-zee-primary text-white hover:opacity-90;
+  }
+
+  .beat-nav-progress {
+    @apply text-sm text-zee-muted;
+  }
+
+  .beat-nav-bar {
+    @apply mt-4 h-1 bg-zee-border rounded-full overflow-hidden;
+  }
+
+  .beat-nav-fill {
+    @apply h-full bg-zee-primary rounded-full transition-all duration-300;
+  }
+}

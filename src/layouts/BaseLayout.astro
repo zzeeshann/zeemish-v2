@@ -1,0 +1,36 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="min-h-screen bg-zee-bg text-zee-text font-sans flex flex-col">
+    <header class="w-full max-w-3xl mx-auto px-6 pt-8 pb-4">
+      <a href="/" class="text-lg font-bold tracking-tight text-zee-primary hover:opacity-80 transition-opacity">
+        zeemish
+      </a>
+    </header>
+
+    <main class="flex-1 w-full max-w-3xl mx-auto px-6 py-6">
+      <slot />
+    </main>
+
+    <footer class="w-full max-w-3xl mx-auto px-6 py-8 text-sm text-zee-muted">
+      &copy; 2026 Zeemish
+    </footer>
+  </body>
+</html>
