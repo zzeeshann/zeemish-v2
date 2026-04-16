@@ -91,3 +91,8 @@ Append-only. Never edit old entries.
 **Context:** Cost model for audio.
 **Decision:** Generate MP3 once via ElevenLabs, store in R2 bucket. Readers stream from R2.
 **Reason:** ~$5 per lesson to generate. $0 per play after that. R2 serving is essentially free at this scale.
+
+## 2026-04-17: Cancel passphrase auth, keep magic link
+**Context:** Architecture planned both passphrase (6 BIP39 words) and magic link as login options.
+**Decision:** Cancel passphrase auth. Build magic link instead.
+**Reason:** They solve the same problem — passwordless login. Magic link is simpler, universally understood, and pairs with the existing email upgrade flow. Passphrase is clever but adds complexity readers don't need.

@@ -38,9 +38,11 @@
 ## Known gaps (honest list)
 - No Cloudflare Workflows v2 (pipeline is synchronous RPC — works but not durable)
 - Fact-Checker has no web search (Claude reasoning only)
-- Passphrase auth not implemented (email+password works)
 - Magic link / password reset not built
 - Voice contract duplicated in .md and .ts (drift risk)
+
+## Cancelled
+- Passphrase auth (6 BIP39 words) — cancelled, magic link replaces it
 
 ## Fixed (previously gaps)
 - ✅ Auth on agents trigger endpoint (ADMIN_SECRET bearer token)

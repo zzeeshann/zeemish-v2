@@ -79,8 +79,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - Web search tool for Fact-Checker (architecture says Workers AI Search)
 
 ### Features
-- Passphrase auth (6 BIP39 words) — email+password works, passphrase is planned
-- Magic link / password reset — not built
+- Magic link / password reset — not built yet
 - Learnings database population — table exists, no agent writes patterns to it yet
 - Prompt-improvement loop — Director doesn't yet analyse auditor patterns and propose prompt edits
 - Per-day spending cap as environment variable
