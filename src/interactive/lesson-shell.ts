@@ -44,6 +44,9 @@ class LessonShell extends HTMLElement {
     // Mark shell as active — CSS uses this to hide non-visible beats
     this.setAttribute('data-active', '');
 
+    // Track view
+    this.trackEngagement('view');
+
     // Build navigation bar
     this.nav = document.createElement('nav');
     this.nav.className = 'beat-nav';
@@ -136,14 +139,32 @@ class LessonShell extends HTMLElement {
       body: JSON.stringify({ ...info, beat }),
     }).catch(() => {}); // silent fail
 
-    // If they reached the last beat, mark lesson complete
+    // If they reached the last beat, mark lesson complete + track engagement
     if (isLast) {
       fetch('/api/progress/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(info),
       }).catch(() => {});
+      this.trackEngagement('complete');
     }
+  }
+
+  /** Fire-and-forget engagement tracking */
+  private trackEngagement(eventType: string, beat?: string) {
+    const info = this.lessonInfo;
+    if (!info) return;
+
+    fetch('/api/engagement/track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        course_id: info.course_slug,
+        lesson_id: `${info.course_slug}/${info.lesson_number}`,
+        event_type: eventType,
+        beat,
+      }),
+    }).catch(() => {});
   }
 }
 

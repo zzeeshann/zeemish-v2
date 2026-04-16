@@ -15,6 +15,8 @@ export interface Env {
   INTEGRATOR: DurableObjectNamespace;
   PUBLISHER: DurableObjectNamespace;
   OBSERVER: DurableObjectNamespace;
+  ENGAGEMENT_ANALYST: DurableObjectNamespace;
+  REVISER: DurableObjectNamespace;
   GITHUB_TOKEN: string;
 }
 

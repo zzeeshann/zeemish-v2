@@ -5,6 +5,7 @@ import { DirectorAgent } from './director';
 import { CuratorAgent } from './curator';
 import { DrafterAgent } from './drafter';
 import { ObserverAgent } from './observer';
+import { EngagementAnalystAgent } from './engagement-analyst';
 
 // Re-export for Durable Object bindings
 export { DirectorAgent, CuratorAgent, DrafterAgent };
@@ -14,6 +15,8 @@ export { FactCheckerAgent } from './fact-checker';
 export { IntegratorAgent } from './integrator';
 export { PublisherAgent } from './publisher';
 export { ObserverAgent } from './observer';
+export { EngagementAnalystAgent } from './engagement-analyst';
+export { ReviserAgent } from './reviser';
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -112,6 +115,23 @@ export default {
         const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
         const events = await observer.getRecentEvents(limit);
         return new Response(JSON.stringify({ events }), {
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // Engagement report: GET /engagement?course=body
+    if (url.pathname === '/engagement' && request.method === 'GET') {
+      const courseId = url.searchParams.get('course') ?? 'body';
+      try {
+        const analyst = await getAgentByName<EngagementAnalystAgent>(env.ENGAGEMENT_ANALYST, 'analyst');
+        const report = await analyst.analyse(courseId);
+        return new Response(JSON.stringify(report), {
           headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
         });
       } catch (err) {

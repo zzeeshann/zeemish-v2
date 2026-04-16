@@ -1,7 +1,7 @@
 # Zeemish v2 — Claude Code Context
 
 ## Current stage
-**Stage 5 — First Real Course** (complete). 12-lesson "The body you live in" course produced by agent team. Ready for Stage 6.
+**Stage 6 — Self-Improvement Loop** (complete). 11 agents, engagement tracking, revision pipeline. Ready for Stage 7 — Zita.
 
 ## What was last worked on
 - Stage 4 weeks 10-11: ObserverAgent, dashboard page, event logging

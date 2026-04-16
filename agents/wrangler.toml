@@ -58,9 +58,21 @@ new_sqlite_classes = ["PublisherAgent"]
 name = "OBSERVER"
 class_name = "ObserverAgent"
 
+[[durable_objects.bindings]]
+name = "ENGAGEMENT_ANALYST"
+class_name = "EngagementAnalystAgent"
+
+[[durable_objects.bindings]]
+name = "REVISER"
+class_name = "ReviserAgent"
+
 [[migrations]]
 tag = "v4"
 new_sqlite_classes = ["ObserverAgent"]
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["EngagementAnalystAgent", "ReviserAgent"]
 
 # D1 for shared data (tasks log, audit results)
 [[d1_databases]]
