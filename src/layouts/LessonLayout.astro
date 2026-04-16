@@ -33,4 +33,10 @@ const { title, courseTitle, courseSlug, lessonNumber, estimatedTime, audioSrc } 
   <article class="prose">
     <slot />
   </article>
+
+  <zita-chat
+    course={courseSlug}
+    lesson={lessonNumber.toString()}
+    title={title}
+  />
 </BaseLayout>

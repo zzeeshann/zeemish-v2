@@ -4,3 +4,4 @@
  */
 import './lesson-beat';
 import './lesson-shell';
+import './zita-chat';

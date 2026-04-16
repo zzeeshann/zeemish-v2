@@ -97,4 +97,88 @@
   .beat-nav-fill {
     @apply h-full bg-zee-primary rounded-full transition-all duration-300;
   }
+
+  /* Zita chat widget */
+  zita-chat {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 50;
+    font-family: 'DM Sans', system-ui, sans-serif;
+  }
+
+  .zita-toggle-btn {
+    @apply flex items-center gap-2 px-4 py-2.5 bg-zee-primary text-white rounded-full shadow-lg;
+    @apply hover:opacity-90 transition-all text-sm font-medium;
+  }
+
+  .zita-icon {
+    @apply w-6 h-6 flex items-center justify-center bg-white/20 rounded-full text-xs font-bold;
+  }
+
+  .zita-panel {
+    @apply bg-white rounded-2xl shadow-2xl border border-zee-border overflow-hidden;
+    width: 340px;
+    max-height: 480px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .zita-header {
+    @apply flex items-center gap-2 px-4 py-3 border-b border-zee-border;
+  }
+
+  .zita-name {
+    @apply font-bold text-sm text-zee-primary;
+  }
+
+  .zita-desc {
+    @apply text-xs text-zee-muted flex-1;
+  }
+
+  .zita-close {
+    @apply w-6 h-6 flex items-center justify-center text-zee-muted hover:text-zee-text rounded transition-colors text-lg;
+  }
+
+  .zita-messages {
+    @apply flex-1 overflow-y-auto px-4 py-3 space-y-3;
+    max-height: 340px;
+  }
+
+  .zita-msg {
+    @apply text-sm leading-relaxed max-w-[85%] px-3 py-2 rounded-xl;
+  }
+
+  .zita-msg-user {
+    @apply bg-zee-primary text-white ml-auto;
+  }
+
+  .zita-msg-assistant {
+    @apply bg-zee-bg text-zee-text;
+  }
+
+  .zita-typing {
+    @apply animate-pulse;
+  }
+
+  .zita-input {
+    @apply flex gap-2 px-3 py-2.5 border-t border-zee-border;
+  }
+
+  .zita-input input {
+    @apply flex-1 text-sm px-3 py-1.5 rounded-lg border border-zee-border bg-zee-bg;
+    @apply focus:outline-none focus:ring-2 focus:ring-zee-primary/30 focus:border-zee-primary;
+  }
+
+  .zita-input button {
+    @apply w-8 h-8 flex items-center justify-center bg-zee-primary text-white rounded-lg;
+    @apply hover:opacity-90 transition-opacity text-sm font-bold;
+  }
+
+  @media (max-width: 400px) {
+    .zita-panel {
+      width: calc(100vw - 2rem);
+      right: 0;
+    }
+  }
 }
