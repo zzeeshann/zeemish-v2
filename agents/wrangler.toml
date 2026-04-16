@@ -37,6 +37,10 @@ class_name = "FactCheckerAgent"
 name = "INTEGRATOR"
 class_name = "IntegratorAgent"
 
+[[durable_objects.bindings]]
+name = "PUBLISHER"
+class_name = "PublisherAgent"
+
 # SQLite storage for agent state
 [[migrations]]
 tag = "v1"
@@ -45,6 +49,10 @@ new_sqlite_classes = ["DirectorAgent", "CuratorAgent", "DrafterAgent"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["VoiceAuditorAgent", "StructureEditorAgent", "FactCheckerAgent", "IntegratorAgent"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["PublisherAgent"]
 
 # D1 for shared data (tasks log, audit results)
 [[d1_databases]]

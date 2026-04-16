@@ -5,7 +5,9 @@ import { VoiceAuditorAgent } from './voice-auditor';
 import { StructureEditorAgent } from './structure-editor';
 import { FactCheckerAgent } from './fact-checker';
 import { IntegratorAgent } from './integrator';
+import { PublisherAgent } from './publisher';
 import type { Env, DirectorState, LessonBrief, DraftResult } from './types';
+import type { PublishResult } from './publisher';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
 import type { FactCheckResult } from './fact-checker';
@@ -23,6 +25,7 @@ export interface PipelineResult {
   finalMdx: string;
   revisionCount: number;
   passed: boolean;
+  published: PublishResult | null;
 }
 
 interface AuditRound {
@@ -112,6 +115,14 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const lastAudit = audits[audits.length - 1];
       const passed = lastAudit.allPassed;
 
+      // Step 4: Publish if all gates passed
+      let published: PublishResult | null = null;
+      if (passed) {
+        this.setState({ ...this.state, status: 'publishing' });
+        const publisher = await this.subAgent(PublisherAgent, `publisher-${taskId}`);
+        published = await publisher.publish(brief, currentMdx);
+      }
+
       // Log to D1
       await this.logTask(courseSlug, lessonNumber, brief, draft, audits, passed);
 
@@ -129,6 +140,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         finalMdx: currentMdx,
         revisionCount: audits.length - 1,
         passed,
+        published,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';

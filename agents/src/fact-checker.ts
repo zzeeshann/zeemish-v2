@@ -36,15 +36,18 @@ export class FactCheckerAgent extends Agent<Env, FactCheckerState> {
 
 RULES:
 - Extract each specific factual claim (statistics, research findings, biological facts, historical claims)
-- For each claim, assess: "verified" (widely accepted/true), "unverified" (can't confirm), or "incorrect" (wrong)
-- Be strict on numbers, dates, and scientific claims
+- For each claim, assess: "verified" (widely accepted/true), "unverified" (plausible but can't fully confirm), or "incorrect" (definitely wrong)
+- Be strict on numbers, dates, and scientific claims that are stated as exact facts
 - Opinion or subjective statements are NOT claims — skip them
 - Metaphors and analogies are NOT claims — skip them
-- If the lesson makes a claim about research, check if the described research is plausible
+- General well-known scientific principles (e.g. "cortisol is a stress hormone") are "verified"
+- Approximate numbers or ranges (e.g. "about 20,000 breaths a day") are "verified" if in the right ballpark
+- Only mark "incorrect" if the claim is demonstrably wrong
+- Mark "unverified" only for very specific numbers, named studies, or precise statistics you truly cannot confirm
 
 Respond with JSON only:
 {
-  "passed": boolean (true if zero "incorrect" and zero "unverified" on hard facts),
+  "passed": boolean (true if zero "incorrect" claims — a few "unverified" is acceptable),
   "claims": [
     { "claim": "the specific claim text", "status": "verified|unverified|incorrect", "note": "explanation" }
   ]

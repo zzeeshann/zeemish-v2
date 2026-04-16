@@ -13,6 +13,8 @@ export interface Env {
   STRUCTURE_EDITOR: DurableObjectNamespace;
   FACT_CHECKER: DurableObjectNamespace;
   INTEGRATOR: DurableObjectNamespace;
+  PUBLISHER: DurableObjectNamespace;
+  GITHUB_TOKEN: string;
 }
 
 /** A lesson brief produced by the Curator */

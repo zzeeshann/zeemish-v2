@@ -49,6 +49,13 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Retry:** Up to 3 revision passes before escalation.
 - **Model:** Claude Sonnet 4.5
 
+### PublisherAgent
+- **Role:** Commits approved MDX to the GitHub repo via Contents API.
+- **Input:** LessonBrief + final MDX (after all gates pass)
+- **Output:** commit SHA, commit URL, file path
+- **Triggers:** GitHub Actions auto-deploy on push to main
+- **Only runs when:** All three quality gates pass
+
 ## Not yet built
 - Audio-Producer, Audio-Auditor (ElevenLabs)
 - Publisher (Git commit + deploy)

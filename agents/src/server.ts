@@ -11,6 +11,7 @@ export { VoiceAuditorAgent } from './voice-auditor';
 export { StructureEditorAgent } from './structure-editor';
 export { FactCheckerAgent } from './fact-checker';
 export { IntegratorAgent } from './integrator';
+export { PublisherAgent } from './publisher';
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -54,6 +55,7 @@ export default {
             factsPassed: a.facts?.passed,
             allPassed: a.allPassed,
           })),
+          published: result.published ?? null,
           mdxPreview: result.finalMdx?.slice(0, 500) + '...',
           mdxLength: result.finalMdx?.length ?? 0,
           model: result.draft?.model,

@@ -44,7 +44,8 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] FactCheckerAgent (verifies factual claims)
 - [x] IntegratorAgent (merges feedback, revises draft, up to 3 rounds)
 - [x] Full pipeline: Curate → Draft → 3 auditors in parallel → Revise loop
-- [ ] Publisher (Git commit + deploy)
+- [x] PublisherAgent (commits MDX to repo via GitHub Contents API, triggers deploy)
+- [x] First agent-authored lesson published end-to-end
 - [ ] Audio-Producer, Audio-Auditor (ElevenLabs)
 - [ ] Observer + dashboard
 
