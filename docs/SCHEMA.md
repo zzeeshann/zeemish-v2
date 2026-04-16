@@ -147,8 +147,23 @@ One row per audit pass per draft — durable audit trail. Written by DirectorAge
 
 Migration: `0004_audit_results.sql`
 
+### magic_tokens
+Time-limited tokens for magic link passwordless login.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| token | TEXT PK | 64-char hex, cryptographically random |
+| email | TEXT | The email the link was sent to |
+| user_id | TEXT | FK→users if user exists, null for new signups |
+| expires_at | INTEGER | Unix timestamp ms, 30 minutes from creation |
+| used_at | INTEGER | Null until clicked, prevents reuse |
+| created_at | INTEGER | |
+
+Migration: `0005_magic_tokens.sql`
+
 ## Migrations summary
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks, observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
 - `0004_audit_results.sql` — audit_results + idx_tasks_parent index
+- `0005_magic_tokens.sql` — magic_tokens for passwordless login

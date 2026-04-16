@@ -5,6 +5,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 const url = new URL(Astro.request.url);
 const isUpgrade = url.searchParams.get('upgrade') === '1';
+const redirect = url.searchParams.get('redirect') ?? '/account/';
 ---
 
 <BaseLayout title={isUpgrade ? 'Save your progress — Zeemish' : 'Log in — Zeemish'}>
@@ -15,13 +16,42 @@ const isUpgrade = url.searchParams.get('upgrade') === '1';
     <p class="text-zee-muted mb-8">
       {isUpgrade
         ? 'Add your email so you can access your progress on any device.'
-        : 'Sign in with your email and password.'}
+        : 'Enter your email and we\'ll send you a login link.'}
     </p>
 
     <div id="error-msg" class="hidden mb-4 p-3 rounded-lg bg-red-50 text-red-700 text-sm"></div>
     <div id="success-msg" class="hidden mb-4 p-3 rounded-lg bg-green-50 text-green-700 text-sm"></div>
 
-    <form id="auth-form" class="space-y-4">
+    <!-- Magic link form (default) -->
+    <form id="magic-form" class="space-y-4">
+      <div>
+        <label for="magic-email" class="block text-sm font-medium mb-1">Email</label>
+        <input
+          type="email"
+          id="magic-email"
+          name="email"
+          required
+          class="w-full px-3 py-2 rounded-lg border border-zee-border bg-white text-zee-text focus:outline-none focus:ring-2 focus:ring-zee-primary/30 focus:border-zee-primary"
+          placeholder="you@example.com"
+        />
+      </div>
+      <button
+        type="submit"
+        id="magic-btn"
+        class="w-full px-4 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity"
+      >
+        {isUpgrade ? 'Save progress' : 'Send login link'}
+      </button>
+    </form>
+
+    <div class="mt-6 pt-6 border-t border-zee-border">
+      <button id="toggle-password" class="text-sm text-zee-muted hover:text-zee-primary transition-colors">
+        Use password instead
+      </button>
+    </div>
+
+    <!-- Password form (hidden by default) -->
+    <form id="password-form" class="space-y-4 hidden mt-4">
       <div>
         <label for="email" class="block text-sm font-medium mb-1">Email</label>
         <input
@@ -61,19 +91,80 @@ const isUpgrade = url.searchParams.get('upgrade') === '1';
   </div>
 </BaseLayout>
 
-<script define:vars={{ isUpgrade }}>
-  const form = document.getElementById('auth-form');
+<script define:vars={{ isUpgrade, redirect }}>
+  const magicForm = document.getElementById('magic-form');
+  const passwordForm = document.getElementById('password-form');
+  const toggleBtn = document.getElementById('toggle-password');
   const errorMsg = document.getElementById('error-msg');
   const successMsg = document.getElementById('success-msg');
 
-  form?.addEventListener('submit', async (e) => {
+  // Toggle between magic link and password forms
+  toggleBtn?.addEventListener('click', () => {
+    const showingMagic = !magicForm?.classList.contains('hidden');
+    if (showingMagic) {
+      magicForm?.classList.add('hidden');
+      passwordForm?.classList.remove('hidden');
+      toggleBtn.textContent = 'Use magic link instead';
+    } else {
+      passwordForm?.classList.add('hidden');
+      magicForm?.classList.remove('hidden');
+      toggleBtn.textContent = 'Use password instead';
+    }
+  });
+
+  // Magic link form
+  magicForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorMsg?.classList.add('hidden');
+    successMsg?.classList.add('hidden');
+
+    const email = document.getElementById('magic-email').value;
+    const endpoint = isUpgrade ? '/api/auth/upgrade' : '/api/auth/magic-link';
+
+    if (isUpgrade) {
+      // For upgrade, we still need a password — redirect to password form
+      toggleBtn?.click();
+      return;
+    }
+
+    const btn = document.getElementById('magic-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+      const res = await fetch('/api/auth/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        errorMsg.textContent = data.error || 'Something went wrong';
+        errorMsg?.classList.remove('hidden');
+      } else {
+        successMsg.textContent = 'Check your email — we sent you a login link.';
+        successMsg?.classList.remove('hidden');
+        magicForm?.classList.add('hidden');
+      }
+    } catch {
+      errorMsg.textContent = 'Network error. Please try again.';
+      errorMsg?.classList.remove('hidden');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Send login link';
+    }
+  });
+
+  // Password form
+  passwordForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorMsg?.classList.add('hidden');
     successMsg?.classList.add('hidden');
 
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
-
     const endpoint = isUpgrade ? '/api/auth/upgrade' : '/api/auth/login';
 
     try {
@@ -88,15 +179,12 @@ const isUpgrade = url.searchParams.get('upgrade') === '1';
       if (!res.ok) {
         errorMsg.textContent = data.error || 'Something went wrong';
         errorMsg?.classList.remove('hidden');
-        return;
-      }
-
-      if (isUpgrade) {
+      } else if (isUpgrade) {
         successMsg.textContent = 'Progress saved! You can now log in from any device.';
         successMsg?.classList.remove('hidden');
-        setTimeout(() => { window.location.href = '/account/'; }, 1500);
+        setTimeout(() => { window.location.href = redirect; }, 1500);
       } else {
-        window.location.href = '/account/';
+        window.location.href = redirect;
       }
     } catch {
       errorMsg.textContent = 'Network error. Please try again.';

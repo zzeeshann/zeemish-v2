@@ -74,19 +74,14 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 
 ## What's NOT built (honest gaps)
 
-### Infrastructure
-- Cloudflare Workflows v2 — pipeline is synchronous RPC. Works, but not durable across Worker restarts.
-- Web search tool for Fact-Checker (architecture says Workers AI Search)
-
-### Features
-- Magic link / password reset — not built yet
-- Learnings database population — table exists, no agent writes patterns to it yet
-- Prompt-improvement loop — Director doesn't yet analyse auditor patterns and propose prompt edits
-- Per-day spending cap as environment variable
+### Small remaining items
+- Resend email uses test domain — needs verified sending domain for production
+- Voice contract duplicated in .md and .ts — manual sync required
+- Per-day spending cap is hardcoded (MAX_LESSONS_PER_DAY = 2), not an env var
 
 ## Deviations from plan
 1. **Single Astro Worker for site + API** instead of separate workers. Avoids CORS.
-2. **No Workflows v2** — pipeline uses synchronous sub-agent RPC calls. Works but not durable.
+2. **Workflows v2 added** — PublishLessonWorkflow wraps the pipeline in durable steps.
 3. **Agent code is flat files** (`curator.ts`) not subdirectories (`curator/agent.ts`).
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.

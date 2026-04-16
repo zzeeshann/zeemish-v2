@@ -1,0 +1,121 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { sessionCookie, generateId } from '../../lib/auth';
+import { createUser, getUserByEmail } from '../../lib/db';
+
+const db = Astro.locals.runtime.env.DB;
+const url = new URL(Astro.request.url);
+const token = url.searchParams.get('token');
+
+let status: 'success' | 'expired' | 'invalid' | 'missing' = 'missing';
+let redirectTo = '/account/';
+
+if (token) {
+  // Look up the token
+  const row = await db
+    .prepare('SELECT * FROM magic_tokens WHERE token = ?')
+    .bind(token)
+    .first<{ token: string; email: string; user_id: string | null; expires_at: number; used_at: number | null }>();
+
+  if (!row) {
+    status = 'invalid';
+  } else if (row.used_at) {
+    status = 'expired'; // Already used
+  } else if (Date.now() > row.expires_at) {
+    status = 'expired';
+  } else {
+    // Valid token — mark as used
+    await db
+      .prepare('UPDATE magic_tokens SET used_at = ? WHERE token = ?')
+      .bind(Date.now(), token)
+      .run();
+
+    // Find or create user
+    let userId = row.user_id;
+    if (!userId) {
+      // Check if user exists with this email
+      const existing = await getUserByEmail(db, row.email);
+      if (existing) {
+        userId = existing.id;
+      } else {
+        // Create new user with this email
+        userId = generateId();
+        await createUser(db, userId);
+        await db
+          .prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?')
+          .bind(row.email, Date.now(), userId)
+          .run();
+      }
+    }
+
+    // Merge anonymous progress if applicable
+    const anonymousId = Astro.locals.userId;
+    if (anonymousId && anonymousId !== userId) {
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO progress (user_id, course_slug, lesson_number, current_beat, completed_at, created_at, updated_at)
+           SELECT ?, course_slug, lesson_number, current_beat, completed_at, created_at, updated_at
+           FROM progress WHERE user_id = ?`,
+        )
+        .bind(userId, anonymousId)
+        .run();
+    }
+
+    // Set session cookie
+    Astro.cookies.set('zee-session', userId, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 365 * 24 * 60 * 60,
+    });
+
+    status = 'success';
+  }
+}
+---
+
+<BaseLayout title="Log in — Zeemish">
+  <div class="max-w-sm mx-auto py-16 text-center">
+    {status === 'success' && (
+      <div>
+        <h1 class="text-2xl font-bold mb-4">You're in</h1>
+        <p class="text-zee-muted mb-6">Your progress is synced across devices now.</p>
+        <a href={redirectTo} class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity">
+          Go to your account
+        </a>
+      </div>
+    )}
+
+    {status === 'expired' && (
+      <div>
+        <h1 class="text-2xl font-bold mb-4">Link expired</h1>
+        <p class="text-zee-muted mb-6">This login link has expired or was already used. Request a new one.</p>
+        <a href="/login/" class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity">
+          Request new link
+        </a>
+      </div>
+    )}
+
+    {status === 'invalid' && (
+      <div>
+        <h1 class="text-2xl font-bold mb-4">Invalid link</h1>
+        <p class="text-zee-muted mb-6">This login link isn't valid. Try requesting a new one.</p>
+        <a href="/login/" class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity">
+          Request new link
+        </a>
+      </div>
+    )}
+
+    {status === 'missing' && (
+      <div>
+        <h1 class="text-2xl font-bold mb-4">No token</h1>
+        <p class="text-zee-muted mb-6">This page needs a login link. Check your email.</p>
+        <a href="/login/" class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity">
+          Go to login
+        </a>
+      </div>
+    )}
+  </div>
+</BaseLayout>

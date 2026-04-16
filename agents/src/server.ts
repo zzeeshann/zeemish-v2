@@ -19,6 +19,7 @@ export { EngagementAnalystAgent } from './engagement-analyst';
 export { ReviserAgent } from './reviser';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
+export { PublishLessonWorkflow } from './workflows/publish-lesson';
 
 /** Check admin auth — bearer token or query param */
 function checkAuth(request: Request, env: Env): boolean {

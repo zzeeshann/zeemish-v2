@@ -96,3 +96,23 @@ Append-only. Never edit old entries.
 **Context:** Architecture planned both passphrase (6 BIP39 words) and magic link as login options.
 **Decision:** Cancel passphrase auth. Build magic link instead.
 **Reason:** They solve the same problem — passwordless login. Magic link is simpler, universally understood, and pairs with the existing email upgrade flow. Passphrase is clever but adds complexity readers don't need.
+
+## 2026-04-17: Resend.com for magic link emails
+**Context:** Choosing an email provider for magic link delivery.
+**Decision:** Use Resend.com (free tier: 100 emails/day).
+**Reason:** Simple API (one fetch call), no npm deps, generous free tier. Using test domain for now (onboarding@resend.dev) — needs verified domain for production.
+
+## 2026-04-17: Two-pass Fact-Checker with web search
+**Context:** Fact-Checker was failing too often on claims it couldn't verify from training data alone.
+**Decision:** Two-pass approach: (1) Claude identifies claims, (2) DuckDuckGo instant answers for unverified/incorrect claims, (3) Claude re-assesses with search results.
+**Reason:** Adds real-world verification without external API dependencies. DuckDuckGo is free and doesn't require an API key. Not as deep as a full search engine, but catches obvious errors.
+
+## 2026-04-17: Learnings written by StructureEditor, reviewed by Director
+**Context:** Architecture Section 4.3 describes a cross-lesson consistency system.
+**Decision:** StructureEditor writes observations to the learnings table when it finds patterns. Director reviews audit patterns after each autonomous run and logs recurring issues via Observer.
+**Reason:** Starts the learning loop without over-engineering. Observations accumulate, the Director surfaces recurring problems, and Zishan can act on them.
+
+## 2026-04-17: PublishLessonWorkflow for durable pipeline execution
+**Context:** Pipeline was synchronous RPC — wouldn't survive Worker restarts.
+**Decision:** Added PublishLessonWorkflow using Cloudflare Workflows v2 via agents SDK. Each pipeline step (curate, draft, audit, revise, audio, publish) is a durable checkpoint.
+**Reason:** Durable execution is critical for a pipeline that takes 1-2 minutes. If the Worker cold-starts mid-pipeline, it resumes from the last completed step instead of starting over.

@@ -95,7 +95,104 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         }
       }
     }
+
+    // After producing lessons, review patterns for recurring issues
+    await this.reviewPatterns();
   }
+
+  /**
+   * Review recent audit patterns and log observations.
+   * Called after autonomous runs to identify recurring issues.
+   */
+  async reviewPatterns(): Promise<void> {
+    try {
+      // Get last 30 days of audit results
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const audits = await this.env.DB
+        .prepare(
+          `SELECT auditor, passed, notes FROM audit_results WHERE created_at > ? ORDER BY created_at DESC LIMIT 100`,
+        )
+        .bind(thirtyDaysAgo)
+        .all<{ auditor: string; passed: number; notes: string }>();
+
+      if (audits.results.length < 10) return; // Not enough data
+
+      // Count failures by auditor
+      const failures: Record<string, number> = {};
+      const commonIssues: Record<string, string[]> = {};
+
+      for (const audit of audits.results) {
+        if (!audit.passed) {
+          failures[audit.auditor] = (failures[audit.auditor] || 0) + 1;
+          try {
+            const notes = JSON.parse(audit.notes);
+            if (Array.isArray(notes)) {
+              if (!commonIssues[audit.auditor]) commonIssues[audit.auditor] = [];
+              commonIssues[audit.auditor].push(...notes.slice(0, 3).map(String));
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+
+      // Log findings via Observer
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      for (const [auditor, count] of Object.entries(failures)) {
+        if (count >= 5) {
+          const issues = commonIssues[auditor]?.slice(0, 5).join('; ') ?? 'various issues';
+          await observer.logEscalation(
+            'system', 0,
+            `${auditor} has failed ${count} times in last 30 days`,
+            0,
+            count,
+            [`Recurring issues: ${issues}`],
+          );
+        }
+      }
+    } catch { /* pattern review shouldn't break anything */ }
+  }
+
+  // --- Workflow step methods (called by PublishLessonWorkflow) ---
+
+  async curateLessonStep(courseSlug: string, courseTitle: string, lessonNumber: number, existingLessons: string[]): Promise<LessonBrief> {
+    const curator = await this.subAgent(CuratorAgent, `curator-${courseSlug}`);
+    return curator.planLesson(courseSlug, courseTitle, lessonNumber, existingLessons, VOICE_CONTRACT);
+  }
+
+  async draftLessonStep(brief: LessonBrief): Promise<DraftResult> {
+    const drafter = await this.subAgent(DrafterAgent, `drafter-${brief.courseSlug}-${brief.lessonNumber}`);
+    return drafter.writeDraft(brief, VOICE_CONTRACT);
+  }
+
+  async auditLessonStep(mdx: string, taskId: string, round: number) {
+    const [voice, structure, facts] = await Promise.all([
+      (await this.subAgent(VoiceAuditorAgent, `voice-${taskId}-r${round}`)).audit(mdx),
+      (await this.subAgent(StructureEditorAgent, `struct-${taskId}-r${round}`)).review(mdx),
+      (await this.subAgent(FactCheckerAgent, `fact-${taskId}-r${round}`)).check(mdx),
+    ]);
+    await this.saveAuditResults(taskId, round, voice, structure, facts);
+    return { voice, structure, facts, allPassed: voice.passed && structure.passed && facts.passed };
+  }
+
+  async reviseLessonStep(mdx: string, auditResult: { voice: any; structure: any; facts: any }): Promise<string> {
+    const integrator = await this.subAgent(IntegratorAgent, `integrator`);
+    const revision = await integrator.revise(mdx, auditResult.voice, auditResult.structure, auditResult.facts);
+    return revision.revisedMdx;
+  }
+
+  async generateAudioStep(brief: LessonBrief, mdx: string) {
+    const audioProducer = await this.subAgent(AudioProducerAgent, `audio-${brief.courseSlug}-${brief.lessonNumber}`);
+    const audioResult = await audioProducer.generateAudio(brief, mdx);
+    const audioAuditor = await this.subAgent(AudioAuditorAgent, `audio-audit-${brief.courseSlug}-${brief.lessonNumber}`);
+    await audioAuditor.audit(audioResult.beatAudioPaths);
+    return audioResult;
+  }
+
+  async publishStep(brief: LessonBrief, mdx: string) {
+    const publisher = await this.subAgent(PublisherAgent, `publisher-${brief.courseSlug}-${brief.lessonNumber}`);
+    return publisher.publish(brief, mdx);
+  }
+
+  // --- End workflow step methods ---
 
   /**
    * Full pipeline: curate → draft → audit → revise → repeat.

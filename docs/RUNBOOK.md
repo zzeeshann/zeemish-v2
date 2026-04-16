@@ -55,6 +55,7 @@ Also auto-deploys on every push to `main` via GitHub Actions (same as site).
 ```bash
 wrangler secret put ANTHROPIC_API_KEY    # For Zita chat
 wrangler secret put AGENTS_ADMIN_SECRET  # For dashboard trigger proxy
+wrangler secret put RESEND_API_KEY       # For magic link emails
 ```
 
 ### Agents worker

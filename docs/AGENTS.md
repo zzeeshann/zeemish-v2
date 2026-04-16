@@ -121,8 +121,12 @@ wrangler deploy
 - `agents/src/shared/voice-contract.ts` — voice contract as string constant
 - `agents/src/shared/parse-json.ts` — robust JSON extraction from LLM responses
 
+## Workflow
+- **PublishLessonWorkflow** — durable multi-step pipeline (curate → draft → audit → revise → audio → publish)
+- Each step is a checkpoint — survives Worker restarts
+- File: `agents/src/workflows/publish-lesson.ts`
+
 ## Known limitations
-- No Cloudflare Workflows v2 — pipeline is synchronous RPC, not durable across restarts
-- Fact-Checker has no web search — uses Claude reasoning only
 - Audio-Auditor does basic file checks only (no STT round-trip yet)
 - Voice contract duplicated in .md and .ts (manual sync required)
+- Fact-Checker web search uses DuckDuckGo instant answers (limited depth)

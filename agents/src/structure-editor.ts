@@ -2,6 +2,7 @@ import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { extractJson } from './shared/parse-json';
+import { writeLearning } from './shared/learnings';
 
 export interface StructureAuditResult {
   passed: boolean;
@@ -53,6 +54,17 @@ If no issues, return { "passed": true, "issues": [], "suggestions": [] }`,
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
     const result = extractJson<StructureAuditResult>(text);
+
+    // Write learnings from structural patterns
+    if (result.passed && result.suggestions.length > 0) {
+      // Even passing lessons can have useful observations
+      for (const suggestion of result.suggestions.slice(0, 2)) {
+        try {
+          await writeLearning(this.env.DB, 'structure', suggestion, { source: 'structure-editor' }, 60);
+        } catch { /* learning write shouldn't break audit */ }
+      }
+    }
+
     this.setState({ lastResult: result });
     return result;
   }

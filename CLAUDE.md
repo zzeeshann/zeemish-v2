@@ -36,10 +36,14 @@
 - Pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Audio → Publish
 
 ## Known gaps (honest list)
-- No Cloudflare Workflows v2 (pipeline is synchronous RPC — works but not durable)
-- Fact-Checker has no web search (Claude reasoning only)
-- Magic link / password reset not built
 - Voice contract duplicated in .md and .ts (drift risk)
+- Resend email uses test domain (onboarding@resend.dev) — needs verified sending domain for production
+
+## Completed (previously gaps)
+- ✅ Cloudflare Workflows v2 (PublishLessonWorkflow with durable steps)
+- ✅ Fact-Checker web search (two-pass: Claude reasoning + DuckDuckGo verification)
+- ✅ Magic link login (Resend email, 30-min token, verify page)
+- ✅ Learnings database (StructureEditor writes patterns, Director reviews)
 
 ## Cancelled
 - Passphrase auth (6 BIP39 words) — cancelled, magic link replaces it
