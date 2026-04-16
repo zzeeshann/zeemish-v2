@@ -56,11 +56,18 @@ wrangler deploy
 wrangler secret put ANTHROPIC_API_KEY   # For Zita chat
 ```
 
+### Site worker
+```bash
+wrangler secret put AGENTS_ADMIN_SECRET  # For dashboard trigger proxy
+```
+
 ### Agents worker
 ```bash
 cd agents
 wrangler secret put ANTHROPIC_API_KEY   # For Claude API calls
 wrangler secret put GITHUB_TOKEN        # For Publisher commits
+wrangler secret put ELEVENLABS_API_KEY  # For Audio-Producer TTS
+wrangler secret put ADMIN_SECRET        # For trigger endpoint auth
 ```
 
 ## D1 Database

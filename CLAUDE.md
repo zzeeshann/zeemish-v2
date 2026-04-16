@@ -1,7 +1,7 @@
 # Zeemish v2 — Claude Code Context
 
 ## Current stage
-**All 7 stages built.** System is functional end-to-end. Key gaps remain: audio agents, Workflows v2, auth on agents endpoint.
+**All 7 stages built. All 13 agents built.** System is functional end-to-end with audio generation. Remaining gap: Cloudflare Workflows v2 for durability.
 
 ## What was last worked on (most recent first)
 - Documentation cleanup: all docs updated to match reality
@@ -21,23 +21,21 @@
 
 ## Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind
-- Backend: Cloudflare Workers (Astro adapter) + D1 + R2 (not yet configured)
+- Backend: Cloudflare Workers (Astro adapter) + D1 + R2 (zeemish-audio bucket)
 - Agents: Cloudflare Agents SDK v0.11.1 (Durable Objects) — separate Worker
 - AI: Anthropic Claude (Sonnet 4.5)
-- Audio: ElevenLabs (NOT YET INTEGRATED)
+- Audio: ElevenLabs (Frederick Surrey voice, saves to R2)
 - Deploy: GitHub Actions → Cloudflare (site only; agents deployed manually)
 
 ## Key architecture notes
 - Single Astro Worker serves static pages + API routes
-- Separate agents/ Worker for the 11 AI agents
+- Separate agents/ Worker for all 13 AI agents
 - Auth middleware only runs on /api/, /account, /login routes
 - D1 database `zeemish` with 9 tables (see `docs/SCHEMA.md`)
 - Passwords hashed with PBKDF2 via Web Crypto API
 - Pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Publish
 
 ## Known gaps (honest list)
-- Audio-Producer and Audio-Auditor agents NOT BUILT (waiting for ElevenLabs)
-- No R2 bucket configured for audio storage
 - No Cloudflare Workflows v2 (pipeline is synchronous RPC — works but not durable)
 - Fact-Checker has no web search (Claude reasoning only)
 - Passphrase auth not implemented (email+password works)

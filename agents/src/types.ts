@@ -17,8 +17,12 @@ export interface Env {
   OBSERVER: DurableObjectNamespace;
   ENGAGEMENT_ANALYST: DurableObjectNamespace;
   REVISER: DurableObjectNamespace;
+  AUDIO_PRODUCER: DurableObjectNamespace;
+  AUDIO_AUDITOR: DurableObjectNamespace;
+  AUDIO_BUCKET: R2Bucket;
   GITHUB_TOKEN: string;
   ADMIN_SECRET: string;
+  ELEVENLABS_API_KEY: string;
 }
 
 /** A lesson brief produced by the Curator */

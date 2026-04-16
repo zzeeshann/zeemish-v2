@@ -76,3 +76,18 @@ Append-only. Never edit old entries.
 **Context:** Stage 5 — agent-authored lessons had `estimatedTime: 18` (number) instead of `"18 min"` (string).
 **Decision:** Changed Zod schema to `z.coerce.string()` for `estimatedTime`.
 **Reason:** Agent output varies. Coercing is more robust than trying to enforce exact format in agent prompts. Numbers become strings automatically.
+
+## 2026-04-17: Frederick Surrey as the Zeemish voice
+**Context:** Choosing an ElevenLabs voice for lesson audio.
+**Decision:** Frederick Surrey — British, male, middle-aged, calm, narrative style.
+**Reason:** Matches the Zeemish tone: calm, direct, warm but not performative. Zishan's choice.
+
+## 2026-04-17: Audio failure doesn't block text publishing
+**Context:** Wiring audio generation into the publishing pipeline.
+**Decision:** If audio generation or audit fails, the text lesson still publishes. Audio failure is logged via Observer but doesn't block.
+**Reason:** Audio is enhancement, not core. A published lesson without audio is better than a blocked lesson. Audio can be regenerated later.
+
+## 2026-04-17: Audio generated once per lesson, served from R2
+**Context:** Cost model for audio.
+**Decision:** Generate MP3 once via ElevenLabs, store in R2 bucket. Readers stream from R2.
+**Reason:** ~$5 per lesson to generate. $0 per play after that. R2 serving is essentially free at this scale.

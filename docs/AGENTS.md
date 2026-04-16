@@ -4,8 +4,9 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
+**All 13 agents from the architecture are built.**
 
-## Built agents (11 of 13)
+## Agents (all 13)
 
 ### DirectorAgent
 - **Role:** Top-level supervisor. Orchestrates the full publishing pipeline.
@@ -69,23 +70,25 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Output:** Revised MDX ready for re-audit through pipeline.
 - **File:** `agents/src/reviser.ts`
 
-## NOT built (2 of 13)
+### AudioProducerAgent
+- **Role:** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.
+- **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk`
+- **Process:** Extract text from each `<lesson-beat>` → strip tags → call ElevenLabs → save MP3 to R2
+- **Audio generated once per lesson, served forever** (zero cost per play)
+- **File:** `agents/src/audio-producer.ts`
 
-### Audio-Producer
-- **Planned role:** Generate MP3 per beat via ElevenLabs, upload to R2.
-- **Blocked by:** No ElevenLabs API key, no R2 bucket configured.
-- **File:** `agents/src/audio-producer/` (empty directory)
-
-### Audio-Auditor
-- **Planned role:** STT round-trip + listening check for mispronunciations.
-- **Blocked by:** Audio-Producer must be built first.
-- **File:** `agents/src/audio-auditor/` (empty directory)
+### AudioAuditorAgent
+- **Role:** Checks generated audio quality — verifies files exist in R2, checks sizes, flags issues.
+- **Checks:** File exists, not empty, not suspiciously large, text wasn't too short
+- **Note:** Does not do STT round-trip yet (can be added when Workers AI supports it)
+- **File:** `agents/src/audio-auditor.ts`
 
 ## Endpoints
 
 ```bash
-# Trigger a lesson pipeline
+# Trigger a lesson pipeline (requires auth)
 POST /trigger?course=body&lesson=3
+# Header: Authorization: Bearer <ADMIN_SECRET>
 
 # Director status
 GET /status
@@ -107,8 +110,10 @@ wrangler deploy
 ```
 
 ## Secrets (set via `wrangler secret put` in `agents/`)
-- `ANTHROPIC_API_KEY` — Claude API key
+- `ANTHROPIC_API_KEY` — Claude API key for all agents
 - `GITHUB_TOKEN` — GitHub token for Publisher commits
+- `ELEVENLABS_API_KEY` — ElevenLabs API key for Audio-Producer
+- `ADMIN_SECRET` — Bearer token for trigger endpoint auth
 
 ## Key shared files
 - `agents/src/types.ts` — Env, state types, LessonBrief, DraftResult
@@ -117,8 +122,7 @@ wrangler deploy
 - `agents/src/shared/parse-json.ts` — robust JSON extraction from LLM responses
 
 ## Known limitations
-- No Cloudflare Workflows v2 — pipeline is synchronous RPC, not durable
-- No scheduled runs — Director must be triggered manually
-- No auth on trigger endpoint — anyone with the URL can trigger
+- No Cloudflare Workflows v2 — pipeline is synchronous RPC, not durable across restarts
 - Fact-Checker has no web search — uses Claude reasoning only
-- `audit_results` table not populated — audits only stored in agent state
+- Audio-Auditor does basic file checks only (no STT round-trip yet)
+- Voice contract duplicated in .md and .ts (manual sync required)

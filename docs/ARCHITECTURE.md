@@ -42,8 +42,8 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
 - [x] Full pipeline: Curate → Draft → 3 parallel auditors → Revise loop → Publish
-- [ ] **Audio-Producer agent** — NOT BUILT (needs ElevenLabs API)
-- [ ] **Audio-Auditor agent** — NOT BUILT (needs STT round-trip)
+- [x] AudioProducerAgent (ElevenLabs TTS, Frederick Surrey voice, saves to R2)
+- [x] AudioAuditorAgent (file existence + size checks on generated audio)
 - [ ] **Cloudflare Workflows v2** — NOT USED (pipeline is synchronous RPC)
 - [ ] **Scheduled Director runs** — NOT BUILT (manual trigger only)
 - [ ] Dashboard page at `/dashboard/` with manual trigger form
@@ -71,14 +71,11 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 
 ## What's NOT built (known gaps)
 
-### Missing agents
-- Audio-Producer (ElevenLabs TTS) — needs API key and R2 bucket
-- Audio-Auditor (STT round-trip quality check)
+### All 13 agents are built
+No missing agents.
 
 ### Missing infrastructure
-- Cloudflare Workflows v2 for durable pipeline execution
-- R2 bucket for audio storage
-- `audit_results` D1 table for persistent audit trail
+- Cloudflare Workflows v2 for durable pipeline execution (pipeline works but is synchronous)
 - Scheduled cron runs for Director and EngagementAnalyst
 - Web search tool for Fact-Checker (Workers AI Search)
 

@@ -7,8 +7,12 @@ import { FactCheckerAgent } from './fact-checker';
 import { IntegratorAgent } from './integrator';
 import { PublisherAgent } from './publisher';
 import { ObserverAgent } from './observer';
+import { AudioProducerAgent } from './audio-producer';
+import { AudioAuditorAgent } from './audio-auditor';
 import type { Env, DirectorState, LessonBrief, DraftResult } from './types';
 import type { PublishResult } from './publisher';
+import type { AudioResult } from './audio-producer';
+import type { AudioAuditResult } from './audio-auditor';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
 import type { FactCheckResult } from './fact-checker';
@@ -158,7 +162,33 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const lastAudit = audits[audits.length - 1];
       const passed = lastAudit.allPassed;
 
-      // Step 4: Publish if all gates passed
+      // Step 4: Generate audio if all text gates passed
+      let audioResult: AudioResult | null = null;
+      if (passed) {
+        this.setState({ ...this.state, status: 'generating_audio' });
+        try {
+          const audioProducer = await this.subAgent(AudioProducerAgent, `audio-${taskId}`);
+          audioResult = await audioProducer.generateAudio(brief, currentMdx);
+
+          // Step 4b: Audit the audio
+          const audioAuditor = await this.subAgent(AudioAuditorAgent, `audio-audit-${taskId}`);
+          const audioAudit = await audioAuditor.audit(audioResult.beatAudioPaths);
+
+          if (!audioAudit.passed) {
+            // Audio failed — still publish text, just log the issue
+            const observer = await this.subAgent(ObserverAgent, 'observer');
+            await observer.logError(courseSlug, lessonNumber,
+              `Audio audit failed: ${audioAudit.issues.map((i) => i.issue).join('; ')}`);
+          }
+        } catch (err) {
+          // Audio failure shouldn't block text publishing
+          const msg = err instanceof Error ? err.message : 'Audio generation failed';
+          const observer = await this.subAgent(ObserverAgent, 'observer');
+          await observer.logError(courseSlug, lessonNumber, msg);
+        }
+      }
+
+      // Step 5: Publish if all text gates passed
       let published: PublishResult | null = null;
       if (passed) {
         this.setState({ ...this.state, status: 'publishing' });

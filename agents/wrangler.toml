@@ -70,9 +70,26 @@ class_name = "ReviserAgent"
 tag = "v4"
 new_sqlite_classes = ["ObserverAgent"]
 
+[[durable_objects.bindings]]
+name = "AUDIO_PRODUCER"
+class_name = "AudioProducerAgent"
+
+[[durable_objects.bindings]]
+name = "AUDIO_AUDITOR"
+class_name = "AudioAuditorAgent"
+
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["EngagementAnalystAgent", "ReviserAgent"]
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["AudioProducerAgent", "AudioAuditorAgent"]
+
+# R2 bucket for audio storage
+[[r2_buckets]]
+binding = "AUDIO_BUCKET"
+bucket_name = "zeemish-audio"
 
 # D1 for shared data (tasks log, audit results)
 [[d1_databases]]
