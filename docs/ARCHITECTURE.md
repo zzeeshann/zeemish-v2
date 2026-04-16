@@ -39,8 +39,12 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Manual trigger endpoint: POST /trigger?course=slug&lesson=number
 - [x] Status endpoint: GET /status
 - [x] Tested end-to-end: Curator + Drafter produce lesson MDX
-- [ ] Voice-Auditor, Structure-Editor, Integrator (quality gates)
-- [ ] Fact-Checker, Publisher (end-to-end publishing)
+- [x] VoiceAuditorAgent (scores voice compliance 0-100, ≥85 to pass)
+- [x] StructureEditorAgent (reviews beat structure, pacing, length)
+- [x] FactCheckerAgent (verifies factual claims)
+- [x] IntegratorAgent (merges feedback, revises draft, up to 3 rounds)
+- [x] Full pipeline: Curate → Draft → 3 auditors in parallel → Revise loop
+- [ ] Publisher (Git commit + deploy)
 - [ ] Audio-Producer, Audio-Auditor (ElevenLabs)
 - [ ] Observer + dashboard
 

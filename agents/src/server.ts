@@ -7,6 +7,10 @@ import { DrafterAgent } from './drafter';
 
 // Re-export for Durable Object bindings
 export { DirectorAgent, CuratorAgent, DrafterAgent };
+export { VoiceAuditorAgent } from './voice-auditor';
+export { StructureEditorAgent } from './structure-editor';
+export { FactCheckerAgent } from './fact-checker';
+export { IntegratorAgent } from './integrator';
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -38,12 +42,22 @@ export default {
         const result = await director.triggerLesson(courseSlug, lessonNumber);
 
         return new Response(JSON.stringify({
-          status: 'success',
+          status: result.passed ? 'success' : 'failed_audit',
+          passed: result.passed,
+          revisionCount: result.revisionCount,
           brief: result.brief,
-          mdxPreview: result.draft.mdx.slice(0, 500) + '...',
-          mdxLength: result.draft.mdx.length,
-          model: result.draft.model,
-          tokensUsed: result.draft.tokensUsed,
+          audits: result.audits?.map((a: any) => ({
+            round: a.round,
+            voiceScore: a.voice?.score,
+            voicePassed: a.voice?.passed,
+            structurePassed: a.structure?.passed,
+            factsPassed: a.facts?.passed,
+            allPassed: a.allPassed,
+          })),
+          mdxPreview: result.finalMdx?.slice(0, 500) + '...',
+          mdxLength: result.finalMdx?.length ?? 0,
+          model: result.draft?.model,
+          tokensUsed: result.draft?.tokensUsed,
         }), { headers: { 'Content-Type': 'application/json' } });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';

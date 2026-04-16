@@ -9,6 +9,10 @@ export interface Env {
   DIRECTOR: DurableObjectNamespace;
   CURATOR: DurableObjectNamespace;
   DRAFTER: DurableObjectNamespace;
+  VOICE_AUDITOR: DurableObjectNamespace;
+  STRUCTURE_EDITOR: DurableObjectNamespace;
+  FACT_CHECKER: DurableObjectNamespace;
+  INTEGRATOR: DurableObjectNamespace;
 }
 
 /** A lesson brief produced by the Curator */

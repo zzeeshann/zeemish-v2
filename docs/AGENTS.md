@@ -29,9 +29,27 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Model:** Claude Sonnet 4.5
 - **Prompt:** `DRAFTER_SYSTEM_PROMPT` in `agents/src/shared/prompts.ts`
 
+### VoiceAuditorAgent
+- **Role:** Reviews drafts against the voice contract. Scores 0-100, must be ≥85 to pass.
+- **Flags:** Tribe words, flattery, jargon without explanation, padding
+- **Model:** Claude Sonnet 4.5
+
+### StructureEditorAgent
+- **Role:** Reviews beat structure, pacing, length. Checks hook, teaching, close rules.
+- **Checks:** 3-6 beats, one idea per beat, valid frontmatter, no filler
+- **Model:** Claude Sonnet 4.5
+
+### FactCheckerAgent
+- **Role:** Verifies every factual claim. Flags unverified or incorrect claims.
+- **Output:** List of claims with status (verified/unverified/incorrect)
+- **Model:** Claude Sonnet 4.5
+
+### IntegratorAgent
+- **Role:** Takes feedback from all three gates, revises the draft, resubmits.
+- **Retry:** Up to 3 revision passes before escalation.
+- **Model:** Claude Sonnet 4.5
+
 ## Not yet built
-- Voice-Auditor, Fact-Checker, Structure-Editor (quality gates)
-- Integrator (feedback merger, revision loops)
 - Audio-Producer, Audio-Auditor (ElevenLabs)
 - Publisher (Git commit + deploy)
 - Engagement-Analyst, Reviser (self-improvement loop)

@@ -21,10 +21,30 @@ class_name = "CuratorAgent"
 name = "DRAFTER"
 class_name = "DrafterAgent"
 
+[[durable_objects.bindings]]
+name = "VOICE_AUDITOR"
+class_name = "VoiceAuditorAgent"
+
+[[durable_objects.bindings]]
+name = "STRUCTURE_EDITOR"
+class_name = "StructureEditorAgent"
+
+[[durable_objects.bindings]]
+name = "FACT_CHECKER"
+class_name = "FactCheckerAgent"
+
+[[durable_objects.bindings]]
+name = "INTEGRATOR"
+class_name = "IntegratorAgent"
+
 # SQLite storage for agent state
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["DirectorAgent", "CuratorAgent", "DrafterAgent"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["VoiceAuditorAgent", "StructureEditorAgent", "FactCheckerAgent", "IntegratorAgent"]
 
 # D1 for shared data (tasks log, audit results)
 [[d1_databases]]
