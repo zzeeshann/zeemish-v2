@@ -40,8 +40,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 ### Stage 4 — Agent Team (complete — 11 agents)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — supervisor, scheduled daily at 2am UTC, manual trigger
-- [x] CuratorAgent — lesson planning via Claude API
-- [x] DrafterAgent — MDX generation via Claude API
+- [x] Director handles curating + drafting inline (Curator/Drafter agents removed)
 - [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass
 - [x] StructureEditorAgent — reviews beat structure, pacing
 - [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search)
@@ -98,7 +97,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 1. **Single Astro Worker for site + API** instead of separate workers. Avoids CORS.
 2. **Workflows v2 added** — PublishLessonWorkflow wraps the pipeline in durable steps.
 8. **14th agent (ScannerAgent)** added for Daily Pieces — not in original 13-agent architecture.
-3. **Agent code is flat files** (`curator.ts`) not subdirectories (`curator/agent.ts`).
+3. **Agent code is flat files** (e.g. `scanner.ts`) not subdirectories.
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.
 6. **Daily pieces only** — courses removed, daily news-driven teaching is the only content type.

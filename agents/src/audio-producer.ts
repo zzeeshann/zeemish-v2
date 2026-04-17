@@ -1,5 +1,11 @@
 import { Agent } from 'agents';
-import type { Env, LessonBrief } from './types';
+import type { Env } from './types';
+
+/** Minimal brief for audio generation */
+interface AudioBrief {
+  courseSlug: string;
+  lessonNumber: number;
+}
 
 export interface AudioResult {
   beatAudioPaths: BeatAudio[];
@@ -35,7 +41,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
    * saves MP3 to R2, returns paths.
    */
   async generateAudio(
-    brief: LessonBrief,
+    brief: AudioBrief,
     mdx: string,
   ): Promise<AudioResult> {
     // Extract text content from each beat
