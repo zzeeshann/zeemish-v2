@@ -4,34 +4,21 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**13 agents deployed** (13 from the original architecture + ScannerAgent for Daily Pieces).
+**11 agents deployed** (10 public + Observer internal).
 
 ## Hard rule for all agents
 
 **Published pieces are permanent. Any agent can READ old pieces to learn from them. No agent WRITES to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
 
-## Agents (13 total — 12 public + Observer internal)
+## Agents (11 total — 10 public + Observer internal)
 
 ### DirectorAgent
-- **Role:** Top-level supervisor. Orchestrates the full publishing pipeline.
-- **State:** `{ status, currentTask, lastLesson, error }`
-- **Methods:** `triggerLesson(courseSlug, lessonNumber)`, `getStatus()`
-- **Spawns:** All other agents as sub-agents
+- **Role:** Top-level supervisor. Orchestrates the daily piece pipeline.
+- **State:** `{ status, currentTask, lastDailyPiece, error }`
+- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC)
+- **Spawns:** Scanner, auditors, Integrator, Publisher, Observer as sub-agents
+- **Writes pipeline_log:** step-by-step log visible in admin dashboard
 - **File:** `agents/src/director.ts`
-
-### CuratorAgent
-- **Role:** Plans individual lessons within a course.
-- **Input:** Subject, course title, lesson number, existing lessons, voice contract
-- **Output:** `LessonBrief` — title, objective, hooks, beat plans
-- **Model:** Claude Sonnet 4.5
-- **File:** `agents/src/curator.ts`
-
-### DrafterAgent
-- **Role:** Writes complete lesson MDX from a brief.
-- **Input:** LessonBrief + voice contract
-- **Output:** `DraftResult` — complete MDX, token count
-- **Model:** Claude Sonnet 4.5
-- **File:** `agents/src/drafter.ts`
 
 ### VoiceAuditorAgent
 - **Role:** Reviews drafts against the voice contract. Scores 0-100, must be ≥85.
@@ -94,25 +81,21 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 ## Endpoints
 
 ```bash
-# Trigger a lesson pipeline (requires auth)
-POST /trigger?course=attention&lesson=1
-# Header: Authorization: Bearer <ADMIN_SECRET>
-
-# Director status
-GET /status
-
-# Observer daily digest (last 24 hours)
-GET /digest
-
-# Recent observer events
-GET /events?limit=20
-
 # Trigger a daily piece (requires auth)
 POST /daily-trigger
 # Header: Authorization: Bearer <ADMIN_SECRET>
 
-# Engagement report for a course
-GET /engagement?course=attention
+# Director status (requires auth)
+GET /status
+
+# Observer daily digest (requires auth)
+GET /digest
+
+# Recent observer events (requires auth)
+GET /events?limit=20
+
+# Engagement report (requires auth)
+GET /engagement?course=daily
 ```
 
 ## How to deploy
@@ -132,11 +115,6 @@ wrangler deploy
 - `agents/src/shared/prompts.ts` — system prompts for Curator + Drafter
 - `agents/src/shared/voice-contract.ts` — voice contract as string constant
 - `agents/src/shared/parse-json.ts` — robust JSON extraction from LLM responses
-
-## Workflow
-- **PublishLessonWorkflow** — durable multi-step pipeline (curate → draft → audit → revise → audio → publish)
-- Each step is a checkpoint — survives Worker restarts
-- File: `agents/src/workflows/publish-lesson.ts`
 
 ## Known limitations
 - Audio-Auditor does basic file checks only (no STT round-trip yet)

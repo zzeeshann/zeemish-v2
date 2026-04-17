@@ -35,7 +35,7 @@ An autonomous multi-agent publishing system. 11 AI agents scan the news, decide 
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
-- Backend: Cloudflare Workers (Astro adapter) + D1 (12 tables) + R2 (audio)
+- Backend: Cloudflare Workers (Astro adapter) + D1 (13 tables) + R2 (audio)
 - Agents: Cloudflare Agents SDK v0.11.1
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
@@ -59,7 +59,7 @@ An autonomous multi-agent publishing system. 11 AI agents scan the news, decide 
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 12 tables, 6 migrations)
+### Database (D1 — 13 tables, 7 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: agent_tasks, observer_events, engagement, learnings, audit_results
@@ -100,7 +100,7 @@ docs/handoff/           Original architecture + specs
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 11 agents, endpoints, secrets
-- `docs/SCHEMA.md` — all 12 D1 tables, 6 migrations
+- `docs/SCHEMA.md` — all 13 D1 tables, 7 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)

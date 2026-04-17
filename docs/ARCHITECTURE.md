@@ -27,7 +27,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
-- [x] D1 database: 12 tables (see `docs/SCHEMA.md`)
+- [x] D1 database: 13 tables (see `docs/SCHEMA.md`)
 - [x] Anonymous-first auth middleware (cookie on first API call)
 - [x] Progress API: save beat, mark complete, fetch progress
 - [x] Auth API: email upgrade, login, logout
@@ -37,7 +37,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — 14 agents built (13 core + ScannerAgent))
+### Stage 4 — Agent Team (complete — 11 agents)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — supervisor, scheduled daily at 2am UTC, manual trigger
 - [x] CuratorAgent — lesson planning via Claude API
@@ -81,7 +81,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] ScannerAgent (#14) — fetches Google News RSS across 6 categories
 - [x] Director daily mode — picks most teachable story, writes brief, runs pipeline
 - [x] Daily piece pages at /daily/ and /daily/YYYY-MM-DD/
-- [x] Home page redesign — today's piece prominent, archive below, courses below
+- [x] Home page redesign — today's piece prominent, library below
 - [x] D1 tables: daily_candidates, daily_pieces (migration 0006)
 - [x] Content collection: dailyPieces with date/newsSource/underlyingSubject schema
 - [x] Scheduled: Scanner + Director at 2am UTC weekdays
@@ -101,5 +101,5 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 3. **Agent code is flat files** (`curator.ts`) not subdirectories (`curator/agent.ts`).
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.
-6. **Lesson titles differ from original course spine** — agents chose their own topics.
+6. **Daily pieces only** — courses removed, daily news-driven teaching is the only content type.
 7. **Audio failure doesn't block publishing** — text lesson still ships, audio issue logged.

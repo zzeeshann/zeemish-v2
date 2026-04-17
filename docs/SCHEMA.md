@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**12 tables across 6 migrations.**
+**13 tables across 7 migrations.**
 
 ## Reader-side tables
 
@@ -203,10 +203,25 @@ Published daily teaching pieces.
 
 Migration: `0006_daily_pieces.sql`
 
-## Migrations summary (6 migrations, 12 tables)
+### pipeline_log
+Step-by-step record of each daily piece run. The admin dashboard polls this for the live pipeline monitor.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| run_id | TEXT | YYYY-MM-DD (one run per day) |
+| step | TEXT | scanning, curating, drafting, auditing_r1, publishing, done, error |
+| status | TEXT | running, done, failed |
+| data | TEXT | JSON with step-specific data (scores, counts, headlines) |
+| created_at | INTEGER | |
+
+Migration: `0007_pipeline_log.sql`
+
+## Migrations summary (7 migrations, 13 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks, observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
 - `0004_audit_results.sql` — audit_results + idx_tasks_parent index
 - `0005_magic_tokens.sql` — magic_tokens for passwordless login
 - `0006_daily_pieces.sql` — daily_candidates, daily_pieces
+- `0007_pipeline_log.sql` — pipeline_log for admin monitor
