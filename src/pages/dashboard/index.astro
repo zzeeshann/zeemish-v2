@@ -49,18 +49,16 @@ try {
   }
 } catch { /* D1 may not have data yet */ }
 
-// Agent team — 12 agents shown publicly (Observer is internal)
+// Agent team — 10 shown publicly (Observer is internal)
 const agents = [
   { name: 'Scanner', job: 'Reads the news every morning' },
-  { name: 'Director', job: 'Picks the most teachable story' },
-  { name: 'Curator', job: 'Plans the piece structure' },
-  { name: 'Drafter', job: 'Writes the piece' },
+  { name: 'Director', job: 'Picks the most teachable story and writes the piece' },
   { name: 'Voice Auditor', job: 'Checks it sounds like Zeemish' },
   { name: 'Fact Checker', job: 'Verifies every claim' },
   { name: 'Structure Editor', job: 'Reviews the flow and pacing' },
   { name: 'Integrator', job: 'Handles revisions before approval' },
-  { name: 'Audio Producer', job: 'Generates the audio version' },
-  { name: 'Audio Auditor', job: 'Checks pronunciation' },
+  { name: 'Audio Producer', job: 'Generates the audio version (paused)' },
+  { name: 'Audio Auditor', job: 'Checks pronunciation (paused)' },
   { name: 'Publisher', job: 'Puts it live on the site' },
   { name: 'Learner', job: 'Learns from reader behaviour to make future pieces better' },
 ];
