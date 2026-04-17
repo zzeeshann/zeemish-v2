@@ -50,7 +50,12 @@ try {
   };
 
   if (todaysPiece) {
-    const audits = await db.prepare("SELECT auditor, passed, score FROM audit_results WHERE task_id LIKE ?").bind(`daily/${today}%`).all();
+    // Order by created_at DESC so the first match per auditor is the
+    // LAST revision round — matches what `daily_pieces.voice_score` and
+    // the piece page's tier word reflect. Previously used `.find()` on
+    // the unordered result, which picked round 1 and made the dashboard
+    // disagree with the piece page.
+    const audits = await db.prepare("SELECT auditor, passed, score FROM audit_results WHERE task_id LIKE ? ORDER BY created_at DESC").bind(`daily/${today}%`).all();
     const v = audits.results.find((a: any) => a.auditor === 'voice');
     const f = audits.results.find((a: any) => a.auditor === 'fact');
     const s = audits.results.find((a: any) => a.auditor === 'structure');
