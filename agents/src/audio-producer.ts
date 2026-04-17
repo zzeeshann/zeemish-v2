@@ -50,8 +50,19 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       // Generate audio via ElevenLabs
       const audioBuffer = await this.callElevenLabs(plainText);
 
-      // Save to R2
+      // Save to R2 — only if it doesn't already exist (published audio is permanent)
       const r2Key = `audio/${brief.courseSlug}/${String(brief.lessonNumber).padStart(2, '0')}/${beat.name}.mp3`;
+      const existing = await this.env.AUDIO_BUCKET.head(r2Key);
+      if (existing) {
+        // Audio already exists — skip, don't overwrite
+        beatAudioPaths.push({
+          beatName: beat.name,
+          r2Key,
+          publicUrl: `/${r2Key}`,
+          characterCount: plainText.length,
+        });
+        continue;
+      }
       await this.env.AUDIO_BUCKET.put(r2Key, audioBuffer, {
         httpMetadata: { contentType: 'audio/mpeg' },
       });

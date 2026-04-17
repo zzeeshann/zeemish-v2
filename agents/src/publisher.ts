@@ -29,10 +29,13 @@ export class PublisherAgent extends Agent<Env, PublisherState> {
     const filePath = `content/lessons/${brief.courseSlug}/${String(brief.lessonNumber).padStart(2, '0')}-${slug}.mdx`;
     const commitMessage = `feat(lesson): ${brief.courseSlug}/${brief.lessonNumber} — ${brief.title} (agent-authored)`;
 
-    // Check if file already exists (to get its SHA for updates)
+    // HARD RULE: published content is permanent. Never overwrite.
     const existingSha = await this.getFileSha(filePath);
+    if (existingSha) {
+      throw new Error(`Refused to overwrite published piece: ${filePath}`);
+    }
 
-    // Create or update the file via GitHub Contents API
+    // Create new file via GitHub Contents API
     const response = await fetch(
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${filePath}`,
       {
@@ -45,9 +48,8 @@ export class PublisherAgent extends Agent<Env, PublisherState> {
         },
         body: JSON.stringify({
           message: commitMessage,
-          content: btoa(unescape(encodeURIComponent(mdx))), // Base64 encode (handles UTF-8)
+          content: btoa(unescape(encodeURIComponent(mdx))),
           branch: BRANCH,
-          ...(existingSha ? { sha: existingSha } : {}),
         }),
       },
     );
@@ -75,7 +77,11 @@ export class PublisherAgent extends Agent<Env, PublisherState> {
 
   /** Publish to a specific file path (for daily pieces) */
   async publishToPath(filePath: string, mdx: string, commitMessage: string): Promise<PublishResult> {
+    // HARD RULE: published content is permanent. Never overwrite.
     const existingSha = await this.getFileSha(filePath);
+    if (existingSha) {
+      throw new Error(`Refused to overwrite published piece: ${filePath}`);
+    }
 
     const response = await fetch(
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${filePath}`,
@@ -91,7 +97,6 @@ export class PublisherAgent extends Agent<Env, PublisherState> {
           message: commitMessage,
           content: btoa(unescape(encodeURIComponent(mdx))),
           branch: BRANCH,
-          ...(existingSha ? { sha: existingSha } : {}),
         }),
       },
     );
