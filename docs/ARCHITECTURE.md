@@ -21,7 +21,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
-- [x] D1 database: 9 tables (see `docs/SCHEMA.md`)
+- [x] D1 database: 12 tables (see `docs/SCHEMA.md`)
 - [x] Anonymous-first auth middleware (cookie on first API call)
 - [x] Progress API: save beat, mark complete, fetch progress
 - [x] Auth API: email upgrade, login, logout
@@ -31,7 +31,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — 13 core agents built)
+### Stage 4 — Agent Team (complete — 14 agents built (13 core + ScannerAgent))
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — supervisor, scheduled daily at 8am UTC, manual trigger
 - [x] CuratorAgent — lesson planning via Claude API

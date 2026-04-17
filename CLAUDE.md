@@ -21,7 +21,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 1. **Stage 1 — Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Stage 2 — Reader Surface:** Beat-by-beat navigation Web Components, content collections, course pages
 3. **Stage 3 — Accounts & Progress:** Anonymous-first auth, D1 database, progress tracking, email upgrade, magic link login
-4. **Stage 4 — Agent Team:** 13 core agents + Workflows v2, full publishing pipeline with quality gates
+4. **Stage 4 — Agent Team:** 14 agents (13 core + ScannerAgent) + Workflows v2, full publishing pipeline with quality gates
 5. **Stage 5 — First Course:** (course content removed — daily pieces are now primary)
 6. **Stage 6 — Self-Improvement:** Engagement tracking, EngagementAnalyst + Reviser agents, learnings database
 7. **Stage 7 — Zita:** Socratic learning guide in every piece
@@ -72,9 +72,9 @@ src/pages/daily/        Daily piece pages
 src/interactive/        Web Components (lesson-shell, lesson-beat, zita-chat)
 src/lib/                Auth, DB helpers, rate limiting
 src/layouts/            BaseLayout, LessonLayout
-content/lessons/        MDX lesson files (by course)
+content/lessons/        MDX lesson files (reserved for future use)
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-content/courses/        Course metadata
+content/voice-contract.md  Voice rules + Zeemish Protocol
 agents/src/             All 14 agent files + workflows + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation

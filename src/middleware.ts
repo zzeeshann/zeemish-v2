@@ -6,7 +6,7 @@ import { createUser, getUser } from './lib/db';
  * Anonymous-first auth middleware.
  *
  * Only runs on server-rendered routes (API endpoints, account, login).
- * Prerendered pages (home, courses, lessons) skip this entirely —
+ * Prerendered pages (home, daily, library) skip this entirely —
  * they don't have access to D1 at build time.
  *
  * The lesson-shell Web Component calls the API from the client,

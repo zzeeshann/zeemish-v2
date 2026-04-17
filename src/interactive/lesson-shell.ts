@@ -21,11 +21,19 @@ class LessonShell extends HTMLElement {
     return `zeemish-beat:${window.location.pathname}`;
   }
 
-  /** Extract course slug and lesson number from the URL: /courses/{course}/{lesson}/ */
+  /** Extract content info from URL: /courses/{course}/{lesson}/ or /daily/{date}/ */
   private get lessonInfo(): { course_slug: string; lesson_number: number } | null {
-    const match = window.location.pathname.match(/\/courses\/([^/]+)\/(\d+)\/?/);
-    if (!match) return null;
-    return { course_slug: match[1], lesson_number: parseInt(match[2], 10) };
+    // Match course lessons: /courses/{slug}/{number}/
+    const courseMatch = window.location.pathname.match(/\/courses\/([^/]+)\/(\d+)\/?/);
+    if (courseMatch) {
+      return { course_slug: courseMatch[1], lesson_number: parseInt(courseMatch[2], 10) };
+    }
+    // Match daily pieces: /daily/{date}/
+    const dailyMatch = window.location.pathname.match(/\/daily\/(\d{4}-\d{2}-\d{2})\/?/);
+    if (dailyMatch) {
+      return { course_slug: 'daily', lesson_number: 0 };
+    }
+    return null;
   }
 
   connectedCallback() {

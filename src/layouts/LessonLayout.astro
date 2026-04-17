@@ -28,7 +28,7 @@ const timeDisplay = estimatedTime?.includes('min') ? estimatedTime : `${estimate
       <>
         <a href="/library/" class="hover:text-zee-primary transition-colors">Library</a>
         <span class="mx-2">/</span>
-        <a href={`/courses/${courseSlug}/`} class="hover:text-zee-primary transition-colors">{courseTitle}</a>
+        <span class="text-zee-text">{courseTitle}</span>
         {lessonNumber > 0 && (
           <>
             <span class="mx-2">/</span>

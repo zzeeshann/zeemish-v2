@@ -2,22 +2,7 @@ import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
 
 /**
- * Courses collection — one MDX file per course with metadata.
- * Lives in content/courses/
- */
-const courses = defineCollection({
-  loader: glob({ pattern: '**/*.mdx', base: './content/courses' }),
-  schema: z.object({
-    title: z.string(),
-    slug: z.string(),
-    description: z.string(),
-    estimatedTotalTime: z.string(),
-    lessonCount: z.number(),
-  }),
-});
-
-/**
- * Lessons collection — MDX files organised by course subdirectory.
+ * Lessons collection — kept for any future course-style content.
  * Lives in content/lessons/{course-slug}/
  */
 const lessons = defineCollection({
@@ -34,7 +19,7 @@ const lessons = defineCollection({
 });
 
 /**
- * Daily pieces collection — news-driven teaching pieces.
+ * Daily pieces collection — the primary content unit.
  * Lives in content/daily-pieces/
  * Filename format: YYYY-MM-DD-{slug}.mdx
  */
@@ -52,4 +37,4 @@ const dailyPieces = defineCollection({
   }),
 });
 
-export const collections = { courses, lessons, dailyPieces };
+export const collections = { lessons, dailyPieces };

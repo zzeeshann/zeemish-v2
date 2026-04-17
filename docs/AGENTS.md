@@ -94,7 +94,7 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 
 ```bash
 # Trigger a lesson pipeline (requires auth)
-POST /trigger?course=body&lesson=3
+POST /trigger?course=attention&lesson=1
 # Header: Authorization: Bearer <ADMIN_SECRET>
 
 # Director status
@@ -111,7 +111,7 @@ POST /daily-trigger
 # Header: Authorization: Bearer <ADMIN_SECRET>
 
 # Engagement report for a course
-GET /engagement?course=body
+GET /engagement?course=attention
 ```
 
 ## How to deploy

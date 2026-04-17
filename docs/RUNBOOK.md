@@ -135,16 +135,17 @@ git revert <commit-sha>                # Creates a revert commit
 git push                               # Triggers auto-deploy
 ```
 
-## Add a lesson manually
-Create an MDX file at `content/lessons/{course}/{nn}-{slug}.mdx`:
+## Add a daily piece manually
+Create an MDX file at `content/daily-pieces/YYYY-MM-DD-{slug}.mdx`:
 ```yaml
 ---
-title: "Lesson title"
-course: "body"
-lessonNumber: 2
-estimatedTime: "20 min"
+title: "How interest rates actually work"
+date: "2026-04-17"
+newsSource: "Reuters"
+underlyingSubject: "monetary policy"
+estimatedTime: "10 min"
 beatCount: 5
-description: "One-line description."
+description: "The ECB just cut rates. Here's what that means."
 ---
 
 <lesson-shell>
@@ -160,7 +161,7 @@ Then `pnpm build && wrangler deploy`.
 ```
 zeemish-v2/
 ├── src/                    Astro site (pages, components, layouts)
-│   ├── pages/              Routes (index, courses, account, login, dashboard, API)
+│   ├── pages/              Routes (index, daily, library, account, login, dashboard, API)
 │   ├── components/         Astro components (AudioPlayer)
 │   ├── layouts/            BaseLayout, LessonLayout
 │   ├── interactive/        Web Components (lesson-shell, lesson-beat, zita-chat)

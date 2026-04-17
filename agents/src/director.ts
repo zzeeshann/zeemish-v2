@@ -63,12 +63,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     error: null,
   };
 
-  /** Set up daily scheduled runs on first activation */
+  /** Set up daily scheduled run on first activation */
   async onStart() {
-    // Scanner runs at 6:00 AM UTC
+    // Daily piece pipeline at 6:00 AM UTC (weekdays)
     await this.schedule('0 6 * * *', 'dailyRun', { type: 'daily-piece' });
-    // Course lessons at 8:00 AM UTC
-    await this.schedule('0 8 * * *', 'autonomousRun', { type: 'course-lesson' });
   }
 
   /**
