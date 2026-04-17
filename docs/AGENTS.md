@@ -6,6 +6,10 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
 **14 agents deployed** (13 from the original architecture + ScannerAgent for Daily Pieces).
 
+## Hard rule for all agents
+
+**Published pieces are permanent. Any agent can READ old pieces to learn from them. No agent WRITES to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
+
 ## Agents (all 14)
 
 ### DirectorAgent

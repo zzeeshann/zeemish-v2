@@ -2,6 +2,12 @@
 
 The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. This file tracks what's **actually built** vs. what's planned.
 
+## Hard rule: published content is permanent
+
+**Published pieces are permanent. Any agent can READ old pieces to learn from them. No agent WRITES to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
+
+This applies to every agent. No exceptions. The past stays. The future gets better.
+
 ## What's built
 
 ### Stage 1 — Foundation (complete)
