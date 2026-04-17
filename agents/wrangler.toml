@@ -13,13 +13,6 @@ enabled = true
 name = "DIRECTOR"
 class_name = "DirectorAgent"
 
-[[durable_objects.bindings]]
-name = "CURATOR"
-class_name = "CuratorAgent"
-
-[[durable_objects.bindings]]
-name = "DRAFTER"
-class_name = "DrafterAgent"
 
 [[durable_objects.bindings]]
 name = "VOICE_AUDITOR"
@@ -98,6 +91,10 @@ renamed_classes = [{from = "ReviserAgent", to = "LearnerAgent"}]
 tag = "v9"
 deleted_classes = ["EngagementAnalystAgent"]
 
+[[migrations]]
+tag = "v10"
+deleted_classes = ["CuratorAgent", "DrafterAgent"]
+
 # R2 bucket for audio storage
 [[r2_buckets]]
 binding = "AUDIO_BUCKET"
@@ -109,9 +106,6 @@ binding = "DB"
 database_name = "zeemish"
 database_id = "f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4"
 
-# Environment variables
-[vars]
-MAX_LESSONS_PER_DAY = "2"
 
 # Secrets (set via: wrangler secret put ANTHROPIC_API_KEY)
 # ANTHROPIC_API_KEY — required for Claude API calls

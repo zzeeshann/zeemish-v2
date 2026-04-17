@@ -2,13 +2,11 @@ import { routeAgentRequest } from 'agents';
 import { getAgentByName } from 'agents';
 import type { Env } from './types';
 import { DirectorAgent } from './director';
-import { CuratorAgent } from './curator';
-import { DrafterAgent } from './drafter';
 import { ObserverAgent } from './observer';
 import { LearnerAgent } from './learner';
 
 // Re-export for Durable Object bindings
-export { DirectorAgent, CuratorAgent, DrafterAgent };
+export { DirectorAgent };
 export { VoiceAuditorAgent } from './voice-auditor';
 export { StructureEditorAgent } from './structure-editor';
 export { FactCheckerAgent } from './fact-checker';
@@ -51,7 +49,7 @@ function corsHeaders(request: Request): Record<string, string> {
  * Entry point for the zeemish-agents Worker.
  *
  * Routes:
- * - POST /trigger?course=slug&lesson=number — kick off a lesson pipeline
+ * - POST /daily-trigger — produce today's daily piece
  * - GET /status — get Director status
  * - /agents/* — Agent SDK routing (WebSocket, RPC)
  */
@@ -179,7 +177,7 @@ export default {
       JSON.stringify({
         service: 'zeemish-agents',
         endpoints: {
-          trigger: 'POST /trigger?course=slug&lesson=number',
+          'daily-trigger': 'POST /daily-trigger (requires auth)',
           status: 'GET /status',
         },
       }),

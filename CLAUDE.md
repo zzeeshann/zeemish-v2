@@ -10,18 +10,18 @@
 
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 13 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, generate audio, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
+An autonomous multi-agent publishing system. 11 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
 
 ## Current state
 
-**Complete.** 13 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Courses removed — daily pieces are the primary content.
+**Complete.** 11 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
 
 ## What was built
 
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 13 agents on Cloudflare Agents SDK + Workflows v2, full pipeline with quality gates
+4. **Agent Team:** 11 agents on Cloudflare Agents SDK, full pipeline with quality gates
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
@@ -31,31 +31,29 @@ An autonomous multi-agent publishing system. 13 AI agents scan the news, decide 
 
 ### Two Workers
 - **zeemish-v2** — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
-- **zeemish-agents** — 13 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-agents** — 11 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
 - Backend: Cloudflare Workers (Astro adapter) + D1 (12 tables) + R2 (audio)
-- Agents: Cloudflare Agents SDK v0.11.1 + Workflows v2
+- Agents: Cloudflare Agents SDK v0.11.1
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
 - Email: Resend (magic link from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
-### The 13 Agents (12 public + Observer internal)
+### The 11 Agents (10 public + Observer internal)
 1. **ScannerAgent** — reads the news every morning
 2. **DirectorAgent** — picks the most teachable story, scheduled daily 2am UTC
-3. **CuratorAgent** — plans the piece structure
-4. **DrafterAgent** — writes the piece via Claude
-5. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
-6. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
-7. **StructureEditorAgent** — reviews flow and pacing
-8. **IntegratorAgent** — handles revisions before approval (3 rounds max)
-9. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2
-10. **AudioAuditorAgent** — checks pronunciation and audio quality
-11. **PublisherAgent** — commits to GitHub, piece goes live
-12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
-13. **ObserverAgent** — (internal) logs events for admin dashboard
+3. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
+4. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
+5. **StructureEditorAgent** — reviews flow and pacing
+6. **IntegratorAgent** — handles revisions before approval (3 rounds max)
+7. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2
+8. **AudioAuditorAgent** — checks pronunciation and audio quality
+9. **PublisherAgent** — commits to GitHub, piece goes live
+10. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
+11. **ObserverAgent** — (internal) logs events for admin dashboard
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
@@ -73,10 +71,10 @@ src/pages/              Routes (index, daily, library, dashboard, account, login
 src/pages/api/dashboard/ Dashboard API (today, recent, stats, analytics, observer)
 src/interactive/        Web Components (lesson-shell, lesson-beat, zita-chat)
 src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate, formatTime)
-src/styles/             global.css (Tailwind) + beats.css (standalone, not Tailwind-processed)
+src/styles/             global.css (Tailwind) + beats.css + zita.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             All 13 agent files + workflows + shared code
+agents/src/             All 11 agent files + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation
 docs/handoff/           Original architecture + specs
@@ -101,7 +99,7 @@ docs/handoff/           Original architecture + specs
 
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
-- `docs/AGENTS.md` — all 13 agents, endpoints, secrets
+- `docs/AGENTS.md` — all 11 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 12 D1 tables, 6 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)

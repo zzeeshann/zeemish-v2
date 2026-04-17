@@ -26,8 +26,8 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
 
   /** Log a lesson being published successfully */
   async logPublished(
-    courseSlug: string,
-    lessonNumber: number,
+    source: string,
+    _unused: number,
     title: string,
     voiceScore: number,
     revisionCount: number,
@@ -36,15 +36,15 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     await this.writeEvent({
       severity: 'info',
       title: `Published: ${title}`,
-      body: `Lesson ${lessonNumber} of "${courseSlug}" passed all gates (voice: ${voiceScore}/100, ${revisionCount} revision${revisionCount !== 1 ? 's' : ''}) and was committed to the repo.`,
-      context: { courseSlug, lessonNumber, voiceScore, revisionCount, commitUrl },
+      body: `"${title}" passed all gates and was committed to the repo.`,
+      context: { source, voiceScore, revisionCount, commitUrl },
     });
   }
 
-  /** Log a lesson that failed after max revisions */
+  /** Log a piece that failed after max revisions */
   async logEscalation(
-    courseSlug: string,
-    lessonNumber: number,
+    source: string,
+    _unused: number,
     title: string,
     voiceScore: number,
     rounds: number,
@@ -53,22 +53,22 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     await this.writeEvent({
       severity: 'escalation',
       title: `Escalation: ${title}`,
-      body: `Lesson ${lessonNumber} of "${courseSlug}" failed after ${rounds} revision rounds. Failed gates: ${failedGates.join(', ')}. Voice score: ${voiceScore}/100. Needs manual review.`,
-      context: { courseSlug, lessonNumber, voiceScore, rounds, failedGates },
+      body: `"${title}" failed after ${rounds} revision rounds. Failed gates: ${failedGates.join(', ')}. Needs manual review.`,
+      context: { source, voiceScore, rounds, failedGates },
     });
   }
 
   /** Log a pipeline error */
   async logError(
-    courseSlug: string,
-    lessonNumber: number,
+    source: string,
+    _unused: number,
     error: string,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
-      title: `Error: ${courseSlug}/lesson-${lessonNumber}`,
+      title: `Error: ${source}`,
       body: `Pipeline error: ${error}`,
-      context: { courseSlug, lessonNumber, error },
+      context: { source, error },
     });
   }
 

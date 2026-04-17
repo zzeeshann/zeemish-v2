@@ -36,7 +36,7 @@ CHECK:
 4. Teaching beats total 1500-2500 words
 5. Close is ONE sentence — no summary, no CTA, no congratulations
 6. Proper <lesson-shell> and <lesson-beat> tags
-7. Valid MDX frontmatter (title, course, lessonNumber, estimatedTime, beatCount, description)
+7. Valid MDX frontmatter (title, date, newsSource, underlyingSubject, estimatedTime, beatCount, description)
 8. No padding, no filler paragraphs
 
 IMPORTANT: Be reasonable. Minor formatting differences or slight word count variations are NOT failures. Only flag genuine structural problems that would hurt the reader experience. If the lesson is well-structured overall, pass it.
