@@ -11,13 +11,13 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] GitHub Actions CI/CD (auto-deploys both site and agents on push to main)
 
 ### Stage 2 — Reader Surface (complete)
-- [x] Content collections (courses + lessons) with Zod schemas
-- [x] `<lesson-shell>` + `<lesson-beat>` Web Components for beat navigation
-- [x] 12 lessons in "The body you live in" course
-- [x] Course page, catalogue, home page with course cards
+- [x] Content collections (dailyPieces) with Zod schemas
+- [x] `<lesson-shell>` + `<lesson-beat>` Web Components for beat navigation (one beat at a time)
+- [x] Beat CSS in standalone `src/styles/beats.css` (not Tailwind-processed, survives purging)
 - [x] AudioPlayer component (shell — real audio via R2 when generated)
 - [x] BaseLayout + LessonLayout with breadcrumbs
 - [x] Progressive enhancement (without JS, beats show as long scroll)
+- [x] `formatDate()` and `formatTime()` helpers in `src/lib/format.ts`
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
@@ -38,7 +38,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] DrafterAgent — MDX generation via Claude API
 - [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass
 - [x] StructureEditorAgent — reviews beat structure, pacing
-- [x] FactCheckerAgent — verifies claims (Claude reasoning only, no web search yet)
+- [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search)
 - [x] IntegratorAgent — merges audit feedback, revises draft, up to 3 rounds
 - [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey), saves MP3 to R2
 - [x] AudioAuditorAgent — verifies audio files in R2, checks sizes
@@ -48,7 +48,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] ReviserAgent — proposes revisions from engagement signals via Claude
 - [x] Full pipeline: Curate → Draft → 3 parallel auditors → Revise → Audio → Publish
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
-- [x] Dashboard at `/dashboard/` (requires email account, has manual trigger)
+- [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
 - [x] Audit results persisted to D1 `audit_results` table
 - [x] R2 bucket `zeemish-audio` for audio storage
 

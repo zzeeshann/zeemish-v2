@@ -1,12 +1,12 @@
 # Zeemish v2 — Claude Code Context
 
-**Read this first. Then read `docs/handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md` for the original architecture and `docs/handoff/ZEEMISH-DAILY-PIECES.md` for the daily content system.**
+**Read this first. Then read `docs/handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md` and `docs/handoff/ZEEMISH-DAILY-PIECES.md`.**
 
 ## The Zeemish Protocol
 
 **"Educate myself for humble decisions."**
 
-Every piece, every agent, every design choice serves this purpose.
+"Most human suffering — personal, in organisations, and across the world — comes from treating connected things as if they were separate. The cure is learning to see and work with the whole."
 
 ## What Zeemish v2 is
 
@@ -14,25 +14,24 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 
 ## Current state
 
-**Complete.** All stages built + Daily Pieces system. 14 agents deployed, 12-lesson course live, daily news-driven teaching operational. Security hardened.
+**Complete.** 14 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Courses removed — daily pieces are the primary content.
 
-## What was built (in order)
+## What was built
 
-1. **Stage 1 — Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
-2. **Stage 2 — Reader Surface:** Beat-by-beat navigation Web Components, content collections, course pages
-3. **Stage 3 — Accounts & Progress:** Anonymous-first auth, D1 database, progress tracking, email upgrade, magic link login
-4. **Stage 4 — Agent Team:** 14 agents (13 core + ScannerAgent) + Workflows v2, full publishing pipeline with quality gates
-5. **Stage 5 — First Course:** (course content removed — daily pieces are now primary)
-6. **Stage 6 — Self-Improvement:** Engagement tracking, EngagementAnalyst + Reviser agents, learnings database
-7. **Stage 7 — Zita:** Socratic learning guide in every piece
-8. **Daily Pieces System:** ScannerAgent (#14), Director daily mode, news-driven teaching every weekday morning
-9. **Content Cleanup:** Courses removed, Library replaces Courses, nav: Daily · Library · Dashboard · Account
+1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
+2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
+3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
+4. **Agent Team:** 14 agents on Cloudflare Agents SDK + Workflows v2, full pipeline with quality gates
+5. **Self-Improvement:** Engagement tracking, EngagementAnalyst + Reviser, learnings database
+6. **Zita:** Socratic learning guide in every piece
+7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
+8. **Dashboard:** Public factory floor (/dashboard/) + admin control room (/dashboard/admin/)
 
 ## Architecture
 
 ### Two Workers
-- **zeemish-v2** (`wrangler.toml`) — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
-- **zeemish-agents** (`agents/wrangler.toml`) — 14 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-v2** — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
+- **zeemish-agents** — 14 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
@@ -40,8 +39,8 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 - Agents: Cloudflare Agents SDK v0.11.1 + Workflows v2
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
-- Email: Resend (magic link login from hello@zeemish.io)
-- Deploy: GitHub Actions → Cloudflare (both workers auto-deploy on push)
+- Email: Resend (magic link from hello@zeemish.io)
+- Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
 ### The 14 Agents
 1. **DirectorAgent** — supervisor, scheduled daily 2am UTC
@@ -57,64 +56,68 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 11. **ObserverAgent** — event logging, daily digest
 12. **EngagementAnalystAgent** — reads completion/drop-off data
 13. **ReviserAgent** — proposes improvements from engagement signals
-14. **ScannerAgent** — fetches Google News RSS, stores daily candidates in D1
+14. **ScannerAgent** — fetches Google News RSS, stores daily candidates
+
+### Dashboard
+- **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
+- **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
 ### Database (D1 — 12 tables, 6 migrations)
-See `docs/SCHEMA.md` for full details.
+See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: agent_tasks, observer_events, engagement, learnings, audit_results
 - Daily: daily_candidates, daily_pieces
 
 ### Key directories
 ```
-src/pages/              Astro pages + API routes
-src/pages/daily/        Daily piece pages
+src/pages/              Routes (index, daily, library, dashboard, account, login, API)
+src/pages/api/dashboard/ Dashboard API (today, recent, stats, analytics, observer)
 src/interactive/        Web Components (lesson-shell, lesson-beat, zita-chat)
-src/lib/                Auth, DB helpers, rate limiting
+src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate, formatTime)
+src/styles/             global.css (Tailwind) + beats.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
-content/lessons/        MDX lesson files (reserved for future use)
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-content/voice-contract.md  Voice rules + Zeemish Protocol
 agents/src/             All 14 agent files + workflows + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation
-docs/handoff/           Original architecture + daily pieces documents
+docs/handoff/           Original architecture + specs
 ```
 
-### Security measures
+### Security
 - Session cookies: HttpOnly, Secure, SameSite=Lax
-- Password hashing: PBKDF2 100k iterations with timing-safe comparison
-- CSRF: Origin header check (strict URL parsing) on all POST requests
-- Rate limiting: login (5/15min), Zita chat (20/15min), upgrade (5/15min)
-- Agents: ADMIN_SECRET bearer token on all admin endpoints + CORS preflight
-- Dashboard: requires authenticated user with email
+- Passwords: PBKDF2 100k iterations, timing-safe comparison
+- CSRF: origin header check (strict URL parsing)
+- Rate limiting: login (5/15min), Zita (20/15min), upgrade (5/15min)
+- Agents: ADMIN_SECRET bearer token, CORS restricted to allowed origins + preflight
+- Dashboard: public view (no auth), admin view (ADMIN_EMAIL gated)
 - Input validation: JSON try-catch, message length limits
-- CSP header, X-Frame-Options DENY, restricted CORS origins
+- CSP header, X-Frame-Options DENY
 
 ### Secrets (never in code)
-**Site worker:** ANTHROPIC_API_KEY, RESEND_API_KEY, AGENTS_ADMIN_SECRET
+**Site worker:** ANTHROPIC_API_KEY, RESEND_API_KEY, AGENTS_ADMIN_SECRET, ADMIN_EMAIL
 **Agents worker:** ANTHROPIC_API_KEY, GITHUB_TOKEN, ELEVENLABS_API_KEY, ADMIN_SECRET
 
+### Site navigation
+**Daily · Library · Dashboard · Account**
+
 ## Documentation index
-- `docs/ARCHITECTURE.md` — what's built vs. what's planned, deviations
-- `docs/AGENTS.md` — all 14 agents, endpoints, secrets, limitations
-- `docs/SCHEMA.md` — all 12 D1 tables with column details, 6 migrations
-- `docs/RUNBOOK.md` — how to run, deploy, trigger, query, revert
-- `docs/DECISIONS.md` — technical decisions (append-only log)
-- `docs/handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md` — the original plan
-- `docs/handoff/ZEEMISH-DAILY-PIECES.md` — daily content system design
+- `docs/ARCHITECTURE.md` — what's built, deviations from plan
+- `docs/AGENTS.md` — all 14 agents, endpoints, secrets
+- `docs/SCHEMA.md` — all 12 D1 tables, 6 migrations
+- `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
+- `docs/DECISIONS.md` — technical decisions (append-only)
+- `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
 
 ## Remaining minor items
-- Voice contract duplicated in `content/voice-contract.md` and `agents/src/shared/voice-contract.ts`
-- Rate limiter is in-memory (resets on Worker restart)
+- Voice contract .ts copy missing belief line (don't update until pipeline runs daily)
 - Audio-Auditor does file checks only (no STT round-trip)
-- CSP uses `unsafe-inline` for scripts (required by Astro)
 - Weekend daily pieces not yet implemented (weekdays only)
+- Rate limiter is in-memory (resets on Worker restart)
+- CSP uses `unsafe-inline` for scripts (required by Astro)
 
 ## Key rules
 - TypeScript strict everywhere
-- No React/Vue as whole-site framework (Astro islands OK)
 - No new dependencies without justification
 - Docs updated alongside code, same commit
-- Explain decisions as you build (Zishan is learning)
 - Voice contract: plain English, no jargon, no tribe words, short sentences
+- When in doubt: "Does this help someone educate themselves for humble decisions?"

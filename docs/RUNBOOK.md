@@ -56,6 +56,7 @@ Also auto-deploys on every push to `main` via GitHub Actions (same as site).
 wrangler secret put ANTHROPIC_API_KEY    # For Zita chat
 wrangler secret put AGENTS_ADMIN_SECRET  # For dashboard trigger proxy
 wrangler secret put RESEND_API_KEY       # For magic link emails
+wrangler secret put ADMIN_EMAIL          # For admin dashboard access
 ```
 
 ### Agents worker
@@ -88,12 +89,12 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events OR
 
 ### Via curl (requires ADMIN_SECRET)
 ```bash
-curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/trigger?course=body&lesson=3" \
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
   -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
 
 ### Via dashboard
-Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/ and use the trigger form.
+Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/ and use the trigger button (requires ADMIN_EMAIL login).
 
 ### Check status
 ```bash
@@ -124,7 +125,21 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/digest"
 curl "https://zeemish-agents.zzeeshann.workers.dev/events?limit=10"
 
 # Engagement report
-curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=body"
+curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+## Dashboard API endpoints (site worker)
+```bash
+# Public (no auth):
+GET /api/dashboard/today      # Today's pipeline status + scores
+GET /api/dashboard/recent     # Last 7 pieces
+GET /api/dashboard/stats      # Library counters
+
+# Admin only (ADMIN_EMAIL):
+GET  /api/dashboard/analytics # Engagement data
+GET  /api/dashboard/observer  # Observer events
+POST /api/dashboard/observer  # Acknowledge event { eventId }
 ```
 
 ## Revert a bad publish
@@ -169,8 +184,7 @@ zeemish-v2/
 │   ├── styles/             Global CSS
 │   └── middleware.ts       Anonymous auth middleware
 ├── content/                MDX content
-│   ├── courses/            Course metadata (body.mdx)
-│   ├── lessons/            Lesson MDX files by course
+│   ├── daily-pieces/       Daily teaching pieces (YYYY-MM-DD-slug.mdx)
 │   ├── voice-contract.md   Voice rules for agents
 │   └── subject-values.json Subject priorities
 ├── agents/                 Separate Cloudflare Worker
