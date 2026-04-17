@@ -24,7 +24,7 @@ The reader gets the news *and* the education they need to actually understand it
 
 ## The flow — end to end
 
-### 6:00 AM UTC — The Scanner wakes up
+### 2:00 AM UTC — The Scanner wakes up
 
 A new agent: the **Scanner**. Its only job is to gather raw material.
 
@@ -46,7 +46,7 @@ The Scanner fetches headlines + short descriptions from all sources. Deduplicate
 
 Saves the list to D1 as `daily_candidates` for this date.
 
-### 6:15 AM UTC — The Director evaluates
+### 2:15 AM UTC — The Director evaluates
 
 The Director reads the candidate list and picks **one story**. Selection criteria (baked into the Director's system prompt):
 
@@ -72,7 +72,7 @@ The Director produces a **brief**:
 }
 ```
 
-### 6:30 AM UTC — The Curator structures the piece
+### 2:30 AM UTC — The Curator structures the piece
 
 The Curator takes the brief and produces the **beat plan**:
 
@@ -114,11 +114,11 @@ The Curator takes the brief and produces the **beat plan**:
 }
 ```
 
-### 7:00 AM UTC — The Drafter writes
+### 3:00 AM UTC — The Drafter writes
 
 The Drafter takes the beat plan + voice contract + the brief's tone note + recent learnings. Produces MDX. 1000-1500 words across all beats.
 
-### 7:15 AM UTC — The auditors check (in parallel)
+### 3:15 AM UTC — The auditors check (in parallel)
 
 - **Voice-Auditor**: Does it sound like Zeemish? Score ≥85 to pass.
 - **Fact-Checker**: Are the claims about ECB rates, mortgage mechanics, employment effects accurate? Uses web search to verify.
@@ -126,11 +126,11 @@ The Drafter takes the beat plan + voice contract + the brief's tone note + recen
 
 If all pass → forward. If any fail → Integrator revises, resubmits. Max 3 loops.
 
-### 7:30 AM UTC — Audio generation
+### 3:30 AM UTC — Audio generation
 
 Audio-Producer generates MP3 per beat. Audio-Auditor checks for pronunciation issues (e.g., "ECB" should be spelled out, "Frankfurt" pronounced correctly).
 
-### 7:45 AM UTC — Interactive component (if needed)
+### 3:45 AM UTC — Interactive component (if needed)
 
 **New step for daily pieces.** If the beat plan includes an interactive exercise (like the rate slider), the system needs to handle it. Two options:
 
@@ -140,11 +140,11 @@ Audio-Producer generates MP3 per beat. Audio-Auditor checks for pronunciation is
 
 For v1: Option B. The system publishes text + audio daily. Interactive components are added by you when you have time, and the piece gets better retroactively. For v2 later: an agent that can generate simple interactive components from a spec.
 
-### 8:00 AM UTC — Publisher ships
+### 4:00 AM UTC — Publisher ships
 
 MDX + audio committed to repo. Astro builds. Live at `zeemish.io/daily/2026-04-17/` within 60 seconds.
 
-### 8:01 AM UTC — Observer logs
+### 4:01 AM UTC — Observer logs
 
 Observer writes a summary: "Published: 'How interest rates actually work' (hook: ECB rate cut). Voice: 91. Facts: verified. 1247 words. 5 beats. Audio: 9 minutes 12 seconds. No interactive component today (rate-slider flagged for manual build)."
 
@@ -281,14 +281,14 @@ Recommendation: **option 3.** It gives the system two modes — reactive (weekda
 
 ### 3. What about time zones?
 
-Publishing at 8am UTC means:
-- 8am in London (perfect)
-- 9am in Frankfurt (good)
-- 1:30pm in Delhi (fine, lunch reading)
-- 4pm in Beijing (afternoon)
-- 3am in New York (they wake up to it)
+Publishing by 4am UTC means:
+- 4am in London (ready before anyone wakes)
+- 5am in Frankfurt (ready before anyone wakes)
+- 9:30am in Delhi (morning reading)
+- 12pm in Beijing (lunch)
+- 11pm in New York (previous evening — they wake up to it)
 
-UTC morning works for a global audience. The piece is there when each timezone wakes up.
+Early UTC means the piece is ready when each timezone wakes up.
 
 ### 4. What about bias?
 
@@ -342,7 +342,7 @@ Tell Claude Code:
 7. **Weekend mode** — evergreen pieces from subject-values, not news-driven
 8. **Skip threshold** — if no candidate is teachable enough, publish "from the archive" instead
 9. **New schema tables** — `daily_candidates`, `daily_pieces`
-10. **8am UTC daily trigger** — Scanner at 6:00, Director at 6:15, pipeline 6:30-8:00, published by 8:00
+10. **2am UTC daily trigger** — Scanner at 2:00, Director at 2:15, pipeline 2:00-4:00, published by 4:00
 
 ---
 

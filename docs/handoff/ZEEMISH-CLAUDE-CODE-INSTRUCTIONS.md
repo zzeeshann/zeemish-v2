@@ -173,9 +173,9 @@ This becomes part of what the Voice Auditor checks against.
 
 The `ZEEMISH-DAILY-PIECES.md` in the handoff folder describes the full daily pipeline. If it hasn't been fully integrated into the architecture docs yet, do so now. Key points to ensure are documented:
 
-- Scanner agent fetches Google News RSS at 6:00 AM UTC
-- Director picks one story at 6:15 AM UTC based on teachability
-- Pipeline runs 6:30-8:00 AM UTC
+- Scanner agent fetches Google News RSS at 2:00 AM UTC
+- Director picks one story at 2:15 AM UTC based on teachability
+- Pipeline runs 2:00-4:00 AM UTC
 - Daily piece format: 4-6 beats, 1000-1500 words
 - Three quality gates in parallel (voice ≥85, zero unverified facts, structure approved)
 - Max 3 revision loops before escalation
