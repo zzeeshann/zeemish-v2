@@ -2,16 +2,15 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
 
-const courses = await getCollection('courses');
 const dailyPieces = await getCollection('dailyPieces');
-const sortedPieces = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
-const todaysPiece = sortedPieces[0]; // Most recent
-const recentPieces = sortedPieces.slice(1, 8); // Last 7
+const sorted = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
+const todaysPiece = sorted[0];
+const recentPieces = sorted.slice(1, 6);
 ---
 
-<BaseLayout title="Zeemish" description="Learn things that matter. Every day.">
+<BaseLayout title="Zeemish" description="Educate yourself for humble decisions.">
 
-  <!-- Today's piece (if exists) -->
+  <!-- Today's piece -->
   {todaysPiece ? (
     <section class="py-10 md:py-16">
       <span class="text-xs font-medium text-zee-gold uppercase tracking-wide">Today</span>
@@ -19,13 +18,13 @@ const recentPieces = sortedPieces.slice(1, 8); // Last 7
         <h1 class="text-3xl md:text-4xl font-bold leading-tight group-hover:text-zee-primary transition-colors">
           {todaysPiece.data.title}
         </h1>
-        <p class="text-lg text-zee-muted mt-3 max-w-xl">{todaysPiece.data.description}</p>
+        <p class="text-lg text-zee-muted mt-3 max-w-xl leading-relaxed">{todaysPiece.data.description}</p>
         <div class="flex items-center gap-3 mt-4 text-sm text-zee-muted">
           <span>{todaysPiece.data.estimatedTime}</span>
-          {todaysPiece.data.newsSource && (
+          {todaysPiece.data.underlyingSubject && (
             <>
               <span>&middot;</span>
-              <span>{todaysPiece.data.newsSource}</span>
+              <span>{todaysPiece.data.underlyingSubject}</span>
             </>
           )}
         </div>
@@ -35,30 +34,21 @@ const recentPieces = sortedPieces.slice(1, 8); // Last 7
   ) : (
     <section class="py-16 md:py-24">
       <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
-        Learn things that matter.
+        Educate yourself for humble decisions.
       </h1>
-      <p class="text-lg text-zee-muted max-w-md leading-relaxed mb-8">
-        Short lessons on subjects worth knowing. Plain language. No filler.
+      <p class="text-lg text-zee-muted max-w-md leading-relaxed">
+        Every morning, one piece. Today's news, explained. The machinery behind the headlines.
       </p>
-      <a
-        href="/courses/"
-        class="inline-flex items-center gap-2 px-5 py-2.5 bg-zee-primary text-white rounded-lg font-medium hover:opacity-90 transition-opacity"
-      >
-        Browse courses
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </a>
       <div class="mt-12 h-px w-16 bg-zee-gold"></div>
     </section>
   )}
 
-  <!-- Recent pieces -->
+  <!-- From the library -->
   {recentPieces.length > 0 && (
     <section class="mb-12">
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide">Recent</h2>
-        <a href="/daily/" class="text-sm text-zee-primary hover:underline">All pieces</a>
+        <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide">From the library</h2>
+        <a href="/library/" class="text-sm text-zee-primary hover:underline">All pieces</a>
       </div>
       <div class="space-y-2">
         {recentPieces.map((piece) => (
@@ -66,11 +56,9 @@ const recentPieces = sortedPieces.slice(1, 8); // Last 7
             href={`/daily/${piece.data.date}/`}
             class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
           >
-            <div class="flex-1">
-              <span class="font-medium group-hover:text-zee-primary transition-colors text-sm">
-                {piece.data.title}
-              </span>
-            </div>
+            <span class="font-medium group-hover:text-zee-primary transition-colors text-sm flex-1">
+              {piece.data.title}
+            </span>
             <span class="text-xs text-zee-muted ml-4 shrink-0">{piece.data.date}</span>
           </a>
         ))}
@@ -78,24 +66,8 @@ const recentPieces = sortedPieces.slice(1, 8); // Last 7
     </section>
   )}
 
-  <!-- Courses -->
-  <section>
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Courses</h2>
-    <div class="grid grid-cols-1 gap-6">
-      {courses.map((course) => (
-        <a
-          href={`/courses/${course.data.slug}/`}
-          class="block p-6 rounded-xl border border-zee-border hover:border-zee-primary/30 hover:shadow-sm transition-all group"
-        >
-          <h3 class="text-xl font-bold mb-2 group-hover:text-zee-primary transition-colors">
-            {course.data.title}
-          </h3>
-          <p class="text-zee-muted mb-3">{course.data.description}</p>
-          <p class="text-sm text-zee-muted">
-            {course.data.lessonCount} lessons &middot; {course.data.estimatedTotalTime}
-          </p>
-        </a>
-      ))}
-    </div>
+  <!-- Protocol -->
+  <section class="py-8 text-center">
+    <p class="text-sm text-zee-muted italic">Educate yourself for humble decisions.</p>
   </section>
 </BaseLayout>
