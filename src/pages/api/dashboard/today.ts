@@ -34,8 +34,12 @@ export const GET: APIRoute = async ({ locals }) => {
         underlyingSubject: (piece as any).underlying_subject,
         wordCount: (piece as any).word_count,
         beatCount: (piece as any).beat_count,
-        // Exposed so the dashboard can badge low-quality publishes.
-        // Null for normal, 'low' when gates failed after max revisions.
+        // Kept in the response for future admin tooling. Not currently
+        // consumed by any client — reader-facing tier is derived from
+        // `voiceScore` via src/lib/audit-tier.ts, not from this flag.
+        // Null for normal, 'low' when Director couldn't clear all gates
+        // within MAX_REVISIONS. See docs/DECISIONS.md 2026-04-17
+        // "Soften quality surfacing" for the move from filter to tier.
         qualityFlag: (piece as any).quality_flag ?? null,
       } : null,
       scores: {
