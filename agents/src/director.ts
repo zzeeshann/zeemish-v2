@@ -122,6 +122,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     const brief = curatorResult.brief;
+    // Director owns the publication date — the brief represents "what to
+    // teach," not "when to publish." Overriding here means Drafter's
+    // date-force in MDX frontmatter can never drift from Director's run date,
+    // regardless of what Claude put in the brief.
+    brief.date = today;
     await this.logStep(today, 'curating', 'done', {
       headline: brief.headline, subject: brief.underlyingSubject, newsSource: brief.newsSource,
     });
