@@ -37,24 +37,25 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — 11 agents)
+### Stage 4 — Agent Team (complete — 13 agents, 2 paused)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
-- [x] DirectorAgent — supervisor, scheduled daily at 2am UTC, manual trigger
-- [x] Director handles curating + drafting inline (Curator/Drafter agents removed)
+- [x] DirectorAgent — pure orchestrator, zero LLM calls, scheduled daily at 2am UTC, manual trigger
+- [x] CuratorAgent — picks most teachable story, plans beats (restored from v10 deletion; owns its prompt file)
+- [x] DrafterAgent — writes MDX from brief (restored from v10 deletion; owns its prompt file)
 - [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass
 - [x] StructureEditorAgent — reviews beat structure, pacing
 - [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search)
 - [x] IntegratorAgent — merges audit feedback, revises draft, up to 3 rounds
-- [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey), saves MP3 to R2
-- [x] AudioAuditorAgent — verifies audio files in R2, checks sizes
+- [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey), saves MP3 to R2 — **paused** (excluded from pipeline)
+- [x] AudioAuditorAgent — verifies audio files in R2, checks sizes — **paused** (excluded from pipeline)
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
 - [x] LearnerAgent — watches engagement + writes learnings for future pieces (merged from EngagementAnalyst + Reviser)
-- [x] Full pipeline: Curate → Draft → 3 parallel auditors → Revise → Audio → Publish
+- [x] Full pipeline: Scanner → Curator → Drafter → 3 parallel auditors → Integrator (if any gate fails) → Publisher
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
 - [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
 - [x] Audit results persisted to D1 `audit_results` table
-- [x] R2 bucket `zeemish-audio` for audio storage
+- [x] R2 bucket `zeemish-audio` for audio storage (unused while audio paused)
 
 ### Stage 5 — First Course (removed)
 - Course content deleted — daily pieces are now the primary content unit
@@ -96,9 +97,10 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 ## Deviations from plan
 1. **Single Astro Worker for site + API** instead of separate workers. Avoids CORS.
 2. **Workflows v2 added** — PublishLessonWorkflow wraps the pipeline in durable steps.
-8. **14th agent (ScannerAgent)** added for Daily Pieces — not in original 13-agent architecture.
 3. **Agent code is flat files** (e.g. `scanner.ts`) not subdirectories.
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.
 6. **Daily pieces only** — courses removed, daily news-driven teaching is the only content type.
-7. **Audio failure doesn't block publishing** — text lesson still ships, audio issue logged.
+7. **Audio failure doesn't block publishing** — text lesson still ships, audio issue logged (audio currently paused anyway).
+8. **Audio agents paused by design** — Audio Producer and Audio Auditor exist as files but are not wired into Director's pipeline. Cost control until text pipeline is fully trusted.
+9. **Per-agent prompt files** — `curator-prompt.ts`, `drafter-prompt.ts` sit next to their owners. `shared/prompts.ts` is a tombstone.

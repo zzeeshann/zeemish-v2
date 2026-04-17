@@ -4,79 +4,125 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**11 agents deployed** (10 public + Observer internal).
+**13 agents total.** Audio Producer + Audio Auditor are paused by design (cost control) — Director's pipeline does not reference them, so no ElevenLabs spend is possible by accident.
+
+## Design principles (all agents)
+
+1. **One agent = one job = one file.** No agent reaches into another agent's responsibility.
+2. **One prompt per agent, co-located.** Prompts live in `{agent}-prompt.ts` next to the agent, not in a shared dumping ground.
+3. **Director is a pure orchestrator.** Zero LLM calls. Only routes work between agents.
+4. **Each agent owns its state.** Typed `Agent<Env, XState>` with its own `status` enum describing only its own work.
+5. **Each agent exposes one primary method.** `scan()`, `curate()`, `draft()`, `audit()`, `check()`, `revise()`, `publish()`, `learn()`.
+6. **Typed I/O at every boundary.** No `any`, no JSON blobs between agents.
+7. **Every agent reports to Observer.** Standard event shape for the admin dashboard.
 
 ## Hard rule for all agents
 
 **Published pieces are permanent. Any agent can READ old pieces to learn from them. No agent WRITES to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
 
-## Agents (11 total — 10 public + Observer internal)
+## Pipeline
 
-### DirectorAgent
-- **Role:** Top-level supervisor. Orchestrates the daily piece pipeline.
-- **State:** `{ status, currentTask, lastDailyPiece, error }`
-- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC)
-- **Spawns:** Scanner, auditors, Integrator, Publisher, Observer as sub-agents
-- **Writes pipeline_log:** step-by-step log visible in admin dashboard
+```
+Scanner → Curator → Drafter → [Voice, Structure, Fact] parallel → Integrator → Publisher
+                                                                       ↑
+                                                          (up to 3 revision rounds)
+
+Audio Producer + Auditor: not wired into pipeline (paused)
+Observer: receives events from every agent throughout
+Learner: runs off-pipeline on reader engagement data
+```
+
+## The 13 agents
+
+### 1. ScannerAgent
+- **Role:** Fetches news from Google News RSS (6 categories), deduplicates, stores candidates in D1.
+- **Sources:** TOP, TECHNOLOGY, SCIENCE, BUSINESS, HEALTH, WORLD feeds
+- **Output:** 30–50 daily candidates in `daily_candidates` table
+- **No API key** — uses free Google News RSS
+- **Method:** `scan()`
+- **File:** `agents/src/scanner.ts`
+
+### 2. DirectorAgent
+- **Role:** Pure orchestrator. Routes work between agents. Zero LLM calls.
+- **State:** `{ status: 'idle' | 'running' | 'error', currentPhase, currentTask, lastDailyPiece, error }`
+- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC weekdays)
+- **Spawns:** Scanner, Curator, Drafter, auditors, Integrator, Publisher, Observer as sub-agents
+- **Writes `pipeline_log`:** step-by-step log visible in admin dashboard
 - **File:** `agents/src/director.ts`
 
-### VoiceAuditorAgent
-- **Role:** Reviews drafts against the voice contract. Scores 0-100, must be ≥85.
+### 3. CuratorAgent
+- **Role:** Picks the most teachable story from today's candidates and plans its structure (beats, hooks, teaching angle).
+- **Selection criteria:** Teachability, universality, freshness, depth potential, no culture war.
+- **Input:** `DailyCandidate[]` + recent piece headlines (30-day history)
+- **Output:** `DailyPieceBrief` or `{ skip: true, reason }`
+- **Method:** `curate(candidates, recentPieces)`
+- **File:** `agents/src/curator.ts`
+- **Prompt:** `agents/src/curator-prompt.ts`
+
+### 4. DrafterAgent
+- **Role:** Writes the MDX for a daily piece from a brief. Enforces `<lesson-shell>` / `<lesson-beat>` format and forces the correct date into frontmatter so it can't drift from the run date.
+- **Input:** `DailyPieceBrief`
+- **Output:** `{ mdx, wordCount }`
+- **Method:** `draft(brief)`
+- **File:** `agents/src/drafter.ts`
+- **Prompt:** `agents/src/drafter-prompt.ts`
+
+### 5. VoiceAuditorAgent
+- **Role:** Reviews drafts against the voice contract. Scores 0–100, must be ≥85.
 - **Flags:** Tribe words, flattery, jargon without explanation, padding
+- **Method:** `audit(mdx)`
 - **File:** `agents/src/voice-auditor.ts`
 
-### StructureEditorAgent
-- **Role:** Reviews beat structure, pacing, length. Checks hook, teaching, close rules.
-- **Checks:** 3-6 beats, one idea per beat, valid frontmatter, no filler
-- **File:** `agents/src/structure-editor.ts`
-
-### FactCheckerAgent
+### 6. FactCheckerAgent
 - **Role:** Verifies factual claims. Two-pass: Claude identifies claims, DuckDuckGo verifies unconfirmed ones.
-- **Limitation:** Web search uses DuckDuckGo instant answers (limited depth).
+- **Limitation:** Web search uses DuckDuckGo instant answers (limited depth)
+- **Method:** `check(mdx)`
 - **File:** `agents/src/fact-checker.ts`
 
-### IntegratorAgent
+### 7. StructureEditorAgent
+- **Role:** Reviews beat structure, pacing, length. Checks hook, teaching, close rules.
+- **Checks:** 3–6 beats, one idea per beat, valid frontmatter, no filler
+- **Method:** `review(mdx)`
+- **File:** `agents/src/structure-editor.ts`
+
+### 8. IntegratorAgent
 - **Role:** Takes feedback from all three gates, revises draft, resubmits.
 - **Retry:** Up to 3 revision passes before escalation.
+- **Method:** `revise(mdx, voice, structure, facts)`
 - **File:** `agents/src/integrator.ts`
 
-### PublisherAgent
+### 9. AudioProducerAgent — **PAUSED**
+- **Role (when active):** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.
+- **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk`
+- **Process:** Extract text from each `<lesson-beat>` → strip tags → call ElevenLabs → save MP3 to R2
+- **Paused because:** Audio costs money per generation. Waiting until text pipeline is fully trusted before spending.
+- **Structural fact:** Director's pipeline does not reference this agent. Cannot run by accident.
+- **File:** `agents/src/audio-producer.ts`
+
+### 10. AudioAuditorAgent — **PAUSED**
+- **Role (when active):** Checks generated audio quality — verifies files exist in R2, checks sizes, flags issues.
+- **Note:** Basic file checks only — no STT round-trip yet.
+- **Paused because:** Nothing to audit until Audio Producer is active.
+- **File:** `agents/src/audio-auditor.ts`
+
+### 11. PublisherAgent
 - **Role:** Commits approved MDX to GitHub repo via Contents API.
 - **Only runs when:** All three quality gates pass.
 - **Output:** Commit SHA, commit URL, file path
+- **Method:** `publishToPath(filePath, mdx, commitMsg)`
 - **File:** `agents/src/publisher.ts`
 
-### ObserverAgent
-- **Role:** Logs events (published, escalated, errors) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `getRecentEvents()`, `getDailyDigest()`
-- **File:** `agents/src/observer.ts`
-
-### LearnerAgent
+### 12. LearnerAgent
 - **Role:** Watches reader engagement data (completions, drop-offs, audio vs text, return rate) AND writes patterns into the learnings database for future pieces. Merged from the former EngagementAnalyst + Reviser.
 - **Methods:** `analyse(courseId, days)` — engagement report; `analyseAndLearn(lessonData)` — extract learnings
 - **Output:** Engagement reports + learnings written to D1 `learnings` table
 - **Does NOT touch published content.** Published pieces are permanent.
 - **File:** `agents/src/learner.ts`
 
-### AudioProducerAgent
-- **Role:** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.
-- **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk`
-- **Process:** Extract text from each `<lesson-beat>` → strip tags → call ElevenLabs → save MP3 to R2
-- **Audio generated once per lesson, served forever** (zero cost per play)
-- **File:** `agents/src/audio-producer.ts`
-
-### AudioAuditorAgent
-- **Role:** Checks generated audio quality — verifies files exist in R2, checks sizes, flags issues.
-- **Checks:** File exists, not empty, not suspiciously large, text wasn't too short
-- **Note:** Does not do STT round-trip yet (can be added when Workers AI supports it)
-- **File:** `agents/src/audio-auditor.ts`
-
-### ScannerAgent
-- **Role:** Fetches news from Google News RSS (6 categories), deduplicates, stores candidates in D1.
-- **Sources:** TOP, TECHNOLOGY, SCIENCE, BUSINESS, HEALTH, WORLD feeds
-- **Output:** 30-50 daily candidates in `daily_candidates` table
-- **No API key needed** — uses free Google News RSS
-- **File:** `agents/src/scanner.ts`
+### 13. ObserverAgent
+- **Role:** Logs events (published, escalated, errors) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `getRecentEvents()`, `getDailyDigest()`
+- **File:** `agents/src/observer.ts`
 
 ## Endpoints
 
@@ -105,20 +151,22 @@ wrangler deploy
 ```
 
 ## Secrets (set via `wrangler secret put` in `agents/`)
-- `ANTHROPIC_API_KEY` — Claude API key for all agents
+- `ANTHROPIC_API_KEY` — Claude API key for all agents that use Claude
 - `GITHUB_TOKEN` — GitHub token for Publisher commits
-- `ELEVENLABS_API_KEY` — ElevenLabs API key for Audio-Producer
+- `ELEVENLABS_API_KEY` — ElevenLabs API key for Audio Producer (kept set but unused while paused)
 - `ADMIN_SECRET` — Bearer token for trigger endpoint auth
 
 ## Key shared files
-- `agents/src/types.ts` — Env, state types, LessonBrief, DraftResult
-- `agents/src/shared/prompts.ts` — system prompts for Curator + Drafter
+- `agents/src/types.ts` — Env, per-agent state types, DailyPieceBrief, DailyCandidate, CuratorResult, DrafterResult
+- `agents/src/curator-prompt.ts` — Curator's system prompt + prompt builder
+- `agents/src/drafter-prompt.ts` — Drafter's system prompt + prompt builder
 - `agents/src/shared/voice-contract.ts` — voice contract as string constant
 - `agents/src/shared/parse-json.ts` — robust JSON extraction from LLM responses
+- `agents/src/shared/prompts.ts` — tombstone; prompts moved to their owning agents
 
 ## Known limitations
-- Audio-Auditor does basic file checks only (no STT round-trip yet)
-- Voice contract duplicated in .md and .ts (manual sync required)
+- Audio Auditor does basic file checks only (no STT round-trip yet) — paused anyway
+- Voice contract duplicated in `.md` and `.ts` (manual sync required)
 - Fact-Checker web search uses DuckDuckGo instant answers (limited depth)
 - Scanner XML parsing uses regex (fragile with malformed RSS)
 - Weekend daily pieces not yet implemented (weekdays only)

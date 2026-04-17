@@ -75,6 +75,14 @@ new_sqlite_classes = ["EngagementAnalystAgent", "ReviserAgent"]
 name = "SCANNER"
 class_name = "ScannerAgent"
 
+[[durable_objects.bindings]]
+name = "CURATOR"
+class_name = "CuratorAgent"
+
+[[durable_objects.bindings]]
+name = "DRAFTER"
+class_name = "DrafterAgent"
+
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["AudioProducerAgent", "AudioAuditorAgent"]
@@ -94,6 +102,10 @@ deleted_classes = ["EngagementAnalystAgent"]
 [[migrations]]
 tag = "v10"
 deleted_classes = ["CuratorAgent", "DrafterAgent"]
+
+[[migrations]]
+tag = "v11"
+new_sqlite_classes = ["CuratorAgent", "DrafterAgent"]
 
 # R2 bucket for audio storage
 [[r2_buckets]]

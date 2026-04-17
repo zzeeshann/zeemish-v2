@@ -18,6 +18,8 @@ export { LearnerAgent } from './learner';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
 export { ScannerAgent } from './scanner';
+export { CuratorAgent } from './curator';
+export { DrafterAgent } from './drafter';
 // Course workflow removed — daily pieces only
 
 /** Check admin auth — bearer token only (no query params — they leak in logs) */

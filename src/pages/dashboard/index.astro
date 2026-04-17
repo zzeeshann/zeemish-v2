@@ -49,18 +49,22 @@ try {
   }
 } catch { /* D1 may not have data yet */ }
 
-// Agent team — 10 shown publicly (Observer is internal)
+// Agent team — 13 agents total. Each does one job.
+// Audio agents are paused by design (cost control) until text pipeline is trusted.
 const agents = [
-  { name: 'Scanner', job: 'Reads the news every morning' },
-  { name: 'Director', job: 'Picks the most teachable story and writes the piece' },
-  { name: 'Voice Auditor', job: 'Checks it sounds like Zeemish' },
-  { name: 'Fact Checker', job: 'Verifies every claim' },
-  { name: 'Structure Editor', job: 'Reviews the flow and pacing' },
-  { name: 'Integrator', job: 'Handles revisions before approval' },
-  { name: 'Audio Producer', job: 'Generates the audio version (paused)' },
-  { name: 'Audio Auditor', job: 'Checks pronunciation (paused)' },
-  { name: 'Publisher', job: 'Puts it live on the site' },
-  { name: 'Learner', job: 'Learns from reader behaviour to make future pieces better' },
+  { name: 'Scanner', job: 'Reads the news every morning', paused: false },
+  { name: 'Director', job: 'Coordinates the pipeline — routes work between agents', paused: false },
+  { name: 'Curator', job: 'Picks the most teachable story and plans the beats', paused: false },
+  { name: 'Drafter', job: 'Writes the MDX piece from the brief', paused: false },
+  { name: 'Voice Auditor', job: 'Checks it sounds like Zeemish', paused: false },
+  { name: 'Fact Checker', job: 'Verifies every claim', paused: false },
+  { name: 'Structure Editor', job: 'Reviews the flow and pacing', paused: false },
+  { name: 'Integrator', job: 'Handles revisions before approval', paused: false },
+  { name: 'Audio Producer', job: 'Generates the audio version', paused: true },
+  { name: 'Audio Auditor', job: 'Checks pronunciation', paused: true },
+  { name: 'Publisher', job: 'Puts it live on the site', paused: false },
+  { name: 'Learner', job: 'Learns from reader behaviour to make future pieces better', paused: false },
+  { name: 'Observer', job: 'Logs every pipeline event for the admin dashboard', paused: false },
 ];
 ---
 
@@ -129,8 +133,13 @@ const agents = [
     <div class="space-y-2">
       {agents.map((agent) => (
         <div class="flex items-baseline gap-4 py-2">
-          <span class="font-medium text-sm w-36 shrink-0">{agent.name}</span>
-          <span class="text-sm text-zee-muted">{agent.job}</span>
+          <span class="font-medium text-sm w-36 shrink-0 flex items-center gap-2">
+            {agent.name}
+            {agent.paused && (
+              <span class="text-[10px] uppercase tracking-wide text-zee-muted border border-zee-border rounded px-1.5 py-0.5">paused</span>
+            )}
+          </span>
+          <span class={`text-sm ${agent.paused ? 'text-zee-muted/60' : 'text-zee-muted'}`}>{agent.job}</span>
         </div>
       ))}
     </div>

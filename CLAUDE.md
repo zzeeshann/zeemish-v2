@@ -10,18 +10,20 @@
 
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 11 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
+An autonomous multi-agent publishing system. 13 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
 
 ## Current state
 
-**Complete.** 11 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
+**Complete.** 13 agents deployed (Audio Producer + Audio Auditor paused by design, to protect ElevenLabs spend until the text pipeline is fully trusted). Daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
+
+Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships. "Paused" is a structural fact, not a label: Director's pipeline does not reference the audio agents, so no ElevenLabs spend is possible by accident.
 
 ## What was built
 
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 11 agents on Cloudflare Agents SDK, full pipeline with quality gates
+4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates (2 paused)
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
@@ -31,7 +33,7 @@ An autonomous multi-agent publishing system. 11 AI agents scan the news, decide 
 
 ### Two Workers
 - **zeemish-v2** — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
-- **zeemish-agents** — 11 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-agents** — 13 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
@@ -42,18 +44,23 @@ An autonomous multi-agent publishing system. 11 AI agents scan the news, decide 
 - Email: Resend (magic link from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
-### The 11 Agents (10 public + Observer internal)
+### The 13 Agents (one job per agent, one file per agent)
+
+Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher. Audio agents excluded from the pipeline (paused). Observer receives events throughout. Learner runs off-pipeline, watching readers.
+
 1. **ScannerAgent** — reads the news every morning
-2. **DirectorAgent** — picks the most teachable story, scheduled daily 2am UTC
-3. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
-4. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
-5. **StructureEditorAgent** — reviews flow and pacing
-6. **IntegratorAgent** — handles revisions before approval (3 rounds max)
-7. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2
-8. **AudioAuditorAgent** — checks pronunciation and audio quality
-9. **PublisherAgent** — commits to GitHub, piece goes live
-10. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
-11. **ObserverAgent** — (internal) logs events for admin dashboard
+2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Scheduled daily 2am UTC weekdays.
+3. **CuratorAgent** — picks the most teachable story from today's candidates, plans beats + hook + teaching angle
+4. **DrafterAgent** — writes the MDX from the brief, enforces `<lesson-shell>` / `<lesson-beat>` format
+5. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
+6. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
+7. **StructureEditorAgent** — reviews flow and pacing
+8. **IntegratorAgent** — handles revisions before approval (3 rounds max)
+9. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2. **Paused.**
+10. **AudioAuditorAgent** — checks pronunciation and audio quality. **Paused.**
+11. **PublisherAgent** — commits to GitHub, piece goes live
+12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
+13. **ObserverAgent** — logs every pipeline event for the admin dashboard
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
@@ -74,7 +81,7 @@ src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate,
 src/styles/             global.css (Tailwind) + beats.css + zita.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             All 11 agent files + shared code
+agents/src/             13 agent files (one per agent) + per-agent prompt files + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation
 docs/handoff/           Original architecture + specs
@@ -99,7 +106,7 @@ docs/handoff/           Original architecture + specs
 
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
-- `docs/AGENTS.md` — all 11 agents, endpoints, secrets
+- `docs/AGENTS.md` — all 13 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 13 D1 tables, 7 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
