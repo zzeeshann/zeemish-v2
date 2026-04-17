@@ -21,6 +21,7 @@ export async function hashPassword(password: string): Promise<string> {
 
 /**
  * Verify a password against a stored "salt:hash" string.
+ * Uses timing-safe comparison to prevent timing attacks.
  */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, hashHex] = stored.split(':');
@@ -29,7 +30,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const salt = fromHex(saltHex);
   const key = await deriveKey(password, salt);
   const hash = await crypto.subtle.exportKey('raw', key);
-  return toHex(new Uint8Array(hash)) === hashHex;
+
+  // Timing-safe comparison — prevents character-by-character timing attacks
+  const computed = new TextEncoder().encode(toHex(new Uint8Array(hash)));
+  const expected = new TextEncoder().encode(hashHex);
+  if (computed.byteLength !== expected.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(computed, expected);
 }
 
 async function deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
@@ -83,14 +89,15 @@ export function parseSessionCookie(cookieHeader: string | null): string | null {
 
 /**
  * Build a Set-Cookie header for the session.
+ * Secure flag ensures cookie only sent over HTTPS.
  */
 export function sessionCookie(userId: string, maxAge = 365 * 24 * 60 * 60): string {
-  return `zee-session=${userId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+  return `zee-session=${userId}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 /**
  * Build a Set-Cookie header that clears the session.
  */
 export function clearSessionCookie(): string {
-  return `zee-session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  return `zee-session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }

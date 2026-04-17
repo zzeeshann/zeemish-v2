@@ -116,3 +116,19 @@ Append-only. Never edit old entries.
 **Context:** Pipeline was synchronous RPC — wouldn't survive Worker restarts.
 **Decision:** Added PublishLessonWorkflow using Cloudflare Workflows v2 via agents SDK. Each pipeline step (curate, draft, audit, revise, audio, publish) is a durable checkpoint.
 **Reason:** Durable execution is critical for a pipeline that takes 1-2 minutes. If the Worker cold-starts mid-pipeline, it resumes from the last completed step instead of starting over.
+
+## 2026-04-17: Security hardening — 21 issues addressed
+**Context:** Comprehensive security audit found 5 critical, 5 high, 7 medium, 4 low issues.
+**Decision:** Fixed all critical and high issues in one pass.
+**Changes:**
+- Added `Secure` flag to session cookies
+- Timing-safe password comparison (prevents timing attacks)
+- Email uniqueness check on upgrade (prevents account hijacking)
+- All agents endpoints now require ADMIN_SECRET auth (not just /trigger)
+- CORS restricted to site domain (was `*`)
+- Removed query parameter auth (secrets leak in logs)
+- CSRF origin header check on all POST requests
+- Rate limiting on Zita chat (20/15min), upgrade (5/15min)
+- Input validation: message length limits, JSON try-catch on all endpoints
+- Claude API errors no longer leaked to users
+- Login response no longer includes user_id

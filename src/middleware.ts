@@ -16,10 +16,19 @@ export const onRequest = defineMiddleware(async (context, next) => {
   const url = new URL(context.request.url);
 
   // Only run auth on server-rendered routes
-  const serverRoutes = ['/api/', '/account', '/login'];
+  const serverRoutes = ['/api/', '/account', '/login', '/dashboard', '/auth/'];
   const isServerRoute = serverRoutes.some((prefix) => url.pathname.startsWith(prefix));
   if (!isServerRoute) {
     return next();
+  }
+
+  // CSRF protection: reject cross-origin POST requests
+  if (context.request.method === 'POST') {
+    const origin = context.request.headers.get('origin');
+    const host = context.request.headers.get('host');
+    if (origin && host && !origin.includes(host)) {
+      return new Response('Forbidden', { status: 403 });
+    }
   }
 
   const db = context.locals.runtime.env.DB;

@@ -10,7 +10,10 @@ export const prerender = false;
 export const POST: APIRoute = async ({ locals, request }) => {
   const db = locals.runtime.env.DB;
 
-  const body = await request.json();
+  let body;
+  try { body = await request.json(); }
+  catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
+
   const { course_id, lesson_id, event_type, beat } = body;
 
   if (!course_id || !lesson_id || !event_type) {

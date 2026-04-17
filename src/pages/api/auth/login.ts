@@ -23,7 +23,10 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const db = locals.runtime.env.DB;
   const anonymousId = locals.userId;
 
-  const body = await request.json();
+  let body;
+  try { body = await request.json(); }
+  catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
+
   const { email, password } = body;
 
   if (!email || !password) {
@@ -45,7 +48,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
     await mergeProgress(db, anonymousId, user.id);
   }
 
-  const response = new Response(JSON.stringify({ status: 'authenticated', user_id: user.id }), {
+  const response = new Response(JSON.stringify({ status: 'authenticated' }), {
     status: 200,
   });
   response.headers.append('Set-Cookie', sessionCookie(user.id));

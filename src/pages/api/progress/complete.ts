@@ -7,7 +7,10 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const db = locals.runtime.env.DB;
   const userId = locals.userId;
 
-  const body = await request.json();
+  let body;
+  try { body = await request.json(); }
+  catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
+
   const { course_slug, lesson_number } = body;
 
   if (!course_slug || !lesson_number) {

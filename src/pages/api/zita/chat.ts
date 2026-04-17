@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { checkRateLimit } from '../../../lib/rate-limit';
 
 export const prerender = false;
 
@@ -33,11 +34,25 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const db = locals.runtime.env.DB;
   const userId = locals.userId;
 
-  const body = await request.json();
+  // Rate limit: 20 messages per 15 min per user (Claude API costs money)
+  const limit = checkRateLimit(`zita:${userId}`, 20, 900);
+  if (!limit.allowed) {
+    return new Response(JSON.stringify({ error: 'Slow down — try again in a few minutes.' }), { status: 429 });
+  }
+
+  let body;
+  try { body = await request.json(); }
+  catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
+
   const { message, course_slug, lesson_number, lesson_title, lesson_context } = body;
 
   if (!message || !course_slug || !lesson_number) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
+  }
+
+  // Input validation: limit message length to prevent API cost abuse
+  if (typeof message !== 'string' || message.length > 2000) {
+    return new Response(JSON.stringify({ error: 'Message too long (max 2000 characters)' }), { status: 400 });
   }
 
   // Load conversation history for this user + lesson
@@ -85,8 +100,7 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
     });
 
     if (!claudeResponse.ok) {
-      const err = await claudeResponse.text();
-      return new Response(JSON.stringify({ error: `Claude API error: ${err}` }), { status: 500 });
+      return new Response(JSON.stringify({ error: 'Zita is temporarily unavailable. Try again later.' }), { status: 503 });
     }
 
     const data = await claudeResponse.json() as {

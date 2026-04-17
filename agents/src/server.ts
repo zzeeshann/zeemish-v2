@@ -21,15 +21,20 @@ export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
 export { PublishLessonWorkflow } from './workflows/publish-lesson';
 
-/** Check admin auth — bearer token or query param */
+/** Check admin auth — bearer token only (no query params — they leak in logs) */
 function checkAuth(request: Request, env: Env): boolean {
   const authHeader = request.headers.get('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7) === env.ADMIN_SECRET;
   }
-  const url = new URL(request.url);
-  return url.searchParams.get('key') === env.ADMIN_SECRET;
+  return false;
 }
+
+/** CORS headers restricted to zeemish.io */
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev',
+  'Content-Type': 'application/json',
+};
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -44,7 +49,7 @@ export default {
     const url = new URL(request.url);
 
     // Admin endpoints require auth
-    const adminPaths = ['/trigger'];
+    const adminPaths = ['/trigger', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -120,7 +125,7 @@ export default {
         const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
         const digest = await observer.getDailyDigest();
         return new Response(JSON.stringify(digest), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -137,7 +142,7 @@ export default {
         const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
         const events = await observer.getRecentEvents(limit);
         return new Response(JSON.stringify({ events }), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -154,7 +159,7 @@ export default {
         const analyst = await getAgentByName<EngagementAnalystAgent>(env.ENGAGEMENT_ANALYST, 'analyst');
         const report = await analyst.analyse(courseId);
         return new Response(JSON.stringify(report), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
