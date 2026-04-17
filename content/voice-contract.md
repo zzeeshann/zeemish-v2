@@ -4,6 +4,8 @@
 
 "Educate myself for humble decisions."
 
+"Most human suffering — personal, in organisations, and across the world — comes from treating connected things as if they were separate. The cure is learning to see and work with the whole."
+
 Every piece serves this purpose. If a piece doesn't help someone understand the world better so they can make more humble, more informed decisions — it doesn't belong on Zeemish.
 
 ---
