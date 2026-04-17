@@ -17,10 +17,13 @@ export const POST: APIRoute = async ({ locals }) => {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 
-  const AGENTS_URL = 'https://zeemish-agents.zzeeshann.workers.dev';
   const ADMIN_SECRET = (locals.runtime.env as Record<string, string>).AGENTS_ADMIN_SECRET ?? '';
+  // Service binding — in-process call to the agents worker.
+  // HTTP fetch across workers on the same .workers.dev zone returns
+  // Cloudflare error 1042. The binding avoids the public network hop.
+  const AGENTS = (locals.runtime.env as unknown as { AGENTS: { fetch: typeof fetch } }).AGENTS;
 
-  const res = await fetch(`${AGENTS_URL}/daily-trigger`, {
+  const res = await AGENTS.fetch('https://agents/daily-trigger', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${ADMIN_SECRET}` },
   });

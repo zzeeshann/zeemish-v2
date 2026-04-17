@@ -20,3 +20,12 @@ enabled = true
 binding = "DB"
 database_name = "zeemish"
 database_id = "f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4"
+
+# Service binding to the agents worker.
+# Workers on .workers.dev cannot fetch each other via HTTP (Cloudflare
+# error 1042). Service bindings call the target worker in-process with
+# no network hop. Used by /api/agents/trigger to proxy manual admin
+# triggers through to the agents worker's /daily-trigger endpoint.
+[[services]]
+binding = "AGENTS"
+service = "zeemish-agents"
