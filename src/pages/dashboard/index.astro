@@ -4,6 +4,7 @@ export const prerender = false;
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
+import { auditTier, auditTierLabel } from '../../lib/audit-tier';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -26,19 +27,19 @@ let stats = {
 let todayScores = { voice: null as any, facts: null as any, structure: null as any };
 
 try {
-  // Today's piece shows regardless of quality — the day isn't blank,
-  // even on a low-quality day. Banner on /daily/today/ handles the
-  // reader-side messaging. All other queries here are archive-facing
-  // and filter low-quality out (see docs/DECISIONS.md).
+  // Every published piece counts toward these stats and lists (as of
+  // 2026-04-17 soften-quality pass — we no longer filter quality_flag).
+  // Tier is surfaced per-piece on its own page. Counters reflect the
+  // raw truth of what's been published.
   todaysPiece = await db.prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1').bind(today).first();
 
-  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date DESC LIMIT 7').all();
+  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces ORDER BY date DESC LIMIT 7').all();
   recentPieces = recent.results;
 
-  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces WHERE quality_flag IS NULL').first<{ total: number }>();
+  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces').first<{ total: number }>();
   const voiceAgg = await db.prepare("SELECT AVG(score) as avg, COUNT(*) as n FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number; n: number }>();
-  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL AND quality_flag IS NULL').all<{ underlying_subject: string }>();
-  const firstPiece = await db.prepare('SELECT date FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date ASC LIMIT 1').first<{ date: string }>();
+  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL').all<{ underlying_subject: string }>();
+  const firstPiece = await db.prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1').first<{ date: string }>();
 
   stats = {
     totalPieces: countResult?.total ?? 0,
@@ -113,18 +114,26 @@ const agents = [
     </div>
   </section>
 
-  <!-- Section 2: Quality scores — three gates, same visual treatment -->
+  <!-- Section 2: Quality scores — three gates, neutral language.
+       Voice uses the 3-tier label (Polished/Solid/Rough); Facts and
+       Structure are boolean gates so they read Passing/Mixed. No red
+       anywhere — a rough piece is information, not an alarm. -->
   {todaysPiece && (() => {
-    type Gate = { label: string; score: number | null | undefined; passed: boolean | null };
+    type Gate = { label: string; score: number | null | undefined; passed: boolean | null; isVoice?: boolean };
     const gates: Gate[] = [
-      { label: 'Voice', score: todayScores.voice?.score, passed: todayScores.voice?.passed ?? null },
+      { label: 'Voice', score: todayScores.voice?.score, passed: todayScores.voice?.passed ?? null, isVoice: true },
       { label: 'Facts', score: todayScores.facts?.score, passed: todayScores.facts?.passed ?? null },
       { label: 'Structure', score: todayScores.structure?.score, passed: todayScores.structure?.passed ?? null },
     ];
-    const verdict = (g: Gate) =>
-      g.passed === null ? 'Not yet run' : g.passed ? 'Passing' : 'Failed';
+    const verdict = (g: Gate) => {
+      if (g.passed === null) return 'Not yet run';
+      if (g.isVoice) return auditTierLabel(auditTier(g.score ?? null));
+      return g.passed ? 'Passing' : 'Mixed';
+    };
+    const isPolished = (g: Gate) =>
+      g.isVoice ? auditTier(g.score ?? null) === 'polished' : !!g.passed;
     const verdictClass = (g: Gate) =>
-      g.passed === null ? 'text-zee-muted' : g.passed ? 'text-zee-primary' : 'text-red-600';
+      g.passed === null ? 'text-zee-muted' : isPolished(g) ? 'text-zee-primary' : 'text-zee-muted';
     return (
       <section class="mb-10">
         <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Quality Scores</h2>
@@ -141,7 +150,7 @@ const agents = [
               {typeof g.score === 'number' && (
                 <div class="mt-3 h-1 bg-zee-border rounded-full overflow-hidden">
                   <div
-                    class={`h-full rounded-full ${g.passed ? 'bg-zee-primary' : 'bg-red-500'}`}
+                    class={`h-full rounded-full ${isPolished(g) ? 'bg-zee-primary' : 'bg-zee-muted'}`}
                     style={`width: ${Math.max(0, Math.min(100, g.score))}%`}
                   ></div>
                 </div>
@@ -220,7 +229,7 @@ const agents = [
   <!-- Footer -->
   <section class="py-8 border-t border-zee-border">
     <p class="text-sm text-zee-muted italic">
-      Zeemish is produced by a team of AI agents, guided by one human. Every piece is audited for voice, accuracy, and structure before it goes live. No piece publishes without passing all three.
+      Zeemish is produced by a team of AI agents, guided by one human. Every piece is audited for voice, accuracy, and structure. We label each piece so you can see how it scored.
     </p>
   </section>
 </BaseLayout>

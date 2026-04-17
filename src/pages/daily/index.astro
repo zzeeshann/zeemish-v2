@@ -4,11 +4,9 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { formatTime, formatDate } from '../../lib/format';
 
 const pieces = await getCollection('dailyPieces');
-// Archive listing — exclude low-quality pieces (see docs/DECISIONS.md
-// 2026-04-17 "Publish-anyway"). They still render at /daily/YYYY-MM-DD/
-// directly, with a banner, so the day isn't blank.
+// Every published piece shows here. Tier surfacing happens on the piece
+// page. See docs/DECISIONS.md 2026-04-17 "Soften quality surfacing".
 const sorted = [...pieces]
-  .filter((p) => p.data.qualityFlag !== 'low')
   .sort((a, b) => b.data.date.localeCompare(a.data.date));
 ---
 

@@ -4,11 +4,10 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { formatTime } from '../../lib/format';
 
 const dailyPieces = await getCollection('dailyPieces');
-// Exclude pieces that failed audit gates after max revisions. They still
-// render at /daily/YYYY-MM-DD/ so the day isn't blank, but the Library is
-// the curated archive — see docs/DECISIONS.md 2026-04-17 "Publish-anyway".
+// Every published piece shows here. Tier (polished / solid / rough) is
+// surfaced on the piece page itself, not in this list view — see
+// docs/DECISIONS.md 2026-04-17 "Soften quality surfacing".
 const sorted = [...dailyPieces]
-  .filter((p) => p.data.qualityFlag !== 'low')
   .sort((a, b) => b.data.date.localeCompare(a.data.date));
 
 // Group by month — "April 2026" buckets. Preserves sort order within bucket.

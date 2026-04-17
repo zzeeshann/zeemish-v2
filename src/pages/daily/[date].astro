@@ -12,7 +12,6 @@ export async function getStaticPaths() {
 
 const { piece } = Astro.props;
 const { Content } = await render(piece);
-const isLowQuality = piece.data.qualityFlag === 'low';
 ---
 
 <LessonLayout
@@ -22,17 +21,9 @@ const isLowQuality = piece.data.qualityFlag === 'low';
   beatCount={piece.data.beatCount}
   subject={piece.data.underlyingSubject}
   date={piece.data.date}
+  voiceScore={piece.data.voiceScore}
+  qualityFlag={piece.data.qualityFlag}
 >
-  {isLowQuality && (
-    <div class="mb-6 p-4 rounded-lg border border-yellow-500/30 bg-yellow-50 text-sm">
-      <p class="font-medium text-yellow-900">A note on today's piece.</p>
-      <p class="text-yellow-800 mt-1">
-        This one didn't fully pass our voice, structure, and fact checks.
-        We published it anyway so the day isn't blank — but we're leaving it
-        out of the library archive. Feedback welcome at <a href="mailto:hello@zeemish.io" class="underline">hello@zeemish.io</a>.
-      </p>
-    </div>
-  )}
   <Content />
 </LessonLayout>
 

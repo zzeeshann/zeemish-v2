@@ -123,8 +123,11 @@ docs/handoff/           Original architecture + specs
 ## Design pass (2026-04-17)
 - Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.
 - Homepage: hero + "made by 13 agents" pipeline strip + recent list. Mission line moved to footer (`BaseLayout`).
-- Library: month-grouped, filterable by title/subject, topic pills in gold.
-- Dashboard: three unified quality-score cards (score + verdict + bar); avg voice score shows sample size; admin button guard hardened against undefined email match.
+- Library: month-grouped, filterable by title/subject, topic pills in gold. No quality filter — every published piece appears.
+- Dashboard: three unified quality-score cards (score + tier + bar); avg voice score shows sample size; admin button guard hardened against undefined email match.
+
+## Quality surfacing (2026-04-17)
+Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.
 
 ## Dev-mode testing
 One-command reset: `ADMIN_SECRET=... ./scripts/reset-today.sh` (git rm

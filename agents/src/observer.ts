@@ -41,7 +41,9 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
-  /** Log a piece that failed after max revisions */
+  /** Log a piece that didn't clear every gate after max revisions.
+   *  Still an escalation — operator needs to know — but phrased
+   *  neutrally. The piece publishes anyway with a tier label. */
   async logEscalation(
     source: string,
     _unused: number,
@@ -53,7 +55,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     await this.writeEvent({
       severity: 'escalation',
       title: `Escalation: ${title}`,
-      body: `"${title}" failed after ${rounds} revision rounds. Failed gates: ${failedGates.join(', ')}. Needs manual review.`,
+      body: `"${title}" didn't clear all gates after ${rounds} revision rounds. Unresolved: ${failedGates.join(', ')}. Published with voice ${voiceScore}/100; worth a manual look.`,
       context: { source, voiceScore, rounds, failedGates },
     });
   }

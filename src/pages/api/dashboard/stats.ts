@@ -7,11 +7,11 @@ export const GET: APIRoute = async ({ locals }) => {
   const db = locals.runtime.env.DB;
 
   try {
-    // All counters reflect the *archived* catalogue — low-quality pieces
-    // (audit failed after max revisions) are excluded so public stats
-    // advertise the clean library, not the raw publish count.
+    // Counters cover every published piece (as of 2026-04-17 soften-
+    // quality pass — we no longer exclude low-quality pieces from public
+    // stats). Tier is surfaced per-piece; the counters are the raw truth.
     const countResult = await db
-      .prepare('SELECT COUNT(*) as total FROM daily_pieces WHERE quality_flag IS NULL')
+      .prepare('SELECT COUNT(*) as total FROM daily_pieces')
       .first<{ total: number }>();
 
     const avgVoice = await db
@@ -20,11 +20,11 @@ export const GET: APIRoute = async ({ locals }) => {
       .first<{ avg_score: number | null }>();
 
     const subjects = await db
-      .prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL AND quality_flag IS NULL')
+      .prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL')
       .all<{ underlying_subject: string }>();
 
     const firstPiece = await db
-      .prepare('SELECT date FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date ASC LIMIT 1')
+      .prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1')
       .first<{ date: string }>();
 
     return new Response(JSON.stringify({

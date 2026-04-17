@@ -219,10 +219,21 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const observer = await this.subAgent(ObserverAgent, 'observer');
     const qualityFlag: 'low' | null = passed ? null : 'low';
 
+    // Splice `voiceScore` into frontmatter for EVERY publish (not only on
+    // failure). The reader-facing audit tier (polished / solid / rough)
+    // is derived from this number at render time, so it must be present
+    // in the MDX whether the piece passed or not. Same regex pattern
+    // Drafter uses for `date`.
+    currentMdx = currentMdx.replace(
+      /^(---\n[\s\S]*?)(\n---\n)/,
+      `$1\nvoiceScore: ${lastVoiceScore}$2`,
+    );
+
     if (!passed) {
-      // Splice `qualityFlag: "low"` into the frontmatter so the content
-      // collection schema picks it up at build time. Matches the same
-      // pattern Drafter uses to force `date` in frontmatter.
+      // Splice `qualityFlag: "low"` into the frontmatter too. No longer
+      // drives archive filtering (see 2026-04-17 soften-quality decision)
+      // but kept as a fallback signal for the tier helper and for
+      // admin/operator tooling.
       currentMdx = currentMdx.replace(
         /^(---\n[\s\S]*?)(\n---\n)/,
         `$1\nqualityFlag: "low"$2`,
@@ -240,7 +251,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
     const commitMsg = passed
       ? `feat(daily): ${today} — ${brief.headline}`
-      : `feat(daily): ${today} — ${brief.headline} [low-quality, gates: ${failedGates.join('/')}]`;
+      : `feat(daily): ${today} — ${brief.headline} [tier: rough, unresolved: ${failedGates.join('/')}]`;
 
     const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
 

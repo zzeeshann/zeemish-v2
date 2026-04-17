@@ -1,6 +1,7 @@
 ---
 import BaseLayout from './BaseLayout.astro';
 import AudioPlayer from '../components/AudioPlayer.astro';
+import { auditTier, auditTierLabel } from '../lib/audit-tier';
 import '../styles/beats.css';
 import '../styles/zita.css';
 
@@ -11,10 +12,17 @@ interface Props {
   beatCount?: number;
   subject?: string;
   date?: string;
+  voiceScore?: number;
+  qualityFlag?: 'low';
 }
 
-const { title, estimatedTime, audioSrc, beatCount, subject, date } = Astro.props;
+const { title, estimatedTime, audioSrc, beatCount, subject, date, voiceScore, qualityFlag } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
+// Tier is a quiet, consistent signal shown in the metadata line — same
+// visual weight as the date. Every piece shows its tier (not just rough
+// ones) so the word doesn't become a warning by absence.
+const tier = auditTier(voiceScore, qualityFlag);
+const tierLabel = auditTierLabel(tier);
 
 let dateDisplay = '';
 if (date) {
@@ -57,6 +65,8 @@ if (date) {
         <span>{subject}</span>
       </>
     )}
+    <span class="opacity-40" aria-hidden="true">·</span>
+    <span>{tierLabel}</span>
   </p>
 
   {audioSrc && (

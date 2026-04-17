@@ -6,11 +6,10 @@ import { formatTime, formatDate } from '../lib/format';
 const dailyPieces = await getCollection('dailyPieces');
 const sorted = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
 const todaysPiece = sorted[0];
-// "From the library" is the archive strip — filter low-quality pieces out
-// same as /library/. The "Today" slot above keeps showing today's piece
-// even if it's low (the day shouldn't be blank), and /daily/[date]/
-// surfaces a banner on that page.
-const recentPieces = sorted.slice(1, 6).filter((p) => p.data.qualityFlag !== 'low');
+// "From the library" strip — shows every piece, same as /library/.
+// Tier (polished / solid / rough) is surfaced on the piece page itself,
+// not here. See docs/DECISIONS.md 2026-04-17 "Soften quality surfacing".
+const recentPieces = sorted.slice(1, 6);
 
 // Long-form date for the eyebrow on today's hero
 let heroDate = '';
