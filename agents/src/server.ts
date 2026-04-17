@@ -151,7 +151,9 @@ export default {
     if (url.pathname === '/daily-trigger' && request.method === 'POST') {
       try {
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
-        const result = await director.triggerDailyPiece();
+        // Manual admin trigger bypasses the "already published today" guard.
+        // ADMIN_SECRET auth above is the control — if you got here, you meant it.
+        const result = await director.triggerDailyPiece(true);
         if (result) {
           return new Response(JSON.stringify({
             status: 'success',

@@ -68,17 +68,25 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
   /**
    * Produce one daily teaching piece from today's news.
-   * Guards: won't produce if today's piece already exists.
+   *
+   * Guard: by default, skips if today's piece already exists (protects the
+   * scheduled 2am run from double-publishing on a cron hiccup).
+   *
+   * @param force — pass true from manual admin triggers to bypass the guard
+   *   and always run the full pipeline. Useful during development when you
+   *   want to test end-to-end even after today's piece has published.
    */
-  async triggerDailyPiece(): Promise<{ brief: DailyPieceBrief; mdx: string } | null> {
+  async triggerDailyPiece(force = false): Promise<{ brief: DailyPieceBrief; mdx: string } | null> {
     const today = new Date().toISOString().slice(0, 10);
 
-    // Guard: skip if today's piece already exists
-    const existing = await this.env.DB
-      .prepare('SELECT id FROM daily_pieces WHERE date = ? LIMIT 1')
-      .bind(today)
-      .first();
-    if (existing) return null;
+    // Guard: skip if today's piece already exists (bypassed when force=true)
+    if (!force) {
+      const existing = await this.env.DB
+        .prepare('SELECT id FROM daily_pieces WHERE date = ? LIMIT 1')
+        .bind(today)
+        .first();
+      if (existing) return null;
+    }
 
     // Clear previous run's log
     await this.env.DB.prepare('DELETE FROM pipeline_log WHERE run_id = ?').bind(today).run().catch(() => {});
