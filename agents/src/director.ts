@@ -82,12 +82,18 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       return null; // Already published today — don't duplicate
     }
 
+    // Clear previous run's log
+    await this.env.DB.prepare('DELETE FROM pipeline_log WHERE run_id = ?').bind(today).run().catch(() => {});
+
     // Step 1: Scanner fetches news
     this.setState({ ...this.state, status: 'scanning', currentTask: `daily/${today}` });
+    await this.logStep(today, 'scanning', 'running', {});
     const scanner = await this.subAgent(ScannerAgent, 'scanner');
     const candidates = await scanner.scan();
+    await this.logStep(today, 'scanning', 'done', { candidateCount: candidates.length });
 
     if (candidates.length === 0) {
+      await this.logStep(today, 'skipped', 'done', { reason: 'No candidates found' });
       const observer = await this.subAgent(ObserverAgent, 'observer');
       await observer.logError('daily', 0, 'Scanner found no candidates');
       this.setState({ ...this.state, status: 'idle', currentTask: null });
@@ -96,6 +102,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // Step 2: Director picks the best story
     this.setState({ ...this.state, status: 'curating' });
+    await this.logStep(today, 'curating', 'running', {});
     const recentPieces = await this.getRecentDailyPieces(30);
     const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
 
@@ -110,11 +117,16 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const brief = extractJson<DailyPieceBrief & { skip?: boolean; selectedCandidateId?: string }>(evalText);
 
     if (brief.skip) {
+      await this.logStep(today, 'skipped', 'done', { reason: 'No teachable stories today' });
       const observer = await this.subAgent(ObserverAgent, 'observer');
       await observer.logError('daily', 0, 'No teachable stories today — skipping');
       this.setState({ ...this.state, status: 'idle', currentTask: null });
       return null;
     }
+
+    await this.logStep(today, 'curating', 'done', {
+      headline: brief.headline, subject: brief.underlyingSubject, newsSource: brief.newsSource,
+    });
 
     // Mark selected candidate in D1
     if (brief.selectedCandidateId) {
@@ -126,6 +138,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // Step 3: Draft the piece
     this.setState({ ...this.state, status: 'drafting' });
+    await this.logStep(today, 'drafting', 'running', {});
     const draftResponse = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 8000,
@@ -133,6 +146,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       messages: [{ role: 'user', content: buildDailyDrafterPrompt(brief as DailyPieceBrief, VOICE_CONTRACT) }],
     });
     const mdx = draftResponse.content[0].type === 'text' ? draftResponse.content[0].text : '';
+    await this.logStep(today, 'drafting', 'done', {
+      wordCount: mdx.split(/\s+/).length, beatCount: brief.beats?.length ?? 0,
+    });
 
     // Step 4: Audit (3 gates in parallel, up to 3 revision rounds)
     this.setState({ ...this.state, status: 'auditing' });
@@ -145,6 +161,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     for (let round = 1; round <= MAX_REVISIONS; round++) {
       totalRounds = round;
+      await this.logStep(today, `auditing_r${round}`, 'running', { round });
       const [voiceResult, structureResult, factResult] = await Promise.all([
         (await this.subAgent(VoiceAuditorAgent, `voice-daily-r${round}`)).audit(currentMdx),
         (await this.subAgent(StructureEditorAgent, `struct-daily-r${round}`)).review(currentMdx),
@@ -158,6 +175,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       if (!structureResult.passed) failedGates.push('structure');
       if (!factResult.passed) failedGates.push('facts');
 
+      await this.logStep(today, `auditing_r${round}`, failedGates.length === 0 ? 'done' : 'failed', {
+        round, voiceScore: lastVoiceScore,
+        voicePassed: voiceResult.passed, factsPassed: factResult.passed, structurePassed: structureResult.passed,
+        violations: voiceResult.violations?.slice(0, 3),
+      });
+
       if (voiceResult.passed && structureResult.passed && factResult.passed) {
         passed = true;
         break;
@@ -165,9 +188,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
       if (round < MAX_REVISIONS) {
         this.setState({ ...this.state, status: 'revising' });
+        await this.logStep(today, `revising_r${round}`, 'running', { round, failedGates });
         const integrator = await this.subAgent(IntegratorAgent, 'integrator-daily');
         const revision = await integrator.revise(currentMdx, voiceResult, structureResult, factResult);
         currentMdx = revision.revisedMdx;
+        await this.logStep(today, `revising_r${round}`, 'done', { round });
       }
     }
 
@@ -175,6 +200,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const observer = await this.subAgent(ObserverAgent, 'observer');
     if (passed) {
       this.setState({ ...this.state, status: 'publishing' });
+      await this.logStep(today, 'publishing', 'running', {});
       const publisher = await this.subAgent(PublisherAgent, `publisher-daily-${today}`);
       const slug = brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
       const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
@@ -192,12 +218,16 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
           currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, 1, Date.now(), Date.now())
         .run().catch(() => {});
 
+      await this.logStep(today, 'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath });
+      await this.logStep(today, 'done', 'done', { headline: brief.headline, date: today, voiceScore: lastVoiceScore, revisions: totalRounds - 1 });
+
       await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
       this.setState({
         ...this.state, status: 'idle', currentTask: null,
         lastDailyPiece: { title: brief.headline, date: today },
       });
     } else {
+      await this.logStep(today, 'error', 'failed', { headline: brief.headline, failedGates, voiceScore: lastVoiceScore, rounds: totalRounds });
       await observer.logEscalation('daily', 0, brief.headline, lastVoiceScore, totalRounds, failedGates);
       this.setState({ ...this.state, status: 'idle', currentTask: null, error: 'Daily piece failed audit' });
     }
@@ -257,5 +287,20 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         ).bind(crypto.randomUUID(), taskId, draftId, 'fact', facts.passed ? 1 : 0, null, JSON.stringify(facts.claims), now),
       ]);
     } catch { /* audit logging shouldn't break the pipeline */ }
+  }
+
+  /** Write a step to the pipeline_log table for the admin monitor */
+  private async logStep(
+    runId: string,
+    step: string,
+    status: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.env.DB
+        .prepare('INSERT INTO pipeline_log (id, run_id, step, status, data, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(crypto.randomUUID(), runId, step, status, JSON.stringify(data), Date.now())
+        .run();
+    } catch { /* pipeline log shouldn't break the pipeline */ }
   }
 }

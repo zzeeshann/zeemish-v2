@@ -47,15 +47,22 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
     <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary">&larr; Public dashboard</a>
   </div>
 
-  <!-- Section 1: Pipeline controls -->
+  <!-- Section 1: Pipeline Monitor -->
   <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Pipeline Controls</h2>
-    <div class="flex flex-wrap gap-3">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Pipeline Monitor</h2>
+
+    <div class="flex flex-wrap gap-3 mb-6">
       <button id="daily-trigger-btn"
         class="px-5 py-3 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
         Trigger Daily Piece
       </button>
       <span id="trigger-status" class="text-sm text-zee-muted self-center"></span>
+    </div>
+
+    <div id="pipeline-monitor" class="p-5 rounded-xl border border-zee-border bg-white/50">
+      <div id="pipeline-steps" class="space-y-3">
+        <p class="text-sm text-zee-muted italic">No pipeline run today. Click trigger to start.</p>
+      </div>
     </div>
   </section>
 
@@ -170,23 +177,99 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
 </BaseLayout>
 
 <script>
-  // Trigger daily piece
   const triggerBtn = document.getElementById('daily-trigger-btn') as HTMLButtonElement;
   const statusEl = document.getElementById('trigger-status');
+  const stepsEl = document.getElementById('pipeline-steps');
+  let pollInterval: number | null = null;
 
+  // Step name → human-readable label
+  const STEP_LABELS: Record<string, string> = {
+    scanning: 'Scanner',
+    curating: 'Director picks',
+    drafting: 'Drafter',
+    auditing_r1: 'Audit round 1',
+    auditing_r2: 'Audit round 2',
+    auditing_r3: 'Audit round 3',
+    revising_r1: 'Integrator (revision 1)',
+    revising_r2: 'Integrator (revision 2)',
+    publishing: 'Publisher',
+    done: 'Complete',
+    error: 'Failed',
+    skipped: 'Skipped',
+  };
+
+  function renderStep(step: any): string {
+    const label = STEP_LABELS[step.step] ?? step.step;
+    const icon = step.status === 'done' ? '✅' : step.status === 'failed' ? '❌' : '⏳';
+    let detail = '';
+
+    const d = step.data || {};
+    if (d.candidateCount != null) detail = `${d.candidateCount} candidates`;
+    if (d.headline) detail = `"${d.headline}"`;
+    if (d.subject) detail += ` · ${d.subject}`;
+    if (d.wordCount) detail = `${d.wordCount} words · ${d.beatCount} beats`;
+    if (d.voiceScore != null) {
+      detail = `Voice: ${d.voiceScore}/100`;
+      if (d.factsPassed != null) detail += ` · Facts: ${d.factsPassed ? '✓' : '✗'}`;
+      if (d.structurePassed != null) detail += ` · Structure: ${d.structurePassed ? '✓' : '✗'}`;
+    }
+    if (d.failedGates) detail = `Failed: ${d.failedGates.join(', ')}`;
+    if (d.commitUrl) detail = `<a href="${d.commitUrl}" class="text-zee-primary hover:underline" target="_blank">View commit</a>`;
+    if (d.reason) detail = d.reason;
+    if (d.error) detail = d.error;
+    if (step.step === 'done' && d.voiceScore) detail = `Voice: ${d.voiceScore}/100 · ${d.revisions} revision${d.revisions !== 1 ? 's' : ''}`;
+
+    return `<div class="flex items-start gap-3 py-2">
+      <span class="text-lg leading-none mt-0.5">${icon}</span>
+      <div>
+        <span class="font-medium text-sm">${label}</span>
+        ${detail ? `<span class="text-sm text-zee-muted ml-2">${detail}</span>` : ''}
+      </div>
+    </div>`;
+  }
+
+  async function pollPipeline() {
+    try {
+      const res = await fetch('/api/dashboard/pipeline');
+      const data = await res.json();
+
+      if (data.steps.length === 0) {
+        stepsEl!.innerHTML = '<p class="text-sm text-zee-muted italic">No pipeline run today. Click trigger to start.</p>';
+        return;
+      }
+
+      stepsEl!.innerHTML = data.steps.map(renderStep).join('');
+
+      if (!data.isRunning && pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+        triggerBtn.disabled = false;
+        statusEl!.textContent = '';
+      }
+    } catch { /* silent */ }
+  }
+
+  // Trigger
   triggerBtn?.addEventListener('click', async () => {
     triggerBtn.disabled = true;
-    statusEl!.textContent = 'Running pipeline (60-120s)...';
+    statusEl!.textContent = 'Starting pipeline...';
+    stepsEl!.innerHTML = '<p class="text-sm text-zee-muted">⏳ Starting...</p>';
+
+    // Start polling immediately
+    pollInterval = setInterval(pollPipeline, 5000) as unknown as number;
+
     try {
-      const res = await fetch('/api/agents/trigger', { method: 'POST' });
-      const data = await res.json();
-      statusEl!.textContent = data.headline ? `Published: ${data.headline}` : data.error ?? 'Done';
+      fetch('/api/agents/trigger', { method: 'POST' }); // Fire and forget
+      // Don't await — let polling show progress
+      setTimeout(pollPipeline, 2000); // First poll after 2s
     } catch {
-      statusEl!.textContent = 'Network error';
-    } finally {
+      statusEl!.textContent = 'Failed to trigger';
       triggerBtn.disabled = false;
     }
   });
+
+  // Poll on page load to show current/last run
+  pollPipeline();
 
   // Acknowledge observer events
   document.querySelectorAll('.ack-btn').forEach((btn) => {
