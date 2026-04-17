@@ -69,11 +69,11 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Threshold:** Lessons with <50% completion and ≥10 views flagged.
 - **File:** `agents/src/engagement-analyst.ts`
 
-### ReviserAgent
-- **Role:** Analyses engagement patterns and writes learnings for future pieces. Does NOT revise published pieces — they are permanent records.
+### LearnerAgent
+- **Role:** Learns from reader behaviour to make future pieces better. Does NOT touch published pieces — they are permanent records.
 - **Output:** Learnings written to D1 `learnings` table. The Drafter reads these when writing new content.
 - **Method:** `analyseAndLearn(lessonData)` — extracts 2-4 actionable learnings from engagement data
-- **File:** `agents/src/reviser.ts`
+- **File:** `agents/src/learner.ts`
 
 ### AudioProducerAgent
 - **Role:** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.

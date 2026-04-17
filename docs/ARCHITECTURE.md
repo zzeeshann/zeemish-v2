@@ -51,7 +51,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
 - [x] EngagementAnalystAgent — reads completion/drop-off data from D1
-- [x] ReviserAgent — analyses engagement patterns, writes learnings for future pieces (does not revise published content)
+- [x] LearnerAgent — analyses engagement patterns, writes learnings for future pieces (does not revise published content)
 - [x] Full pipeline: Curate → Draft → 3 parallel auditors → Revise → Audio → Publish
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
 - [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
@@ -65,7 +65,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 6 — Self-Improvement Loop (partially complete)
 - [x] EngagementAnalystAgent built and deployed
-- [x] ReviserAgent built and deployed
+- [x] LearnerAgent built and deployed
 - [x] Engagement tracking API (`/api/engagement/track`)
 - [x] lesson-shell tracks views and completions
 - [x] D1 tables: engagement, learnings

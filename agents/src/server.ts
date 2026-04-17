@@ -16,7 +16,7 @@ export { IntegratorAgent } from './integrator';
 export { PublisherAgent } from './publisher';
 export { ObserverAgent } from './observer';
 export { EngagementAnalystAgent } from './engagement-analyst';
-export { ReviserAgent } from './reviser';
+export { LearnerAgent } from './learner';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
 export { ScannerAgent } from './scanner';

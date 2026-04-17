@@ -33,7 +33,7 @@ interface EngagementAnalystState {
 /**
  * EngagementAnalystAgent — watches reader engagement data.
  * Identifies underperforming lessons (low completion, sharp drop-offs)
- * and signals the Reviser to propose improvements.
+ * and signals the Learner to extract patterns for future pieces.
  *
  * Runs on schedule (daily) via Director, or on demand.
  */

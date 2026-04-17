@@ -22,7 +22,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
 4. **Agent Team:** 14 agents on Cloudflare Agents SDK + Workflows v2, full pipeline with quality gates
-5. **Self-Improvement:** Engagement tracking, EngagementAnalyst + Reviser, learnings database
+5. **Self-Improvement:** Engagement tracking, EngagementAnalyst + Learner, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
 8. **Dashboard:** Public factory floor (/dashboard/) + admin control room (/dashboard/admin/)
@@ -55,7 +55,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 10. **PublisherAgent** — commits MDX to GitHub via Contents API
 11. **ObserverAgent** — event logging, daily digest
 12. **EngagementAnalystAgent** — reads completion/drop-off data
-13. **ReviserAgent** — analyses engagement patterns, writes learnings for future pieces (does NOT revise published pieces)
+13. **LearnerAgent** — learns from reader behaviour to make future pieces better
 14. **ScannerAgent** — fetches Google News RSS, stores daily candidates
 
 ### Dashboard

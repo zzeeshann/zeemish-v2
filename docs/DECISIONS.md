@@ -177,3 +177,8 @@ Append-only. Never edit old entries.
 **Context:** Zishan clarified that published pieces are permanent records.
 **Decision:** Reviser's role changed from "propose revisions to existing pieces" to "analyse engagement patterns and write learnings for future pieces." It feeds the learnings database only.
 **Reason:** Published content is a permanent record. The way to improve is not to rewrite the past but to make the future better. The Drafter reads learnings when writing new pieces — that's the improvement loop.
+
+## 2026-04-17: Reviser renamed to Learner
+**Context:** "Reviser" implies changing published content. It doesn't do that.
+**Decision:** Rename ReviserAgent to LearnerAgent. "Learns from reader behaviour to make future pieces better."
+**Reason:** The name should match the job. It learns. It doesn't revise.

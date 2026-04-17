@@ -10,21 +10,20 @@ export interface EngagementLearning {
   learnings: string[];
 }
 
-interface ReviserState {
+interface LearnerState {
   learningsWritten: number;
 }
 
 /**
- * ReviserAgent — analyses engagement patterns and writes learnings
- * for future pieces. Does NOT revise or update published pieces.
- * Published pieces are permanent records.
+ * LearnerAgent — learns from reader behaviour to make future pieces better.
+ * Does NOT revise or update published pieces. Published pieces are permanent.
  *
- * The Reviser's only job: make future pieces better based on what
- * readers did with past ones. It feeds the learnings database,
- * which the Drafter reads when writing new content.
+ * Analyses engagement patterns (completion rates, drop-off beats) and
+ * writes actionable learnings to the D1 learnings table. The Drafter
+ * reads these when writing new content.
  */
-export class ReviserAgent extends Agent<Env, ReviserState> {
-  initialState: ReviserState = { learningsWritten: 0 };
+export class LearnerAgent extends Agent<Env, LearnerState> {
+  initialState: LearnerState = { learningsWritten: 0 };
 
   /** Analyse an underperforming piece and extract learnings for future pieces */
   async analyseAndLearn(lessonData: UnderperformingLesson): Promise<EngagementLearning> {
@@ -35,8 +34,7 @@ export class ReviserAgent extends Agent<Env, ReviserState> {
       max_tokens: 1500,
       system: `You analyse reader engagement data to extract learnings for future writing.
 
-You do NOT revise existing pieces. Published pieces are permanent records.
-Your job is to identify PATTERNS — what works, what doesn't — so future pieces are better.
+Published pieces are permanent. Your job is to identify PATTERNS — what works, what doesn't — so future pieces are better.
 
 Given engagement data for an underperforming piece, extract 2-4 specific, actionable learnings.
 
@@ -76,20 +74,13 @@ Extract learnings for future pieces. What should the Drafter do differently next
       parsed = { learnings: [] };
     }
 
-    // Write each learning to D1
     for (const learning of parsed.learnings) {
       try {
-        await writeLearning(
-          this.env.DB,
-          'engagement',
-          learning,
-          {
-            source: lessonData.lessonId,
-            completionRate: lessonData.completionRate,
-            dropOffBeat: lessonData.dropOffBeat,
-          },
-          70,
-        );
+        await writeLearning(this.env.DB, 'engagement', learning, {
+          source: lessonData.lessonId,
+          completionRate: lessonData.completionRate,
+          dropOffBeat: lessonData.dropOffBeat,
+        }, 70);
       } catch { /* learning write shouldn't break */ }
     }
 

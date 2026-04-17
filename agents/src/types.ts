@@ -16,7 +16,7 @@ export interface Env {
   PUBLISHER: DurableObjectNamespace;
   OBSERVER: DurableObjectNamespace;
   ENGAGEMENT_ANALYST: DurableObjectNamespace;
-  REVISER: DurableObjectNamespace;
+  LEARNER: DurableObjectNamespace;
   AUDIO_PRODUCER: DurableObjectNamespace;
   AUDIO_AUDITOR: DurableObjectNamespace;
   AUDIO_BUCKET: R2Bucket;
