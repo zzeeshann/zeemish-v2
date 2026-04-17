@@ -33,7 +33,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 
 ### Stage 4 — Agent Team (complete — 14 agents built (13 core + ScannerAgent))
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
-- [x] DirectorAgent — supervisor, scheduled daily at 8am UTC, manual trigger
+- [x] DirectorAgent — supervisor, scheduled daily at 2am UTC, manual trigger
 - [x] CuratorAgent — lesson planning via Claude API
 - [x] DrafterAgent — MDX generation via Claude API
 - [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass
@@ -79,7 +79,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Home page redesign — today's piece prominent, archive below, courses below
 - [x] D1 tables: daily_candidates, daily_pieces (migration 0006)
 - [x] Content collection: dailyPieces with date/newsSource/underlyingSubject schema
-- [x] Scheduled: Scanner + Director at 6am UTC weekdays
+- [x] Scheduled: Scanner + Director at 2am UTC weekdays
 - [x] First daily piece published and live
 - [ ] Weekend evergreen mode (weekdays only for now)
 

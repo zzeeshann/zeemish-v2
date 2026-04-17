@@ -44,7 +44,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy on push)
 
 ### The 14 Agents
-1. **DirectorAgent** — supervisor, scheduled daily 6am + 8am UTC
+1. **DirectorAgent** — supervisor, scheduled daily 2am UTC
 2. **CuratorAgent** — plans lessons from subject values
 3. **DrafterAgent** — writes MDX via Claude
 4. **VoiceAuditorAgent** — voice compliance gate (≥85/100)

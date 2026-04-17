@@ -109,7 +109,7 @@ curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
 ```
 
 ### Automatic
-The Director runs daily at 6:00 AM UTC (weekdays). It scans news, picks the most teachable story, drafts, audits, and publishes.
+The Director runs daily at 2:00 AM UTC. It scans news, picks the most teachable story, drafts, audits, and publishes. Piece is ready by ~4:00 AM UTC.
 
 ### View daily pieces
 - Archive: https://zeemish-v2.zzeeshann.workers.dev/daily/

@@ -65,8 +65,8 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
   /** Set up daily scheduled run on first activation */
   async onStart() {
-    // Daily piece pipeline at 6:00 AM UTC (weekdays)
-    await this.schedule('0 6 * * *', 'dailyRun', { type: 'daily-piece' });
+    // Daily piece pipeline at 2:00 AM UTC
+    await this.schedule('0 2 * * *', 'dailyRun', { type: 'daily-piece' });
   }
 
   /**
@@ -106,7 +106,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   }
 
   /**
-   * Daily piece pipeline — runs at 6:00 AM UTC.
+   * Daily piece pipeline — runs at 2:00 AM UTC.
    * Scans news, picks the most teachable story, drafts + audits + publishes.
    * Weekend mode: uses subject-values for evergreen content instead of news.
    */
