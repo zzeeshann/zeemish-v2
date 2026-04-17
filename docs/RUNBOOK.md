@@ -131,15 +131,22 @@ git push
 # Wait ~30s for auto-deploy to strip them from the live site
 ```
 
-### 2. Clear today's D1 rows across all 4 tables
+### 2. Clear today's D1 rows across all 5 tables
 ```bash
 DATE=$(date -u +%Y-%m-%d)
+DATE_MS=$(($(date -u -j -f "%Y-%m-%d" "$DATE" "+%s") * 1000))
 npx wrangler d1 execute zeemish --remote --command \
   "DELETE FROM daily_pieces WHERE date = '$DATE'; \
    DELETE FROM daily_candidates WHERE date = '$DATE'; \
    DELETE FROM pipeline_log WHERE run_id = '$DATE'; \
-   DELETE FROM audit_results WHERE task_id LIKE 'daily/$DATE%';"
+   DELETE FROM audit_results WHERE task_id LIKE 'daily/$DATE%'; \
+   DELETE FROM observer_events WHERE created_at >= $DATE_MS;"
 ```
+Note: `observer_events` uses an epoch-ms `created_at` timestamp (not a date
+string), which is why it's filtered differently. If you forget this table,
+the admin dashboard Observer feed still shows yesterday's "Published: …"
+events even after the underlying pieces are deleted — accurate history but
+visually confusing during a reset.
 
 ### 3. Trigger a fresh run
 Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
