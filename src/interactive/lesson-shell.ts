@@ -22,10 +22,10 @@ class LessonShell extends HTMLElement {
   }
 
   /** Extract content info from URL: /daily/{date}/ */
-  private get lessonInfo(): { course_slug: string; lesson_number: number } | null {
+  private get lessonInfo(): { course_slug: string; lesson_number: number; piece_date: string } | null {
     const dailyMatch = window.location.pathname.match(/\/daily\/(\d{4}-\d{2}-\d{2})\/?/);
     if (dailyMatch) {
-      return { course_slug: 'daily', lesson_number: 0 };
+      return { course_slug: 'daily', lesson_number: 0, piece_date: dailyMatch[1] };
     }
     return null;
   }
@@ -98,7 +98,7 @@ class LessonShell extends HTMLElement {
         <span class="beat-nav-progress" aria-live="polite">
           ${this.currentIndex + 1} of ${this.beats.length}
         </span>
-        <button class="beat-nav-btn beat-nav-next" ${isLast ? 'disabled' : ''} aria-label="${isLast ? 'Last beat' : 'Next beat'}">
+        <button class="beat-nav-btn beat-nav-next" aria-label="${isLast ? 'Finish' : 'Next beat'}">
           ${isLast ? 'Finish' : 'Next'}
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -114,7 +114,14 @@ class LessonShell extends HTMLElement {
     const prevBtn = this.nav.querySelector('.beat-nav-prev');
     const nextBtn = this.nav.querySelector('.beat-nav-next');
     prevBtn?.addEventListener('click', () => this.go(-1));
-    nextBtn?.addEventListener('click', () => this.go(1));
+    nextBtn?.addEventListener('click', () => {
+      if (this.currentIndex === this.beats.length - 1) {
+        // Finish — navigate to daily archive
+        window.location.href = '/daily/';
+      } else {
+        this.go(1);
+      }
+    });
   }
 
   private go(direction: -1 | 1) {
@@ -162,7 +169,7 @@ class LessonShell extends HTMLElement {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         course_id: info.course_slug,
-        lesson_id: `${info.course_slug}/${info.lesson_number}`,
+        lesson_id: info.piece_date ?? `${info.course_slug}/${info.lesson_number}`,
         event_type: eventType,
         beat,
       }),

@@ -178,11 +178,7 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
     triggerBtn.disabled = true;
     statusEl!.textContent = 'Running pipeline (60-120s)...';
     try {
-      const res = await fetch('/api/agents/trigger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'daily' }),
-      });
+      const res = await fetch('/api/agents/trigger', { method: 'POST' });
       const data = await res.json();
       statusEl!.textContent = data.headline ? `Published: ${data.headline}` : data.error ?? 'Done';
     } catch {

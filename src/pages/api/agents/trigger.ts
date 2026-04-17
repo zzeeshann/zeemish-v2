@@ -5,14 +5,15 @@ export const prerender = false;
 
 /**
  * Proxy endpoint for triggering the daily piece pipeline.
- * Only authenticated users with ADMIN_EMAIL can trigger.
+ * ADMIN_EMAIL only — not just any authenticated user.
  */
-export const POST: APIRoute = async ({ locals, request }) => {
+export const POST: APIRoute = async ({ locals }) => {
   const db = locals.runtime.env.DB;
   const userId = locals.userId;
+  const ADMIN_EMAIL = (locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
 
   const user = userId ? await getUser(db, userId) : null;
-  if (!user?.email) {
+  if (!user?.email || user.email !== ADMIN_EMAIL) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
   }
 

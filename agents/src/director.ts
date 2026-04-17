@@ -31,7 +31,6 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   initialState: DirectorState = {
     status: 'idle',
     currentTask: null,
-    lastLesson: null,
     lastDailyPiece: null,
     error: null,
   };
@@ -140,8 +139,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const taskId = `daily/${today}`;
     let currentMdx = mdx;
     let passed = false;
+    let lastVoiceScore = 0;
+    let totalRounds = 0;
+    let failedGates: string[] = [];
 
     for (let round = 1; round <= MAX_REVISIONS; round++) {
+      totalRounds = round;
       const [voiceResult, structureResult, factResult] = await Promise.all([
         (await this.subAgent(VoiceAuditorAgent, `voice-daily-r${round}`)).audit(currentMdx),
         (await this.subAgent(StructureEditorAgent, `struct-daily-r${round}`)).review(currentMdx),
@@ -149,6 +152,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       ]);
 
       await this.saveAuditResults(taskId, round, voiceResult, structureResult, factResult);
+      lastVoiceScore = voiceResult.score ?? 0;
+      failedGates = [];
+      if (!voiceResult.passed) failedGates.push('voice');
+      if (!structureResult.passed) failedGates.push('structure');
+      if (!factResult.passed) failedGates.push('facts');
 
       if (voiceResult.passed && structureResult.passed && factResult.passed) {
         passed = true;
@@ -172,25 +180,25 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
       const commitMsg = `feat(daily): ${today} — ${brief.headline}`;
 
-      await publisher.publishToPath(filePath, currentMdx, commitMsg);
+      const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
 
-      // Log to daily_pieces table
+      // Log to daily_pieces table with actual audit data
       await this.env.DB
         .prepare(
-          `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, published_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, published_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
-          currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, Date.now(), Date.now())
+          currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, 1, Date.now(), Date.now())
         .run().catch(() => {});
 
-      await observer.logPublished('daily', 0, brief.headline, 0, 0, '');
+      await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
       this.setState({
         ...this.state, status: 'idle', currentTask: null,
         lastDailyPiece: { title: brief.headline, date: today },
       });
     } else {
-      await observer.logEscalation('daily', 0, brief.headline, 0, MAX_REVISIONS, ['audit']);
+      await observer.logEscalation('daily', 0, brief.headline, lastVoiceScore, totalRounds, failedGates);
       this.setState({ ...this.state, status: 'idle', currentTask: null, error: 'Daily piece failed audit' });
     }
 
