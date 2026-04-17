@@ -112,14 +112,6 @@ docs/handoff/           Original architecture + specs
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
 
-## Next planned work
-**Decouple piece identity from publication date.** Currently URLs, Director's
-guard, and the admin monitor all treat `date` as identity — two pieces on the
-same date cause a URL collision (only one reachable). Multiple pieces per day
-is the product vision, "one per day" was a temporary scaffold. Plan +
-implement in the next session. Full context: `docs/DECISIONS.md` entry dated
-2026-04-17.
-
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
