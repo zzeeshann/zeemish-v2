@@ -1,8 +1,8 @@
 import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
-import { VOICE_CONTRACT } from './shared/voice-contract';
 import { extractJson } from './shared/parse-json';
+import { buildVoiceAuditorSystem } from './voice-auditor-prompt';
 
 export interface VoiceAuditResult {
   passed: boolean;
@@ -29,25 +29,7 @@ export class VoiceAuditorAgent extends Agent<Env, VoiceAuditorState> {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 2000,
-      system: `You are a voice auditor for Zeemish, a learning site. Your ONLY job is to check if a draft follows the voice contract.
-
-${VOICE_CONTRACT}
-
-Score the draft 0-100 on voice compliance. Be strict. Flag EVERY violation.
-- Tribe words (mindfulness, journey, empower, etc.) → automatic -10 per instance
-- Flattery ("great job reading this") → -15
-- Jargon without explanation → -10
-- Long padded sentences → -5 each
-- "In this lesson we'll learn..." openings → -20
-- Summary/CTA/congratulations in close → -15
-
-Respond with JSON only:
-{
-  "score": number,
-  "passed": boolean (score >= 85),
-  "violations": ["specific violation 1", "specific violation 2"],
-  "suggestions": ["how to fix violation 1", "how to fix violation 2"]
-}`,
+      system: buildVoiceAuditorSystem(),
       messages: [{ role: 'user', content: `Audit this draft:\n\n${mdx}` }],
     });
 

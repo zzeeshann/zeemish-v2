@@ -2,6 +2,8 @@ import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { writeLearning } from './shared/learnings';
+import { extractJson } from './shared/parse-json';
+import { LEARNER_ANALYSE_PROMPT } from './learner-prompt';
 
 // --- Types (merged from EngagementAnalyst + Learner) ---
 
@@ -145,24 +147,7 @@ export class LearnerAgent extends Agent<Env, LearnerState> {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 1500,
-      system: `You analyse reader engagement data to extract learnings for future writing.
-
-Published pieces are permanent. Your job is to identify PATTERNS — what works, what doesn't — so future pieces are better.
-
-Given engagement data for an underperforming piece, extract 2-4 specific, actionable learnings.
-
-Examples of good learnings:
-- "Hooks that open with a specific number get 20% higher completion than hooks that open with a question"
-- "Teaching beats longer than 400 words show sharp drop-off — keep under 350"
-- "Readers drop off when the subject shifts from concrete to abstract without a bridge example"
-
-Return JSON:
-{
-  "learnings": [
-    "specific actionable learning 1",
-    "specific actionable learning 2"
-  ]
-}`,
+      system: LEARNER_ANALYSE_PROMPT,
       messages: [
         {
           role: 'user',
@@ -181,8 +166,7 @@ Extract learnings for future pieces. What should the Drafter do differently next
     const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
     let parsed: { learnings: string[] };
     try {
-      const match = text.match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : { learnings: [] };
+      parsed = extractJson<{ learnings: string[] }>(text);
     } catch {
       parsed = { learnings: [] };
     }

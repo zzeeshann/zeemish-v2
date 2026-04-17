@@ -2,11 +2,26 @@ import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { extractJson } from './shared/parse-json';
+import { FACT_CHECKER_PASS1_PROMPT, FACT_CHECKER_PASS2_PROMPT } from './fact-checker-prompt';
 
+/**
+ * Result of fact-checking a draft.
+ *
+ * Gate semantics: `passed` is true iff no claim is marked `incorrect`.
+ * Unverified claims are allowed (asymmetric with voice/structure gates —
+ * this is intentional, since LLMs can flag anything they can't fully
+ * confirm).
+ *
+ * `searchAvailable: false` means the web-verification step failed
+ * (DuckDuckGo unreachable) — the first-pass Claude assessment was the
+ * final word. Director logs an Observer warn when this happens so the
+ * pipeline honours the "no silent failure" principle.
+ */
 export interface FactCheckResult {
   passed: boolean;
   claims: FactClaim[];
   searchUsed: boolean;
+  searchAvailable: boolean;
 }
 
 export interface FactClaim {
@@ -37,21 +52,7 @@ export class FactCheckerAgent extends Agent<Env, FactCheckerState> {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 3000,
-      system: `You are a fact-checker for Zeemish. Identify every factual claim and assess accuracy.
-
-RULES:
-- Extract each specific factual claim (statistics, research findings, biological facts)
-- Assess: "verified" (widely accepted/true), "unverified" (can't fully confirm), "incorrect" (definitely wrong)
-- General well-known science (e.g. "cortisol is a stress hormone") → "verified"
-- Approximate numbers in right ballpark (e.g. "about 20,000 breaths a day") → "verified"
-- Only "incorrect" if demonstrably wrong
-- Skip opinions, metaphors, analogies
-
-Return JSON only:
-{
-  "passed": boolean (true if zero "incorrect" — a few "unverified" is acceptable),
-  "claims": [{ "claim": "text", "status": "verified|unverified|incorrect", "note": "why" }]
-}`,
+      system: FACT_CHECKER_PASS1_PROMPT,
       messages: [{ role: 'user', content: `Fact-check this lesson:\n\n${mdx}` }],
     });
 
@@ -64,7 +65,8 @@ Return JSON only:
     );
 
     if (needsSearch.length === 0) {
-      const result = { ...firstPass, searchUsed: false };
+      // No claims needed web verification — searchAvailable is trivially true
+      const result: FactCheckResult = { ...firstPass, searchUsed: false, searchAvailable: true };
       this.setState({ lastResult: result });
       return result;
     }
@@ -73,8 +75,8 @@ Return JSON only:
     const searchResults = await this.searchClaims(needsSearch);
 
     if (!searchResults) {
-      // Search unavailable — return first pass results
-      const result = { ...firstPass, searchUsed: false };
+      // Search was attempted and failed — Director will surface this via Observer
+      const result: FactCheckResult = { ...firstPass, searchUsed: false, searchAvailable: false };
       this.setState({ lastResult: result });
       return result;
     }
@@ -83,7 +85,7 @@ Return JSON only:
     const reassessResponse = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 2000,
-      system: `You are re-assessing factual claims using web search results. Update each claim's status based on what the search found. Return JSON only with the same format.`,
+      system: FACT_CHECKER_PASS2_PROMPT,
       messages: [
         {
           role: 'user',
@@ -104,6 +106,7 @@ Return JSON only:
       passed: !hasIncorrect,
       claims: allClaims,
       searchUsed: true,
+      searchAvailable: true,
     };
 
     this.setState({ lastResult: result });

@@ -72,24 +72,31 @@ Learner: runs off-pipeline on reader engagement data
 - **Flags:** Tribe words, flattery, jargon without explanation, padding
 - **Method:** `audit(mdx)`
 - **File:** `agents/src/voice-auditor.ts`
+- **Prompt:** `agents/src/voice-auditor-prompt.ts`
 
 ### 6. FactCheckerAgent
 - **Role:** Verifies factual claims. Two-pass: Claude identifies claims, DuckDuckGo verifies unconfirmed ones.
 - **Limitation:** Web search uses DuckDuckGo instant answers (limited depth)
+- **Gate semantics:** Passes if no claim is `incorrect`; unverified claims are acceptable. When web search fails, result has `searchAvailable: false` and Director logs a warn via Observer — per the "no silent failure" principle.
 - **Method:** `check(mdx)`
 - **File:** `agents/src/fact-checker.ts`
+- **Prompt:** `agents/src/fact-checker-prompt.ts`
 
 ### 7. StructureEditorAgent
 - **Role:** Reviews beat structure, pacing, length. Checks hook, teaching, close rules.
 - **Checks:** 3–6 beats, one idea per beat, valid frontmatter, no filler
+- **Learnings:** Writes to the learnings DB for both passing drafts (suggestions, confidence 60) and failing drafts (issues, confidence 40). The learnings DB feeds Drafter's future prompts, so neutral sampling matters.
 - **Method:** `review(mdx)`
 - **File:** `agents/src/structure-editor.ts`
+- **Prompt:** `agents/src/structure-editor-prompt.ts`
 
 ### 8. IntegratorAgent
 - **Role:** Takes feedback from all three gates, revises draft, resubmits.
 - **Retry:** Up to 3 revision passes before escalation.
+- **Instance:** Fresh DO per day (`integrator-daily-${today}`) — daily pipelines are discrete events.
 - **Method:** `revise(mdx, voice, structure, facts)`
 - **File:** `agents/src/integrator.ts`
+- **Prompt:** `agents/src/integrator-prompt.ts`
 
 ### 9. AudioProducerAgent — **PAUSED**
 - **Role (when active):** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.
@@ -118,6 +125,7 @@ Learner: runs off-pipeline on reader engagement data
 - **Output:** Engagement reports + learnings written to D1 `learnings` table
 - **Does NOT touch published content.** Published pieces are permanent.
 - **File:** `agents/src/learner.ts`
+- **Prompt:** `agents/src/learner-prompt.ts`
 
 ### 13. ObserverAgent
 - **Role:** Logs events (published, escalated, errors) to D1. Powers dashboard.
@@ -160,6 +168,11 @@ wrangler deploy
 - `agents/src/types.ts` — Env, per-agent state types, DailyPieceBrief, DailyCandidate, CuratorResult, DrafterResult
 - `agents/src/curator-prompt.ts` — Curator's system prompt + prompt builder
 - `agents/src/drafter-prompt.ts` — Drafter's system prompt + prompt builder
+- `agents/src/voice-auditor-prompt.ts` — VoiceAuditor's system prompt builder (interpolates VOICE_CONTRACT)
+- `agents/src/structure-editor-prompt.ts` — StructureEditor's system prompt
+- `agents/src/fact-checker-prompt.ts` — FactChecker's two-pass system prompts
+- `agents/src/integrator-prompt.ts` — Integrator's system prompt builder (interpolates VOICE_CONTRACT)
+- `agents/src/learner-prompt.ts` — Learner's analyse-and-learn system prompt
 - `agents/src/shared/voice-contract.ts` — voice contract as string constant
 - `agents/src/shared/parse-json.ts` — robust JSON extraction from LLM responses
 - `agents/src/shared/prompts.ts` — tombstone; prompts moved to their owning agents

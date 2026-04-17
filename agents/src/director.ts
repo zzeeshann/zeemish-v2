@@ -167,6 +167,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       ]);
 
       await this.saveAuditResults(taskId, round, voiceResult, structureResult, factResult);
+
+      // "No silent failure" (architecture §3.2): if the fact-checker's web
+      // search was down, surface it via Observer. Pipeline continues with
+      // first-pass Claude assessment, but Zishan needs to know.
+      if (!factResult.searchAvailable) {
+        const obs = await this.subAgent(ObserverAgent, 'observer');
+        await obs.logError(
+          'fact-check',
+          0,
+          'Web search unavailable — fact-check used first-pass Claude assessment only',
+        ).catch(() => {});
+      }
+
       lastVoiceScore = voiceResult.score ?? 0;
       failedGates = [];
       if (!voiceResult.passed) failedGates.push('voice');
@@ -188,7 +201,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       if (round < MAX_REVISIONS) {
         this.enterPhase('integrator');
         await this.logStep(today, `revising_r${round}`, 'running', { round, failedGates });
-        const integrator = await this.subAgent(IntegratorAgent, 'integrator-daily');
+        const integrator = await this.subAgent(IntegratorAgent, `integrator-daily-${today}`);
         const revision = await integrator.revise(currentMdx, voiceResult, structureResult, factResult);
         currentMdx = revision.revisedMdx;
         await this.logStep(today, `revising_r${round}`, 'done', { round });

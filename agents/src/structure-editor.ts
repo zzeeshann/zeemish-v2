@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { extractJson } from './shared/parse-json';
 import { writeLearning } from './shared/learnings';
+import { STRUCTURE_EDITOR_PROMPT } from './structure-editor-prompt';
 
 export interface StructureAuditResult {
   passed: boolean;
@@ -27,40 +28,29 @@ export class StructureEditorAgent extends Agent<Env, StructureEditorState> {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 2000,
-      system: `You are a structure editor for Zeemish, a learning site. Review the lesson structure:
-
-CHECK:
-1. Has 3-6 beats (hook, 2-3 teaching, optional practice, close)
-2. Hook is ONE screen — drops reader in, no introduction
-3. Each teaching beat has ONE idea (not crammed)
-4. Teaching beats total 1500-2500 words
-5. Close is ONE sentence — no summary, no CTA, no congratulations
-6. Proper <lesson-shell> and <lesson-beat> tags
-7. Valid MDX frontmatter (title, date, newsSource, underlyingSubject, estimatedTime, beatCount, description)
-8. No padding, no filler paragraphs
-
-IMPORTANT: Be reasonable. Minor formatting differences or slight word count variations are NOT failures. Only flag genuine structural problems that would hurt the reader experience. If the lesson is well-structured overall, pass it.
-
-Respond with JSON only:
-{
-  "passed": boolean,
-  "issues": ["specific issue 1", "specific issue 2"],
-  "suggestions": ["how to fix issue 1", "how to fix issue 2"]
-}
-
-If no issues, return { "passed": true, "issues": [], "suggestions": [] }`,
+      system: STRUCTURE_EDITOR_PROMPT,
       messages: [{ role: 'user', content: `Review this lesson structure:\n\n${mdx}` }],
     });
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
     const result = extractJson<StructureAuditResult>(text);
 
-    // Write learnings from structural patterns
-    if (result.passed && result.suggestions.length > 0) {
-      // Even passing lessons can have useful observations
-      for (const suggestion of result.suggestions.slice(0, 2)) {
+    // Write learnings — from both passing drafts (suggestions) and failing
+    // drafts (issues). The learnings DB feeds Drafter's future prompts, so
+    // a neutral sample matters. Failures get lower confidence (40 vs 60)
+    // so they carry less weight in prompt re-tuning.
+    const items = result.passed ? result.suggestions : result.issues;
+    if (items.length > 0) {
+      const confidence = result.passed ? 60 : 40;
+      for (const item of items.slice(0, 2)) {
         try {
-          await writeLearning(this.env.DB, 'structure', suggestion, { source: 'structure-editor' }, 60);
+          await writeLearning(
+            this.env.DB,
+            'structure',
+            item,
+            { source: 'structure-editor', passed: result.passed },
+            confidence,
+          );
         } catch { /* learning write shouldn't break audit */ }
       }
     }

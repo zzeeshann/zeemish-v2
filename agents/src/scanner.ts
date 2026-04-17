@@ -39,7 +39,18 @@ export class ScannerAgent extends Agent<Env, ScannerState> {
     const allCandidates: NewsCandidate[] = [];
     const seenHeadlines = new Set<string>();
 
-    for (const [category, feedUrl] of Object.entries(RSS_FEEDS)) {
+    // Optional env override — lets ops change feeds without a redeploy.
+    // Malformed JSON silently falls back to the hardcoded defaults below.
+    let feeds: Record<string, string> = RSS_FEEDS;
+    if (this.env.SCANNER_RSS_FEEDS_JSON) {
+      try {
+        feeds = JSON.parse(this.env.SCANNER_RSS_FEEDS_JSON);
+      } catch {
+        feeds = RSS_FEEDS;
+      }
+    }
+
+    for (const [category, feedUrl] of Object.entries(feeds)) {
       try {
         const candidates = await this.fetchFeed(feedUrl, category);
         for (const c of candidates) {

@@ -67,6 +67,15 @@ class_name = "AudioProducerAgent"
 name = "AUDIO_AUDITOR"
 class_name = "AudioAuditorAgent"
 
+# --- Migration history (DO NOT EDIT; entries below are immutable) ---
+# v5  created EngagementAnalystAgent + ReviserAgent (both later refactored away)
+# v8  renamed ReviserAgent → LearnerAgent
+# v9  deleted EngagementAnalystAgent (merged into LearnerAgent)
+# v10 deleted Curator/Drafter
+# v11 recreated Curator/Drafter with SQLite storage
+# Active classes: DirectorAgent (v1), VoiceAuditor/StructureEditor/
+# FactChecker/Integrator (v2), Publisher (v3), Observer/Learner (v4),
+# AudioProducer/AudioAuditor (v6), Scanner (v7), Curator/Drafter (v11).
 [[migrations]]
 tag = "v5"
 new_sqlite_classes = ["EngagementAnalystAgent", "ReviserAgent"]

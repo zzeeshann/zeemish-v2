@@ -23,6 +23,14 @@ export interface Env {
   GITHUB_TOKEN: string;
   ADMIN_SECRET: string;
   ELEVENLABS_API_KEY: string;
+  /**
+   * Optional JSON-encoded override for Scanner's RSS feed list.
+   * Shape: `{"CATEGORY": "https://feed.url/...", ...}`.
+   * Set via `wrangler secret put SCANNER_RSS_FEEDS_JSON '{...}'` to
+   * change feeds without a redeploy. Malformed JSON falls back to the
+   * hardcoded defaults in scanner.ts.
+   */
+  SCANNER_RSS_FEEDS_JSON?: string;
 }
 
 /** Plan for a single beat within a piece */

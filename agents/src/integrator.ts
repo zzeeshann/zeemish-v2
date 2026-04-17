@@ -2,6 +2,7 @@ import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { VOICE_CONTRACT } from './shared/voice-contract';
+import { buildIntegratorSystem } from './integrator-prompt';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
 import type { FactCheckResult } from './fact-checker';
@@ -11,18 +12,16 @@ export interface IntegrationResult {
   changesSummary: string[];
 }
 
-interface IntegratorState {
-  revisionCount: number;
-}
-
 /**
  * IntegratorAgent — takes audit feedback from all three gates,
  * synthesises it, and revises the draft. Submits back for re-audit.
  * Max 3 revision passes before escalation.
+ *
+ * Stateless — Director spawns a fresh instance per day
+ * (integrator-daily-${today}) so each day's pipeline runs against a
+ * clean DO.
  */
-export class IntegratorAgent extends Agent<Env, IntegratorState> {
-  initialState: IntegratorState = { revisionCount: 0 };
-
+export class IntegratorAgent extends Agent<Env> {
   async revise(
     mdx: string,
     voiceResult: VoiceAuditResult,
@@ -56,16 +55,7 @@ export class IntegratorAgent extends Agent<Env, IntegratorState> {
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 8000,
-      system: `You are the Integrator for Zeemish. Your job is to revise a lesson draft based on feedback from three auditors (voice, structure, fact-checking).
-
-${VOICE_CONTRACT}
-
-RULES:
-- Fix every flagged issue
-- Do NOT introduce new problems while fixing old ones
-- Keep the same overall structure and topic — don't rewrite from scratch
-- Return the COMPLETE revised MDX file, ready to save
-- Start with the --- frontmatter delimiter, nothing else before or after`,
+      system: buildIntegratorSystem(VOICE_CONTRACT),
       messages: [
         {
           role: 'user',
@@ -75,8 +65,6 @@ RULES:
     });
 
     const revisedMdx = response.content[0].type === 'text' ? response.content[0].text : mdx;
-
-    this.setState({ revisionCount: this.state.revisionCount + 1 });
 
     return {
       revisedMdx,
