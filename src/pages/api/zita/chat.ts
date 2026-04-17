@@ -46,7 +46,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   const { message, course_slug, lesson_number, lesson_title, lesson_context } = body;
 
-  if (!message || !course_slug || !lesson_number) {
+  if (!message || !course_slug || lesson_number == null) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
   }
 

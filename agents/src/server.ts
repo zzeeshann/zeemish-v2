@@ -177,7 +177,7 @@ export default {
 
     // Engagement report: GET /engagement?course=body
     if (url.pathname === '/engagement' && request.method === 'GET') {
-      const courseId = url.searchParams.get('course') ?? 'body';
+      const courseId = url.searchParams.get('course') ?? 'daily';
       try {
         const analyst = await getAgentByName<EngagementAnalystAgent>(env.ENGAGEMENT_ANALYST, 'analyst');
         const report = await analyst.analyse(courseId);

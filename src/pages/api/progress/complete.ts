@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
 
   const { course_slug, lesson_number } = body;
 
-  if (!course_slug || !lesson_number) {
+  if (!course_slug || lesson_number == null) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
   }
 
