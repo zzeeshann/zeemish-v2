@@ -1,0 +1,627 @@
+/*
+ * "How this was made" transparency drawer — standalone CSS.
+ * Not processed by Tailwind (like beats.css / zita.css). Custom-element
+ * selectors are safe from purging.
+ *
+ * Shape:
+ *   <made-drawer date="YYYY-MM-DD">
+ *     <button class="made-open">…</button>       ← open affordance (inline on page)
+ *     <div class="made-panel" hidden>            ← slide-in drawer
+ *       <header class="made-panel-header">…</header>
+ *       <div class="made-panel-body">
+ *         <section class="made-section">…</section>
+ *         …
+ *       </div>
+ *     </div>
+ *   </made-drawer>
+ */
+
+/* --- Open affordance (button at bottom of the piece) ---------------- */
+
+.made-open {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin: 3rem 0 0;
+  padding: 1.25rem 0;
+  border: 0;
+  border-top: 1px solid #E8E4DE;
+  border-bottom: 1px solid #E8E4DE;
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.made-open:hover {
+  background: rgba(232, 228, 222, 0.25);
+}
+
+.made-open-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1A1A1A;
+  letter-spacing: -0.01em;
+}
+
+.made-open-meta {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #6B6B6B;
+  margin-top: 0.25rem;
+  letter-spacing: 0;
+}
+
+.made-open-arrow {
+  flex-shrink: 0;
+  color: #1A6B62;
+  transition: transform 0.2s ease;
+}
+
+.made-open:hover .made-open-arrow {
+  transform: translateX(2px);
+}
+
+.made-open:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+/* --- Backdrop + panel ----------------------------------------------- */
+
+.made-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 26, 26, 0.35);
+  z-index: 60;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.made-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(560px, 100vw);
+  background: #FAF8F4;
+  border-left: 1px solid #E8E4DE;
+  box-shadow: -12px 0 32px rgba(26, 26, 26, 0.08);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+made-drawer[data-open] .made-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+made-drawer[data-open] .made-panel {
+  transform: translateX(0);
+}
+
+@media (max-width: 560px) {
+  .made-panel {
+    width: 100vw;
+    border-left: 0;
+  }
+}
+
+/* --- Header --------------------------------------------------------- */
+
+.made-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid #E8E4DE;
+}
+
+.made-panel-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1A1A1A;
+}
+
+.made-panel-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  line-height: 1.5;
+}
+
+.made-close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: 1px solid #E8E4DE;
+  background: #FAF8F4;
+  color: #6B6B6B;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.made-close:hover {
+  background: #E8E4DE;
+  color: #1A1A1A;
+}
+
+.made-close:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 2px;
+}
+
+/* --- Body ----------------------------------------------------------- */
+
+.made-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem 1.5rem 3rem;
+  scroll-behavior: smooth;
+}
+
+.made-section {
+  margin: 1.5rem 0 2rem;
+}
+
+.made-section-header {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6B6B6B;
+  margin: 0 0 0.75rem;
+}
+
+.made-section-note {
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  margin: 0 0 1rem;
+  line-height: 1.6;
+}
+
+.made-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 2rem 0;
+}
+
+.made-skeleton-line {
+  height: 0.875rem;
+  background: linear-gradient(90deg, #E8E4DE 0%, #F1EEE8 50%, #E8E4DE 100%);
+  background-size: 200% 100%;
+  border-radius: 0.25rem;
+  animation: made-shimmer 1.4s infinite;
+}
+
+.made-skeleton-line:nth-child(1) { width: 40%; }
+.made-skeleton-line:nth-child(2) { width: 90%; }
+.made-skeleton-line:nth-child(3) { width: 75%; }
+.made-skeleton-line:nth-child(4) { width: 85%; }
+
+@keyframes made-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* --- Piece summary (hero strip inside the drawer) ------------------- */
+
+.made-piece {
+  padding: 1rem 0;
+  border-bottom: 1px solid #E8E4DE;
+}
+
+.made-piece-headline {
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #1A1A1A;
+  margin: 0;
+}
+
+.made-piece-meta {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+
+.made-piece-meta .sep {
+  opacity: 0.4;
+}
+
+.made-tier {
+  font-weight: 600;
+}
+
+.made-tier-polished { color: #1A6B62; }
+.made-tier-solid    { color: #1A1A1A; }
+.made-tier-rough    { color: #6B6B6B; }
+
+/* --- Timeline ------------------------------------------------------- */
+
+.made-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+}
+
+.made-timeline::before {
+  content: '';
+  position: absolute;
+  left: 0.4375rem;
+  top: 0.4375rem;
+  bottom: 0.4375rem;
+  width: 1px;
+  background: #E8E4DE;
+}
+
+.made-step {
+  position: relative;
+  padding: 0 0 1rem 1.75rem;
+}
+
+.made-step:last-child {
+  padding-bottom: 0;
+}
+
+.made-step-dot {
+  position: absolute;
+  left: 0;
+  top: 0.375rem;
+  width: 0.9375rem;
+  height: 0.9375rem;
+  border-radius: 9999px;
+  border: 2px solid #E8E4DE;
+  background: #FAF8F4;
+}
+
+.made-step[data-state='done']   .made-step-dot { border-color: #1A6B62; background: #1A6B62; }
+.made-step[data-state='failed'] .made-step-dot { border-color: #6B6B6B; background: #FAF8F4; }
+.made-step[data-state='running'] .made-step-dot { border-color: #1A6B62; }
+
+.made-step-label {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1A1A1A;
+  line-height: 1.4;
+}
+
+.made-step-time {
+  font-size: 0.75rem;
+  color: #6B6B6B;
+  margin-left: 0.5rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.made-step-detail {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  line-height: 1.55;
+}
+
+/* --- Round cards (auditors said …) --------------------------------- */
+
+.made-round {
+  border: 1px solid #E8E4DE;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 0 0 0.875rem;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.made-round-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.875rem;
+}
+
+.made-round-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1A1A1A;
+}
+
+.made-round-summary {
+  font-size: 0.75rem;
+  color: #6B6B6B;
+  font-variant-numeric: tabular-nums;
+}
+
+.made-gate {
+  margin: 0.75rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px dashed #E8E4DE;
+}
+
+.made-gate:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.made-gate-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.made-gate-label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6B6B6B;
+}
+
+.made-gate-verdict {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.made-gate-verdict-ok   { color: #1A6B62; }
+.made-gate-verdict-mixed{ color: #6B6B6B; }
+
+.made-gate-bar {
+  height: 0.1875rem;
+  background: #E8E4DE;
+  border-radius: 9999px;
+  overflow: hidden;
+  margin: 0.375rem 0 0.625rem;
+}
+
+.made-gate-bar-fill {
+  height: 100%;
+  background: #1A6B62;
+  border-radius: 9999px;
+}
+
+.made-gate-bar-fill-muted {
+  background: #6B6B6B;
+}
+
+.made-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.375rem 0 0;
+}
+
+.made-list li {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: #1A1A1A;
+  padding: 0.375rem 0 0.375rem 1.125rem;
+  position: relative;
+}
+
+.made-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.875rem;
+  width: 0.375rem;
+  height: 1px;
+  background: #E8E4DE;
+}
+
+.made-claim {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.made-claim-status {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.made-claim-verified   { color: #1A6B62; }
+.made-claim-unverified { color: #6B6B6B; }
+.made-claim-contested  { color: #B85c00; }
+
+.made-claim-note {
+  font-size: 0.75rem;
+  color: #6B6B6B;
+  margin-top: 0.125rem;
+}
+
+.made-list-empty {
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  font-style: italic;
+  margin: 0.25rem 0 0;
+}
+
+/* --- Rules card ----------------------------------------------------- */
+
+.made-rules {
+  background: rgba(232, 228, 222, 0.35);
+  border-radius: 0.75rem;
+  padding: 1rem 1.125rem;
+}
+
+.made-rules-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #1A1A1A;
+  margin: 0 0 0.5rem;
+}
+
+.made-rules-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.375rem;
+}
+
+.made-rule {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: #6B6B6B;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.made-rule::before {
+  content: '·';
+  color: #6B6B6B;
+}
+
+.made-rule[data-hit] {
+  color: #1A1A1A;
+  font-weight: 500;
+}
+
+.made-rule[data-hit]::before {
+  color: #1A6B62;
+  content: '•';
+}
+
+.made-rules-footer {
+  margin: 0.75rem 0 0;
+  font-size: 0.75rem;
+  color: #6B6B6B;
+}
+
+.made-rules-footer a {
+  color: #1A6B62;
+  text-decoration: none;
+}
+
+.made-rules-footer a:hover {
+  text-decoration: underline;
+}
+
+/* --- Candidates collapsible ---------------------------------------- */
+
+.made-candidates {
+  border: 1px solid #E8E4DE;
+  border-radius: 0.75rem;
+}
+
+.made-candidates-toggle {
+  width: 100%;
+  padding: 0.875rem 1rem;
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  color: #1A1A1A;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.made-candidates-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+.made-candidates[data-expanded] .made-candidates-toggle svg {
+  transform: rotate(90deg);
+}
+
+.made-candidates-body {
+  display: none;
+  border-top: 1px solid #E8E4DE;
+  padding: 0.5rem 0;
+}
+
+.made-candidates[data-expanded] .made-candidates-body {
+  display: block;
+}
+
+.made-candidate {
+  padding: 0.625rem 1rem;
+  display: grid;
+  gap: 0.125rem;
+}
+
+.made-candidate + .made-candidate {
+  border-top: 1px solid #E8E4DE;
+}
+
+.made-candidate-headline {
+  font-size: 0.8125rem;
+  color: #1A1A1A;
+  line-height: 1.45;
+  font-weight: 500;
+}
+
+.made-candidate-headline a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.made-candidate-headline a:hover {
+  color: #1A6B62;
+}
+
+.made-candidate-meta {
+  font-size: 0.6875rem;
+  color: #6B6B6B;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Commit link ---------------------------------------------------- */
+
+.made-commit {
+  font-size: 0.8125rem;
+  color: #6B6B6B;
+  line-height: 1.55;
+}
+
+.made-commit a {
+  color: #1A6B62;
+  text-decoration: none;
+}
+
+.made-commit a:hover {
+  text-decoration: underline;
+}
+
+.made-commit code {
+  font-size: 0.75rem;
+  background: rgba(232, 228, 222, 0.6);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+
+/* --- Lock body scroll when drawer is open -------------------------- */
+
+body.made-locked {
+  overflow: hidden;
+}

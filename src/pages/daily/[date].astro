@@ -1,6 +1,8 @@
 ---
 import { getCollection, render } from 'astro:content';
 import LessonLayout from '../../layouts/LessonLayout.astro';
+import MadeBy from '../../components/MadeBy.astro';
+import '../../styles/made.css';
 
 export async function getStaticPaths() {
   const pieces = await getCollection('dailyPieces');
@@ -25,6 +27,7 @@ const { Content } = await render(piece);
   qualityFlag={piece.data.qualityFlag}
 >
   <Content />
+  <MadeBy date={piece.data.date} />
 </LessonLayout>
 
 <script>

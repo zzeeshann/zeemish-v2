@@ -5,3 +5,4 @@
 import './lesson-beat';
 import './lesson-shell';
 import './zita-chat';
+import './made-drawer';

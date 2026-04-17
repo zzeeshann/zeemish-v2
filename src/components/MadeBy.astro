@@ -1,0 +1,73 @@
+---
+/**
+ * "How this was made" — open affordance + drawer shell.
+ *
+ * Server-renders only the static scaffold:
+ *   - the open affordance button (static "13 agents" + client-filled counts)
+ *   - the empty drawer with a skeleton
+ *
+ * The daily piece page is statically prerendered (no D1 access at build
+ * time), so the two dynamic teaser numbers (rounds, candidates) and the
+ * full drawer content are all fetched client-side from
+ * /api/daily/{date}/made by src/interactive/made-drawer.ts.
+ */
+interface Props {
+  date: string;
+}
+
+const { date } = Astro.props;
+---
+
+<made-drawer data-date={date}>
+  <button
+    class="made-open"
+    type="button"
+    data-made-open
+    aria-haspopup="dialog"
+    aria-controls={`made-panel-${date}`}
+  >
+    <span>
+      <span class="made-open-label">How this was made</span>
+      <span class="made-open-meta" data-made-teaser>
+        The pipeline of 13 agents behind this piece
+      </span>
+    </span>
+    <svg class="made-open-arrow" width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+  </button>
+
+  <div class="made-backdrop" data-made-backdrop aria-hidden="true"></div>
+
+  <aside
+    class="made-panel"
+    id={`made-panel-${date}`}
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby={`made-panel-title-${date}`}
+    hidden
+  >
+    <header class="made-panel-header">
+      <div>
+        <h2 class="made-panel-title" id={`made-panel-title-${date}`}>How this was made</h2>
+        <p class="made-panel-subtitle">
+          The full creation story of this piece — timeline, auditors, rules.
+        </p>
+      </div>
+      <button class="made-close" type="button" data-made-close aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 4L12 12M12 4L4 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </header>
+
+    <div class="made-panel-body" data-made-body>
+      <div class="made-skeleton" data-made-skeleton>
+        <div class="made-skeleton-line"></div>
+        <div class="made-skeleton-line"></div>
+        <div class="made-skeleton-line"></div>
+        <div class="made-skeleton-line"></div>
+      </div>
+    </div>
+  </aside>
+</made-drawer>

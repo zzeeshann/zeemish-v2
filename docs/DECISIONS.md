@@ -378,3 +378,35 @@ WHERE voice_score IS NOT NULL;
 The API endpoint also now returns `voiceSampleSize` alongside `avgVoiceScore` so external consumers get the same honesty the dashboard UI already shows ("from N pieces").
 
 **Verified:** `npm run build` clean; local static build; live deploy confirms dashboard renders a number and "from N pieces" subtitle.
+
+## 2026-04-18: "How this was made" surfaced as a drawer on each piece, not a page
+
+**Context:** Transparency is the brand (CLAUDE.md). Before today, a reader saw only the finished piece — the machinery behind it (13 agents, audit scores, voice-contract rules, rejected candidates, revision rounds) was invisible. The user asked for a complete transparency surface readers can open on any piece.
+
+**Decision:** Add a "How this was made" drawer that slides in from the right of the daily piece page. Not a dedicated `/daily/.../process/` route. Not a section expanded below the piece.
+
+The open affordance is a full-width, quiet link-style row at the bottom of each piece. Clicking it opens a drawer with four sections: piece summary, timeline, per-round auditor output, rules applied, and the candidates Scanner surfaced. URL hash `#made` makes the drawer deep-linkable without a new route.
+
+**Why a drawer, not a page:**
+- Transparency lives *next* to the work, not behind a page-jump. A reader interested in "how was this made" is still interested in the piece itself; yanking them to a separate route breaks that thread.
+- The drawer preserves scroll position on the piece. Close → you're back where you were, reading.
+- One URL per piece keeps the library/daily routing model simple. Deep-links via `#made` work without new routes.
+
+**Why it ships with only existing data, no DB or agent changes:**
+- `pipeline_log` already has the full per-phase timeline (keyed by `run_id = YYYY-MM-DD`).
+- `audit_results` already has per-round scores + violations / claims / issues (keyed by `task_id = daily/YYYY-MM-DD`, grouped by `draft_id`).
+- `daily_candidates` already has the full Scanner candidate set.
+- `daily_pieces` already has piece metadata + voice_score + quality_flag.
+- Commit URL + file path are already written into the `publishing.done` step of `pipeline_log`.
+
+Data that doesn't exist is explicitly not displayed: no reader visits (engagement isn't wired for daily pieces), no Curator reasoning (never stored), no intermediate drafts (not kept). The drawer hides sections whose data is empty rather than inventing placeholders.
+
+**Shape of the fix:**
+- New public endpoint `src/pages/api/daily/[date]/made.ts` aggregates the four tables above into one JSON envelope. Independent of the admin dashboard endpoints — simpler to consume than orchestrating three calls client-side.
+- New `src/components/MadeBy.astro` renders the open button + drawer scaffold.
+- New `src/interactive/made-drawer.ts` Web Component: open/close, focus trap, Escape to close, body scroll lock, URL hash sync, fetch-on-mount, render.
+- New `src/styles/made.css` — standalone CSS, same pattern as `beats.css` / `zita.css` (avoids Tailwind purge).
+- Rules card uses keyword matching between auditor violations and voice-contract rules — an honest, if imperfect, signal of which rules the audit flagged something adjacent to. Each rule "lights up" when a keyword from its list appears in any violation string.
+- `src/lib/pipeline-steps.ts` extracted from `admin.astro` so admin + drawer share one step→label map and can't drift.
+
+**Verified:** `npm run build` clean. Static preview: drawer opens, closes via button / Escape / backdrop, hash deep-link works. Full content requires D1 — confirmed live after deploy.

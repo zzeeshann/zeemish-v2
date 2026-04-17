@@ -1,0 +1,239 @@
+import type { APIRoute } from 'astro';
+import { auditTier } from '../../../../lib/audit-tier';
+import type {
+  MadeEnvelope,
+  MadePiece,
+  MadeTimelineStep,
+  MadeRound,
+  MadeCandidate,
+  MadeCandidates,
+  MadeFactClaim,
+} from '../../../../lib/made-by';
+
+export const prerender = false;
+
+/**
+ * Public, no-auth endpoint. Returns the full "How this was made" envelope
+ * for a single piece: metadata + timeline + audit rounds + candidate set.
+ *
+ * All data aggregates existing tables — no new columns, no new events:
+ *   daily_pieces       → piece metadata
+ *   pipeline_log       → timeline + commit URL
+ *   audit_results      → rounds (grouped by draft_id)
+ *   daily_candidates   → picked + alsoConsidered
+ *
+ * Graceful degradation: if any one table is empty, its section in the
+ * response is empty and the drawer hides that section client-side.
+ */
+export const GET: APIRoute = async ({ params, locals }) => {
+  const db = locals.runtime.env.DB;
+  const date = String(params.date ?? '').trim();
+
+  // Basic validation — date route param is YYYY-MM-DD.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return new Response(JSON.stringify({ error: 'Invalid date' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const envelope: MadeEnvelope = {
+    date,
+    piece: null,
+    timeline: [],
+    rounds: [],
+    candidates: { total: 0, picked: null, alsoConsidered: [] },
+  };
+
+  // --- Piece metadata --------------------------------------------------
+  try {
+    const row = await db
+      .prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1')
+      .bind(date)
+      .first<any>();
+    if (row) {
+      const piece: MadePiece = {
+        headline: row.headline,
+        subject: row.underlying_subject ?? null,
+        wordCount: row.word_count ?? null,
+        beatCount: row.beat_count ?? null,
+        voiceScore: row.voice_score ?? null,
+        tier: auditTier(row.voice_score, row.quality_flag),
+        qualityFlag: row.quality_flag ?? null,
+        publishedAt: row.published_at ?? null,
+        commitUrl: null, // backfilled below from pipeline_log
+        filePath: null,  // backfilled below from pipeline_log
+      };
+      envelope.piece = piece;
+    }
+  } catch { /* no row yet */ }
+
+  // --- Timeline from pipeline_log --------------------------------------
+  try {
+    const steps = await db
+      .prepare(
+        'SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC',
+      )
+      .bind(date)
+      .all<{ step: string; status: string; data: string | null; created_at: number }>();
+
+    envelope.timeline = steps.results.map<MadeTimelineStep>((r) => ({
+      step: r.step,
+      status: r.status,
+      t: r.created_at,
+      data: r.data ? safeJson(r.data) : {},
+    }));
+
+    // Pull commit URL + file path from the publishing.done step if present.
+    if (envelope.piece) {
+      const pub = envelope.timeline.find(
+        (s) => s.step === 'publishing' && s.status === 'done',
+      );
+      if (pub?.data) {
+        envelope.piece.commitUrl = pub.data.commitUrl ?? null;
+        envelope.piece.filePath = pub.data.filePath ?? null;
+      }
+    }
+  } catch { /* leave empty */ }
+
+  // --- Audit rounds from audit_results ---------------------------------
+  try {
+    const rows = await db
+      .prepare(
+        'SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC',
+      )
+      .bind(`daily/${date}`)
+      .all<{
+        auditor: string;
+        passed: number;
+        score: number | null;
+        notes: string | null;
+        draft_id: string;
+        created_at: number;
+      }>();
+
+    // Group by draft_id — each draft_id is one round (…-r1, …-r2, …).
+    const byDraft = new Map<string, typeof rows.results>();
+    for (const r of rows.results) {
+      if (!byDraft.has(r.draft_id)) byDraft.set(r.draft_id, [] as any);
+      byDraft.get(r.draft_id)!.push(r);
+    }
+
+    // Keep insertion order (audits are inserted per round, oldest first).
+    const drafts = Array.from(byDraft.entries());
+    drafts.sort((a, b) => {
+      const ra = roundFromDraftId(a[0]);
+      const rb = roundFromDraftId(b[0]);
+      return ra - rb;
+    });
+
+    envelope.rounds = drafts.map<MadeRound>(([draftId, group]) => {
+      const round = roundFromDraftId(draftId);
+      const voice = group.find((g) => g.auditor === 'voice');
+      const structure = group.find((g) => g.auditor === 'structure');
+      const fact = group.find((g) => g.auditor === 'fact');
+
+      return {
+        round,
+        voice: {
+          score: voice?.score ?? null,
+          passed: !!voice?.passed,
+          violations: parseStringArray(voice?.notes),
+        },
+        structure: {
+          passed: !!structure?.passed,
+          issues: parseStringArray(structure?.notes),
+        },
+        fact: {
+          passed: !!fact?.passed,
+          claims: parseClaims(fact?.notes),
+        },
+      };
+    });
+  } catch { /* leave empty */ }
+
+  // --- Candidates Scanner surfaced -------------------------------------
+  try {
+    const cands = await db
+      .prepare(
+        'SELECT headline, source, category, summary, url, teachability_score, selected FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC',
+      )
+      .bind(date)
+      .all<{
+        headline: string;
+        source: string;
+        category: string | null;
+        summary: string | null;
+        url: string | null;
+        teachability_score: number | null;
+        selected: number | null;
+      }>();
+
+    const list = cands.results.map<MadeCandidate>((c) => ({
+      headline: c.headline,
+      source: c.source,
+      category: c.category ?? null,
+      summary: c.summary ?? null,
+      url: c.url ?? null,
+      teachabilityScore: c.teachability_score ?? null,
+    }));
+
+    const pickedIdx = cands.results.findIndex((c) => c.selected === 1);
+    const envelopeCandidates: MadeCandidates = {
+      total: list.length,
+      picked: pickedIdx >= 0 ? list[pickedIdx] : null,
+      alsoConsidered: list
+        .filter((_, i) => i !== pickedIdx)
+        .slice(0, 6),
+    };
+    envelope.candidates = envelopeCandidates;
+  } catch { /* leave empty */ }
+
+  return new Response(JSON.stringify(envelope), {
+    headers: {
+      'Content-Type': 'application/json',
+      // Safe to cache briefly — pipeline writes land once per day, and
+      // readers hitting the drawer minutes apart don't need stale-while-
+      // revalidate gymnastics. 5 min should be a fine floor.
+      'Cache-Control': 'public, max-age=60, s-maxage=300',
+    },
+  });
+};
+
+/** `daily/2026-04-17-r2` → 2. Falls back to 1 if the pattern is missing. */
+function roundFromDraftId(draftId: string): number {
+  const m = draftId.match(/-r(\d+)$/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+function safeJson(input: string): any {
+  try { return JSON.parse(input); } catch { return {}; }
+}
+
+function parseStringArray(notes: string | null | undefined): string[] {
+  if (!notes) return [];
+  try {
+    const parsed = JSON.parse(notes);
+    if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === 'string');
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function parseClaims(notes: string | null | undefined): MadeFactClaim[] {
+  if (!notes) return [];
+  try {
+    const parsed = JSON.parse(notes);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((c) => c && typeof c === 'object' && typeof c.claim === 'string')
+      .map((c: any) => ({
+        claim: c.claim,
+        status: typeof c.status === 'string' ? c.status : undefined,
+        note: typeof c.note === 'string' ? c.note : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}

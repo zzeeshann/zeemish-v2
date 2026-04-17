@@ -26,6 +26,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] `formatDate()` and `formatTime()` helpers in `src/lib/format.ts`
 - [x] `src/lib/rehype-beats.ts` — render-time MDX transform that wraps `##`-demarcated sections in `<lesson-shell>`/`<lesson-beat>`. Drafter keeps emitting plain markdown; the plugin connects the pipes so the dormant Web Component activates. Humanises kebab-case headings (`## what-is-hormuz` → "What Is Hormuz"). No-op when MDX has no h2s.
 - [x] Keyboard navigation (← / →) for beats, ignoring inputs/textareas and the Zita chat
+- [x] "How this was made" transparency drawer (`src/components/MadeBy.astro` + `src/interactive/made-drawer.ts` + `src/styles/made.css` + `/api/daily/[date]/made`). Per-piece timeline, audit rounds, rules applied, rejected candidates. Aggregates `pipeline_log` + `audit_results` + `daily_candidates` + `daily_pieces`. No new schema, no agent changes. Deep-linkable via `#made`.
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
