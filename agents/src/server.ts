@@ -20,7 +20,7 @@ export { LearnerAgent } from './learner';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
 export { ScannerAgent } from './scanner';
-export { PublishLessonWorkflow } from './workflows/publish-lesson';
+// Course workflow removed — daily pieces only
 
 /** Check admin auth — bearer token only (no query params — they leak in logs) */
 function checkAuth(request: Request, env: Env): boolean {
@@ -72,57 +72,12 @@ export default {
     }
 
     // Admin endpoints require auth
-    const adminPaths = ['/trigger', '/daily-trigger', '/status', '/digest', '/events', '/engagement'];
+    const adminPaths = ['/daily-trigger', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
-    }
-
-    // Manual trigger: POST /trigger?course=body&lesson=2
-    if (url.pathname === '/trigger' && request.method === 'POST') {
-      const courseSlug = url.searchParams.get('course');
-      const lessonNumber = parseInt(url.searchParams.get('lesson') ?? '0', 10);
-
-      if (!courseSlug || !lessonNumber) {
-        return new Response(
-          JSON.stringify({ error: 'Missing ?course=slug&lesson=number' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
-
-      try {
-        // Get Director agent via SDK helper
-        const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
-        const result = await director.triggerLesson(courseSlug, lessonNumber);
-
-        return new Response(JSON.stringify({
-          status: result.passed ? 'success' : 'failed_audit',
-          passed: result.passed,
-          revisionCount: result.revisionCount,
-          brief: result.brief,
-          audits: result.audits?.map((a: any) => ({
-            round: a.round,
-            voiceScore: a.voice?.score,
-            voicePassed: a.voice?.passed,
-            structurePassed: a.structure?.passed,
-            factsPassed: a.facts?.passed,
-            allPassed: a.allPassed,
-          })),
-          published: result.published ?? null,
-          mdxPreview: result.finalMdx?.slice(0, 500) + '...',
-          mdxLength: result.finalMdx?.length ?? 0,
-          model: result.draft?.model,
-          tokensUsed: result.draft?.tokensUsed,
-        }), { headers: { 'Content-Type': 'application/json' } });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        return new Response(
-          JSON.stringify({ error: message }),
-          { status: 500, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
     }
 
     // Status: GET /status

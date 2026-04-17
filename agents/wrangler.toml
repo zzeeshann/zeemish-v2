@@ -98,12 +98,6 @@ renamed_classes = [{from = "ReviserAgent", to = "LearnerAgent"}]
 tag = "v9"
 deleted_classes = ["EngagementAnalystAgent"]
 
-# Workflow bindings
-[[workflows]]
-name = "publish-lesson"
-binding = "PUBLISH_LESSON_WORKFLOW"
-class_name = "PublishLessonWorkflow"
-
 # R2 bucket for audio storage
 [[r2_buckets]]
 binding = "AUDIO_BUCKET"
