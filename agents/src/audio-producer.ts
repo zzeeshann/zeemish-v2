@@ -59,7 +59,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       beatAudioPaths.push({
         beatName: beat.name,
         r2Key,
-        publicUrl: `/audio/${r2Key}`, // Will be served via R2 public access or a Worker
+        publicUrl: `/${r2Key}`, // Served via R2 public access (key already starts with audio/)
         characterCount: plainText.length,
       });
     }

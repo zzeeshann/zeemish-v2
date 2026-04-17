@@ -4,9 +4,9 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**All 13 agents from the architecture are built.**
+**14 agents deployed** (13 from the original architecture + ScannerAgent for Daily Pieces).
 
-## Agents (all 13)
+## Agents (all 14)
 
 ### DirectorAgent
 - **Role:** Top-level supervisor. Orchestrates the full publishing pipeline.
@@ -40,8 +40,8 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **File:** `agents/src/structure-editor.ts`
 
 ### FactCheckerAgent
-- **Role:** Verifies factual claims. Flags unverified or incorrect claims.
-- **Limitation:** Uses Claude reasoning only — no web search tool yet.
+- **Role:** Verifies factual claims. Two-pass: Claude identifies claims, DuckDuckGo verifies unconfirmed ones.
+- **Limitation:** Web search uses DuckDuckGo instant answers (limited depth).
 - **File:** `agents/src/fact-checker.ts`
 
 ### IntegratorAgent
@@ -83,6 +83,13 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Note:** Does not do STT round-trip yet (can be added when Workers AI supports it)
 - **File:** `agents/src/audio-auditor.ts`
 
+### ScannerAgent
+- **Role:** Fetches news from Google News RSS (6 categories), deduplicates, stores candidates in D1.
+- **Sources:** TOP, TECHNOLOGY, SCIENCE, BUSINESS, HEALTH, WORLD feeds
+- **Output:** 30-50 daily candidates in `daily_candidates` table
+- **No API key needed** — uses free Google News RSS
+- **File:** `agents/src/scanner.ts`
+
 ## Endpoints
 
 ```bash
@@ -98,6 +105,10 @@ GET /digest
 
 # Recent observer events
 GET /events?limit=20
+
+# Trigger a daily piece (requires auth)
+POST /daily-trigger
+# Header: Authorization: Bearer <ADMIN_SECRET>
 
 # Engagement report for a course
 GET /engagement?course=body
@@ -130,3 +141,5 @@ wrangler deploy
 - Audio-Auditor does basic file checks only (no STT round-trip yet)
 - Voice contract duplicated in .md and .ts (manual sync required)
 - Fact-Checker web search uses DuckDuckGo instant answers (limited depth)
+- Scanner XML parsing uses regex (fragile with malformed RSS)
+- Weekend daily pieces not yet implemented (weekdays only)

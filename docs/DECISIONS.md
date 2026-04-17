@@ -132,3 +132,23 @@ Append-only. Never edit old entries.
 - Input validation: message length limits, JSON try-catch on all endpoints
 - Claude API errors no longer leaked to users
 - Login response no longer includes user_id
+
+## 2026-04-17: Daily Pieces system — news-driven teaching
+**Context:** Zishan's vision: Zeemish should teach from today's news, every morning.
+**Decision:** Added ScannerAgent (#14) + Director daily mode. Scanner fetches Google News RSS (free, no API key), Director picks the most teachable story, existing pipeline produces the piece.
+**Reason:** Nobody does "today's news → today's 10-minute lesson on the underlying system." CNN gives you the news. Coursera gives you the education 6 months later. Zeemish gives you both, same morning.
+
+## 2026-04-17: Google News RSS as first news source
+**Context:** Choosing a news data source for the Scanner.
+**Decision:** Google News RSS feeds (6 categories: TOP, TECH, SCIENCE, BUSINESS, HEALTH, WORLD).
+**Reason:** Free, no API key, unlimited requests, covers global news. Can add NewsData.io, Guardian API, etc. later as v2 sources.
+
+## 2026-04-17: CORS dynamic origin matching
+**Context:** Agents CORS was hardcoded to workers.dev domain.
+**Decision:** CORS now checks request Origin against an allowed list (workers.dev + zeemish.io). Added CORS preflight (OPTIONS) handler.
+**Reason:** Workers.dev domain will change to zeemish.io in production. Dynamic matching handles both without code changes.
+
+## 2026-04-17: CSRF origin check uses URL parsing, not substring
+**Context:** Security audit found the CSRF check used `origin.includes(host)` which is bypassable.
+**Decision:** Changed to `new URL(origin).host === host` for strict comparison.
+**Reason:** Substring matching allows attacker domains that contain the host string. URL parsing is correct.

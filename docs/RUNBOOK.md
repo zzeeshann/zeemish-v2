@@ -100,6 +100,21 @@ Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/ and use the trigger fo
 curl "https://zeemish-agents.zzeeshann.workers.dev/status"
 ```
 
+## Trigger a daily piece
+
+### Via curl (requires ADMIN_SECRET)
+```bash
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+### Automatic
+The Director runs daily at 6:00 AM UTC (weekdays). It scans news, picks the most teachable story, drafts, audits, and publishes.
+
+### View daily pieces
+- Archive: https://zeemish-v2.zzeeshann.workers.dev/daily/
+- Single piece: https://zeemish-v2.zzeeshann.workers.dev/daily/YYYY-MM-DD/
+
 ## Check what agents have been doing
 ```bash
 # Last 24 hours digest
@@ -158,7 +173,7 @@ zeemish-v2/
 │   ├── voice-contract.md   Voice rules for agents
 │   └── subject-values.json Subject priorities
 ├── agents/                 Separate Cloudflare Worker
-│   ├── src/                Agent code (13 agents)
+│   ├── src/                Agent code (14 agents)
 │   └── wrangler.toml       Agent worker config
 ├── migrations/             D1 schema migrations
 ├── docs/                   Living documentation

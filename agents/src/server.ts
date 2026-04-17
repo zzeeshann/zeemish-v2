@@ -31,11 +31,21 @@ function checkAuth(request: Request, env: Env): boolean {
   return false;
 }
 
-/** CORS headers restricted to zeemish.io */
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev',
-  'Content-Type': 'application/json',
-};
+/** Allowed origins for CORS */
+const ALLOWED_ORIGINS = [
+  'https://zeemish-v2.zzeeshann.workers.dev',
+  'https://zeemish.io',
+  'https://www.zeemish.io',
+];
+
+function corsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin') ?? '';
+  const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allowed,
+    'Content-Type': 'application/json',
+  };
+}
 
 /**
  * Entry point for the zeemish-agents Worker.
@@ -48,6 +58,18 @@ const CORS_HEADERS = {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // CORS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          ...corsHeaders(request),
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+          'Access-Control-Max-Age': '86400',
+        },
+      });
+    }
 
     // Admin endpoints require auth
     const adminPaths = ['/trigger', '/daily-trigger', '/status', '/digest', '/events', '/engagement'];
@@ -126,7 +148,7 @@ export default {
         const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
         const digest = await observer.getDailyDigest();
         return new Response(JSON.stringify(digest), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -143,7 +165,7 @@ export default {
         const observer = await getAgentByName<ObserverAgent>(env.OBSERVER, 'observer');
         const events = await observer.getRecentEvents(limit);
         return new Response(JSON.stringify({ events }), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -160,7 +182,7 @@ export default {
         const analyst = await getAgentByName<EngagementAnalystAgent>(env.ENGAGEMENT_ANALYST, 'analyst');
         const report = await analyst.analyse(courseId);
         return new Response(JSON.stringify(report), {
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://zeemish-v2.zzeeshann.workers.dev' },
+          headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
@@ -181,15 +203,15 @@ export default {
             headline: result.brief.headline,
             subject: result.brief.underlyingSubject,
             mdxLength: result.mdx.length,
-          }), { headers: CORS_HEADERS });
+          }), { headers: corsHeaders(request) });
         }
         return new Response(JSON.stringify({ status: 'skipped', reason: 'No teachable stories' }), {
-          headers: CORS_HEADERS,
+          headers: corsHeaders(request),
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         return new Response(JSON.stringify({ error: message }), {
-          status: 500, headers: CORS_HEADERS,
+          status: 500, headers: corsHeaders(request),
         });
       }
     }

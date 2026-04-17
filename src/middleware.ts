@@ -26,8 +26,15 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (context.request.method === 'POST') {
     const origin = context.request.headers.get('origin');
     const host = context.request.headers.get('host');
-    if (origin && host && !origin.includes(host)) {
-      return new Response('Forbidden', { status: 403 });
+    if (origin && host) {
+      try {
+        const originHost = new URL(origin).host;
+        if (originHost !== host) {
+          return new Response('Forbidden', { status: 403 });
+        }
+      } catch {
+        return new Response('Forbidden', { status: 403 });
+      }
     }
   }
 

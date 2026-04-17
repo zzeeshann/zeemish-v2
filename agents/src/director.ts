@@ -59,6 +59,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     status: 'idle',
     currentTask: null,
     lastLesson: null,
+    lastDailyPiece: null,
     error: null,
   };
 
@@ -118,8 +119,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     try {
       if (isWeekend) {
-        // Weekend mode: evergreen piece from subject-values
-        await this.triggerLesson('body', Math.floor(Math.random() * 12) + 1);
+        // Weekend mode: still run daily pipeline but with a note to pick
+        // an evergreen topic from subject-values instead of news
+        // For now, skip weekends — publish weekdays only
         return;
       }
 
@@ -180,9 +182,8 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         .run().catch(() => {});
     }
 
-    // Step 3: Draft the piece
+    // Step 3: Draft the piece (using Claude directly — same model as DrafterAgent)
     this.setState({ ...this.state, status: 'drafting' });
-    const drafter = await this.subAgent(DrafterAgent, `drafter-daily-${today}`);
     const draftResponse = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 8000,

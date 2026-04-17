@@ -22,6 +22,7 @@ export interface Env {
   AUDIO_BUCKET: R2Bucket;
   GITHUB_TOKEN: string;
   SCANNER: DurableObjectNamespace;
+  PUBLISH_LESSON_WORKFLOW: unknown;
   ADMIN_SECRET: string;
   ELEVENLABS_API_KEY: string;
   MAX_LESSONS_PER_DAY?: string;

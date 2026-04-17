@@ -31,7 +31,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — all 13 agents built)
+### Stage 4 — Agent Team (complete — 13 core agents built)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — supervisor, scheduled daily at 8am UTC, manual trigger
 - [x] CuratorAgent — lesson planning via Claude API
@@ -72,16 +72,27 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Per-user per-lesson conversation history in D1
 - [x] Integrated into LessonLayout
 
+### Daily Pieces System (complete)
+- [x] ScannerAgent (#14) — fetches Google News RSS across 6 categories
+- [x] Director daily mode — picks most teachable story, writes brief, runs pipeline
+- [x] Daily piece pages at /daily/ and /daily/YYYY-MM-DD/
+- [x] Home page redesign — today's piece prominent, archive below, courses below
+- [x] D1 tables: daily_candidates, daily_pieces (migration 0006)
+- [x] Content collection: dailyPieces with date/newsSource/underlyingSubject schema
+- [x] Scheduled: Scanner + Director at 6am UTC weekdays
+- [x] First daily piece published and live
+- [ ] Weekend evergreen mode (weekdays only for now)
+
 ## What's NOT built (honest gaps)
 
 ### Small remaining items
-- Resend email uses test domain — needs verified sending domain for production
 - Voice contract duplicated in .md and .ts — manual sync required
-- Per-day spending cap is hardcoded (MAX_LESSONS_PER_DAY = 2), not an env var
+- Weekend daily pieces not yet implemented
 
 ## Deviations from plan
 1. **Single Astro Worker for site + API** instead of separate workers. Avoids CORS.
 2. **Workflows v2 added** — PublishLessonWorkflow wraps the pipeline in durable steps.
+8. **14th agent (ScannerAgent)** added for Daily Pieces — not in original 13-agent architecture.
 3. **Agent code is flat files** (`curator.ts`) not subdirectories (`curator/agent.ts`).
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.

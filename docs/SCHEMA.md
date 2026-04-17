@@ -2,6 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
+**12 tables across 6 migrations.**
 
 ## Reader-side tables
 
@@ -161,9 +162,51 @@ Time-limited tokens for magic link passwordless login.
 
 Migration: `0005_magic_tokens.sql`
 
-## Migrations summary
+## Daily Pieces tables
+
+### daily_candidates
+News candidates from the Scanner, evaluated by the Director.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| date | TEXT | YYYY-MM-DD |
+| headline | TEXT | News headline |
+| source | TEXT | e.g. "Reuters", "BBC" |
+| category | TEXT | TOP, TECHNOLOGY, SCIENCE, BUSINESS, HEALTH, WORLD |
+| summary | TEXT | Short description from RSS |
+| url | TEXT | Link to original story |
+| teachability_score | INTEGER | 0-100, set by Director |
+| selected | INTEGER | 1 if Director picked this story |
+| created_at | INTEGER | |
+
+Migration: `0006_daily_pieces.sql`
+
+### daily_pieces
+Published daily teaching pieces.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| date | TEXT | YYYY-MM-DD |
+| headline | TEXT | The teaching piece title |
+| underlying_subject | TEXT | What it teaches about |
+| source_story | TEXT | Original news source |
+| word_count | INTEGER | |
+| beat_count | INTEGER | |
+| voice_score | INTEGER | |
+| fact_check_passed | INTEGER | |
+| has_interactive | INTEGER | 0 or 1 |
+| reading_minutes | INTEGER | |
+| published_at | INTEGER | |
+| created_at | INTEGER | |
+
+Migration: `0006_daily_pieces.sql`
+
+## Migrations summary (6 migrations, 12 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks, observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
 - `0004_audit_results.sql` — audit_results + idx_tasks_parent index
 - `0005_magic_tokens.sql` — magic_tokens for passwordless login
+- `0006_daily_pieces.sql` — daily_candidates, daily_pieces
