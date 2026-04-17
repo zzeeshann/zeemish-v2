@@ -10,7 +10,7 @@
 
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 14 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, generate audio, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
+An autonomous multi-agent publishing system. 13 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, generate audio, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
 
 ## Current state
 
@@ -42,21 +42,20 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 - Email: Resend (magic link from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
-### The 14 Agents
-1. **DirectorAgent** — supervisor, scheduled daily 2am UTC
-2. **CuratorAgent** — plans lessons from subject values
-3. **DrafterAgent** — writes MDX via Claude
-4. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
-5. **StructureEditorAgent** — beat structure & pacing gate
-6. **FactCheckerAgent** — verifies claims (two-pass: Claude + DuckDuckGo)
-7. **IntegratorAgent** — merges audit feedback, revises (3 rounds max)
-8. **AudioProducerAgent** — ElevenLabs TTS, saves MP3 to R2
-9. **AudioAuditorAgent** — verifies audio files in R2
-10. **PublisherAgent** — commits MDX to GitHub via Contents API
-11. **ObserverAgent** — event logging, daily digest
-12. **LearnerAgent** — watches reader engagement + writes learnings for future pieces
-13. **ScannerAgent** — fetches Google News RSS, stores daily candidates
-+ **ObserverAgent** (internal — not shown publicly, logs events for admin dashboard)
+### The 13 Agents (12 public + Observer internal)
+1. **ScannerAgent** — reads the news every morning
+2. **DirectorAgent** — picks the most teachable story, scheduled daily 2am UTC
+3. **CuratorAgent** — plans the piece structure
+4. **DrafterAgent** — writes the piece via Claude
+5. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
+6. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
+7. **StructureEditorAgent** — reviews flow and pacing
+8. **IntegratorAgent** — handles revisions before approval (3 rounds max)
+9. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2
+10. **AudioAuditorAgent** — checks pronunciation and audio quality
+11. **PublisherAgent** — commits to GitHub, piece goes live
+12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
+13. **ObserverAgent** — (internal) logs events for admin dashboard
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
@@ -77,7 +76,7 @@ src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate,
 src/styles/             global.css (Tailwind) + beats.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             All 14 agent files + workflows + shared code
+agents/src/             All 13 agent files + workflows + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation
 docs/handoff/           Original architecture + specs
@@ -109,11 +108,14 @@ docs/handoff/           Original architecture + specs
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
 
 ## Remaining minor items
-- Voice contract .ts copy missing belief line (don't update until pipeline runs daily)
+- Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
 - Weekend daily pieces not yet implemented (weekdays only)
 - Rate limiter is in-memory (resets on Worker restart)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
+
+## Hard rule
+**Published pieces are permanent. No agent writes to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
 
 ## Key rules
 - TypeScript strict everywhere
