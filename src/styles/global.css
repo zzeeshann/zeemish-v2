@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 @layer base {
+  /* Prevent horizontal overflow on mobile */
+  html, body {
+    @apply overflow-x-hidden;
+  }
+
   /* Prose defaults for MDX content */
   .prose {
     @apply text-zee-text leading-relaxed;
