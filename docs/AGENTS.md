@@ -4,13 +4,13 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**14 agents deployed** (13 from the original architecture + ScannerAgent for Daily Pieces).
+**13 agents deployed** (13 from the original architecture + ScannerAgent for Daily Pieces).
 
 ## Hard rule for all agents
 
 **Published pieces are permanent. Any agent can READ old pieces to learn from them. No agent WRITES to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
 
-## Agents (all 14)
+## Agents (13 total — 12 public + Observer internal)
 
 ### DirectorAgent
 - **Role:** Top-level supervisor. Orchestrates the full publishing pipeline.
@@ -64,15 +64,11 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `getRecentEvents()`, `getDailyDigest()`
 - **File:** `agents/src/observer.ts`
 
-### EngagementAnalystAgent
-- **Role:** Reads completion rates, drop-off beats. Identifies underperforming lessons.
-- **Threshold:** Lessons with <50% completion and ≥10 views flagged.
-- **File:** `agents/src/engagement-analyst.ts`
-
 ### LearnerAgent
-- **Role:** Learns from reader behaviour to make future pieces better. Does NOT touch published pieces — they are permanent records.
-- **Output:** Learnings written to D1 `learnings` table. The Drafter reads these when writing new content.
-- **Method:** `analyseAndLearn(lessonData)` — extracts 2-4 actionable learnings from engagement data
+- **Role:** Watches reader engagement data (completions, drop-offs, audio vs text, return rate) AND writes patterns into the learnings database for future pieces. Merged from the former EngagementAnalyst + Reviser.
+- **Methods:** `analyse(courseId, days)` — engagement report; `analyseAndLearn(lessonData)` — extract learnings
+- **Output:** Engagement reports + learnings written to D1 `learnings` table
+- **Does NOT touch published content.** Published pieces are permanent.
 - **File:** `agents/src/learner.ts`
 
 ### AudioProducerAgent

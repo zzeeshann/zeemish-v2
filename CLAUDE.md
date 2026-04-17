@@ -14,15 +14,15 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 
 ## Current state
 
-**Complete.** 14 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Courses removed — daily pieces are the primary content.
+**Complete.** 13 agents deployed, daily news-driven teaching operational, public + admin dashboard, security hardened. Courses removed — daily pieces are the primary content.
 
 ## What was built
 
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 14 agents on Cloudflare Agents SDK + Workflows v2, full pipeline with quality gates
-5. **Self-Improvement:** Engagement tracking, EngagementAnalyst + Learner, learnings database
+4. **Agent Team:** 13 agents on Cloudflare Agents SDK + Workflows v2, full pipeline with quality gates
+5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
 8. **Dashboard:** Public factory floor (/dashboard/) + admin control room (/dashboard/admin/)
@@ -31,7 +31,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 
 ### Two Workers
 - **zeemish-v2** — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
-- **zeemish-agents** — 14 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-agents** — 13 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
@@ -54,9 +54,9 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 9. **AudioAuditorAgent** — verifies audio files in R2
 10. **PublisherAgent** — commits MDX to GitHub via Contents API
 11. **ObserverAgent** — event logging, daily digest
-12. **EngagementAnalystAgent** — reads completion/drop-off data
-13. **LearnerAgent** — learns from reader behaviour to make future pieces better
-14. **ScannerAgent** — fetches Google News RSS, stores daily candidates
+12. **LearnerAgent** — watches reader engagement + writes learnings for future pieces
+13. **ScannerAgent** — fetches Google News RSS, stores daily candidates
++ **ObserverAgent** (internal — not shown publicly, logs events for admin dashboard)
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
@@ -102,7 +102,7 @@ docs/handoff/           Original architecture + specs
 
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
-- `docs/AGENTS.md` — all 14 agents, endpoints, secrets
+- `docs/AGENTS.md` — all 13 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 12 D1 tables, 6 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)

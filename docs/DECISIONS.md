@@ -182,3 +182,8 @@ Append-only. Never edit old entries.
 **Context:** "Reviser" implies changing published content. It doesn't do that.
 **Decision:** Rename ReviserAgent to LearnerAgent. "Learns from reader behaviour to make future pieces better."
 **Reason:** The name should match the job. It learns. It doesn't revise.
+
+## 2026-04-17: Merge EngagementAnalyst + Reviser into LearnerAgent
+**Context:** Two agents doing related work — one watched engagement, the other extracted learnings. Unnecessary separation.
+**Decision:** Merge into one LearnerAgent. It watches reader engagement (completions, drop-offs, audio vs text) AND writes patterns into the learnings database. 13 agents total now (12 public + Observer internal).
+**Reason:** Simpler. One agent owns the entire "learn from readers" responsibility. Fewer moving parts.

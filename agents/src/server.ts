@@ -5,7 +5,7 @@ import { DirectorAgent } from './director';
 import { CuratorAgent } from './curator';
 import { DrafterAgent } from './drafter';
 import { ObserverAgent } from './observer';
-import { EngagementAnalystAgent } from './engagement-analyst';
+import { LearnerAgent } from './learner';
 
 // Re-export for Durable Object bindings
 export { DirectorAgent, CuratorAgent, DrafterAgent };
@@ -15,7 +15,7 @@ export { FactCheckerAgent } from './fact-checker';
 export { IntegratorAgent } from './integrator';
 export { PublisherAgent } from './publisher';
 export { ObserverAgent } from './observer';
-export { EngagementAnalystAgent } from './engagement-analyst';
+// EngagementAnalyst merged into LearnerAgent
 export { LearnerAgent } from './learner';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
@@ -179,7 +179,7 @@ export default {
     if (url.pathname === '/engagement' && request.method === 'GET') {
       const courseId = url.searchParams.get('course') ?? 'daily';
       try {
-        const analyst = await getAgentByName<EngagementAnalystAgent>(env.ENGAGEMENT_ANALYST, 'analyst');
+        const analyst = await getAgentByName<LearnerAgent>(env.LEARNER, 'learner');
         const report = await analyst.analyse(courseId);
         return new Response(JSON.stringify(report), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders(request) },

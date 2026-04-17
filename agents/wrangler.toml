@@ -59,10 +59,6 @@ name = "OBSERVER"
 class_name = "ObserverAgent"
 
 [[durable_objects.bindings]]
-name = "ENGAGEMENT_ANALYST"
-class_name = "EngagementAnalystAgent"
-
-[[durable_objects.bindings]]
 name = "LEARNER"
 class_name = "LearnerAgent"
 
@@ -97,6 +93,10 @@ new_sqlite_classes = ["ScannerAgent"]
 [[migrations]]
 tag = "v8"
 renamed_classes = [{from = "ReviserAgent", to = "LearnerAgent"}]
+
+[[migrations]]
+tag = "v9"
+deleted_classes = ["EngagementAnalystAgent"]
 
 # Workflow bindings
 [[workflows]]

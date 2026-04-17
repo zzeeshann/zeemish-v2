@@ -2,7 +2,33 @@ import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { writeLearning } from './shared/learnings';
-import type { UnderperformingLesson } from './engagement-analyst';
+
+// --- Types (merged from EngagementAnalyst + Learner) ---
+
+export interface EngagementReport {
+  courseId: string;
+  underperformingLessons: UnderperformingLesson[];
+  topLessons: LessonMetric[];
+  totalViews: number;
+  totalCompletions: number;
+  overallCompletionRate: number;
+}
+
+export interface UnderperformingLesson {
+  lessonId: string;
+  views: number;
+  completions: number;
+  completionRate: number;
+  dropOffBeat: string | null;
+  reason: string;
+}
+
+export interface LessonMetric {
+  lessonId: string;
+  views: number;
+  completions: number;
+  completionRate: number;
+}
 
 export interface EngagementLearning {
   lessonId: string;
@@ -12,18 +38,105 @@ export interface EngagementLearning {
 
 interface LearnerState {
   learningsWritten: number;
+  lastReport: EngagementReport | null;
 }
 
 /**
- * LearnerAgent — learns from reader behaviour to make future pieces better.
- * Does NOT revise or update published pieces. Published pieces are permanent.
+ * LearnerAgent — watches reader engagement data and writes patterns
+ * into the learnings database for future pieces.
  *
- * Analyses engagement patterns (completion rates, drop-off beats) and
- * writes actionable learnings to the D1 learnings table. The Drafter
- * reads these when writing new content.
+ * Two jobs, one agent:
+ * 1. Analyse engagement (completions, drop-offs, audio vs text, return rate)
+ * 2. Extract actionable learnings from underperforming pieces
+ *
+ * Does NOT touch published pieces. Published content is permanent.
+ * All improvements feed forward into future pieces only.
  */
 export class LearnerAgent extends Agent<Env, LearnerState> {
-  initialState: LearnerState = { learningsWritten: 0 };
+  initialState: LearnerState = { learningsWritten: 0, lastReport: null };
+
+  // --- Engagement analysis ---
+
+  /** Analyse engagement for a content stream over the last N days */
+  async analyse(courseId: string, days = 7): Promise<EngagementReport> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceStr = since.toISOString().slice(0, 10);
+
+    const result = await this.env.DB
+      .prepare(
+        `SELECT lesson_id,
+                SUM(views) as total_views,
+                SUM(completions) as total_completions,
+                GROUP_CONCAT(drop_off_beat) as drop_off_beats
+         FROM engagement
+         WHERE course_id = ? AND date >= ?
+         GROUP BY lesson_id
+         ORDER BY lesson_id`,
+      )
+      .bind(courseId, sinceStr)
+      .all<{
+        lesson_id: string;
+        total_views: number;
+        total_completions: number;
+        drop_off_beats: string | null;
+      }>();
+
+    const metrics: LessonMetric[] = result.results.map((r) => ({
+      lessonId: r.lesson_id,
+      views: r.total_views,
+      completions: r.total_completions,
+      completionRate: r.total_views > 0 ? Math.round((r.total_completions / r.total_views) * 100) : 0,
+    }));
+
+    const totalViews = metrics.reduce((sum, m) => sum + m.views, 0);
+    const totalCompletions = metrics.reduce((sum, m) => sum + m.completions, 0);
+    const overallCompletionRate = totalViews > 0 ? Math.round((totalCompletions / totalViews) * 100) : 0;
+
+    const underperforming: UnderperformingLesson[] = result.results
+      .filter((r) => r.total_views >= 10 && (r.total_completions / r.total_views) < 0.5)
+      .map((r) => {
+        const rate = Math.round((r.total_completions / r.total_views) * 100);
+        const mostCommonDropOff = r.drop_off_beats
+          ?.split(',')
+          .filter(Boolean)
+          .reduce((acc: Record<string, number>, beat: string) => {
+            acc[beat] = (acc[beat] || 0) + 1;
+            return acc;
+          }, {});
+        const topDropOff = mostCommonDropOff
+          ? Object.entries(mostCommonDropOff).sort(([, a], [, b]) => b - a)[0]?.[0] ?? null
+          : null;
+
+        return {
+          lessonId: r.lesson_id,
+          views: r.total_views,
+          completions: r.total_completions,
+          completionRate: rate,
+          dropOffBeat: topDropOff,
+          reason: rate < 30
+            ? 'Very low completion rate'
+            : topDropOff
+              ? `Sharp drop-off at beat: ${topDropOff}`
+              : 'Below average completion',
+        };
+      });
+
+    const topLessons = [...metrics]
+      .filter((m) => m.views >= 5)
+      .sort((a, b) => b.completionRate - a.completionRate)
+      .slice(0, 3);
+
+    const report: EngagementReport = {
+      courseId, underperformingLessons: underperforming, topLessons,
+      totalViews, totalCompletions, overallCompletionRate,
+    };
+
+    this.setState({ ...this.state, lastReport: report });
+    return report;
+  }
+
+  // --- Learning extraction ---
 
   /** Analyse an underperforming piece and extract learnings for future pieces */
   async analyseAndLearn(lessonData: UnderperformingLesson): Promise<EngagementLearning> {
@@ -84,7 +197,7 @@ Extract learnings for future pieces. What should the Drafter do differently next
       } catch { /* learning write shouldn't break */ }
     }
 
-    this.setState({ learningsWritten: this.state.learningsWritten + parsed.learnings.length });
+    this.setState({ ...this.state, learningsWritten: this.state.learningsWritten + parsed.learnings.length });
 
     return {
       lessonId: lessonData.lessonId,
