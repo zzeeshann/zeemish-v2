@@ -68,12 +68,23 @@ wrangler secret put ELEVENLABS_API_KEY  # For Audio-Producer TTS
 wrangler secret put ADMIN_SECRET        # For trigger endpoint auth
 ```
 
+### Optional agents-worker settings
+```bash
+# Override Scanner's RSS feed list without a redeploy.
+# Shape: {"CATEGORY": "https://feed.url/...", ...}
+# Malformed JSON falls back to the hardcoded defaults in scanner.ts.
+wrangler secret put SCANNER_RSS_FEEDS_JSON
+```
+
 ## D1 Database
 
 ### Run migrations
+There are 7 migrations (`0001_init.sql` … `0007_pipeline_log.sql`).
+Run them in order on a fresh database:
 ```bash
-# Run a migration on remote D1
-wrangler d1 execute zeemish --remote --file=migrations/0001_init.sql
+for f in migrations/*.sql; do
+  wrangler d1 execute zeemish --remote --file="$f"
+done
 
 # Check what's in the database
 wrangler d1 execute zeemish --remote --command="SELECT name FROM sqlite_master WHERE type='table'"
@@ -85,7 +96,10 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM users LIMIT 5"
 wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 10"
 ```
 
-## Trigger a lesson (agent pipeline)
+## Trigger a daily piece
+
+Daily pieces are the only content type. The manual trigger and the
+scheduled run use the same `/daily-trigger` endpoint.
 
 ### Via curl (requires ADMIN_SECRET)
 ```bash
@@ -94,23 +108,20 @@ curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
 ```
 
 ### Via dashboard
-Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/ and use the trigger button (requires ADMIN_EMAIL login).
-
-### Check status
-```bash
-curl "https://zeemish-agents.zzeeshann.workers.dev/status"
-```
-
-## Trigger a daily piece
-
-### Via curl (requires ADMIN_SECRET)
-```bash
-curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
-  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
-```
+Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/ and use
+the trigger button (requires ADMIN_EMAIL login).
 
 ### Automatic
-The Director runs daily at 2:00 AM UTC. It scans news, picks the most teachable story, drafts, audits, and publishes. Piece is ready by ~4:00 AM UTC.
+The Director runs daily at 2:00 AM UTC (weekdays only — see
+`docs/AGENTS.md`). It scans news, picks the most teachable story,
+drafts, audits, and publishes. Piece is ready by ~4:00 AM UTC.
+
+### Check Director status
+```bash
+# /status requires auth — it's an admin endpoint
+curl "https://zeemish-agents.zzeeshann.workers.dev/status" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
 
 ### View daily pieces
 - Archive: https://zeemish-v2.zzeeshann.workers.dev/daily/
@@ -134,19 +145,22 @@ git push
 ### 2. Clear today's D1 rows across all 5 tables
 ```bash
 DATE=$(date -u +%Y-%m-%d)
-DATE_MS=$(($(date -u -j -f "%Y-%m-%d" "$DATE" "+%s") * 1000))
 npx wrangler d1 execute zeemish --remote --command \
   "DELETE FROM daily_pieces WHERE date = '$DATE'; \
    DELETE FROM daily_candidates WHERE date = '$DATE'; \
    DELETE FROM pipeline_log WHERE run_id = '$DATE'; \
    DELETE FROM audit_results WHERE task_id LIKE 'daily/$DATE%'; \
-   DELETE FROM observer_events WHERE created_at >= $DATE_MS;"
+   DELETE FROM observer_events WHERE created_at >= (strftime('%s','now','start of day') * 1000);"
 ```
-Note: `observer_events` uses an epoch-ms `created_at` timestamp (not a date
-string), which is why it's filtered differently. If you forget this table,
-the admin dashboard Observer feed still shows yesterday's "Published: …"
-events even after the underlying pieces are deleted — accurate history but
-visually confusing during a reset.
+Note: `observer_events` uses an epoch-ms `created_at` timestamp (not a
+date string), so the cutoff is computed inside SQL with
+`strftime(...,'start of day')`. A prior version of this runbook used a
+shell `DATE_MS` formula that reused the current time-of-day on macOS
+BSD `date`, leaving morning-run events behind after an afternoon
+reset. If you forget this table, the admin dashboard Observer feed
+still shows earlier "Published: …" events even after the underlying
+pieces are deleted — accurate history but visually confusing during a
+reset.
 
 ### 3. Trigger a fresh run
 Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
@@ -158,17 +172,28 @@ Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
 - Live URL: `/daily/YYYY-MM-DD/` should return 200 after the post-publish deploy completes (~30s)
 
 ## Check what agents have been doing
+All three endpoints are admin-only and require `ADMIN_SECRET`.
 ```bash
 # Last 24 hours digest
-curl "https://zeemish-agents.zzeeshann.workers.dev/digest"
+curl "https://zeemish-agents.zzeeshann.workers.dev/digest" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 
 # Recent events
-curl "https://zeemish-agents.zzeeshann.workers.dev/events?limit=10"
+curl "https://zeemish-agents.zzeeshann.workers.dev/events?limit=10" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 
 # Engagement report
 curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
   -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
+
+### What to watch for on a fresh run
+- `severity: 'info'`, title `Published: …` — the happy path
+- `severity: 'escalation'`, title `Escalation: …` — failed 3 revision rounds
+- `severity: 'warn'`, title `Error: fact-check` — web search (DuckDuckGo)
+  was unreachable, so fact-checking used Claude's first-pass assessment
+  only. Pipeline continued, but unverified claims may have slipped past.
+  Worth re-running or spot-checking the piece.
 
 ## Dashboard API endpoints (site worker)
 ```bash
@@ -211,7 +236,10 @@ Your hook text here.
 <!-- more beats -->
 </lesson-shell>
 ```
-Then `pnpm build && wrangler deploy`.
+Then commit and push — GitHub Actions rebuilds and deploys the site
+automatically. Don't `wrangler deploy` locally without committing, as
+the next auto-deploy will rebuild from `main` and strip the
+uncommitted file.
 
 ## Project structure
 ```
