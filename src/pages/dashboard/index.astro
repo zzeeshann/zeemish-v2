@@ -19,15 +19,19 @@ let stats = { totalPieces: 0, avgVoiceScore: 0, subjects: [] as string[], runnin
 let todayScores = { voice: null as any, facts: null as any, structure: null as any };
 
 try {
+  // Today's piece shows regardless of quality — the day isn't blank,
+  // even on a low-quality day. Banner on /daily/today/ handles the
+  // reader-side messaging. All other queries here are archive-facing
+  // and filter low-quality out (see docs/DECISIONS.md).
   todaysPiece = await db.prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1').bind(today).first();
 
-  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces ORDER BY date DESC LIMIT 7').all();
+  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date DESC LIMIT 7').all();
   recentPieces = recent.results;
 
-  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces').first<{ total: number }>();
+  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces WHERE quality_flag IS NULL').first<{ total: number }>();
   const avgVoice = await db.prepare("SELECT AVG(score) as avg FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number }>();
-  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL').all<{ underlying_subject: string }>();
-  const firstPiece = await db.prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1').first<{ date: string }>();
+  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL AND quality_flag IS NULL').all<{ underlying_subject: string }>();
+  const firstPiece = await db.prepare('SELECT date FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date ASC LIMIT 1').first<{ date: string }>();
 
   stats = {
     totalPieces: countResult?.total ?? 0,

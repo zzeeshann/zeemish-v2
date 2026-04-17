@@ -112,9 +112,11 @@ Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/ and use
 the trigger button (requires ADMIN_EMAIL login).
 
 ### Automatic
-The Director runs daily at 2:00 AM UTC (weekdays only — see
-`docs/AGENTS.md`). It scans news, picks the most teachable story,
-drafts, audits, and publishes. Piece is ready by ~4:00 AM UTC.
+The Director runs every day at 2:00 AM UTC (including weekends). It
+scans news, picks the most teachable story, drafts, audits, and
+publishes. Piece is ready by ~4:00 AM UTC. If the news is thin (rare,
+but possible on quiet weekends), Curator's skip path logs "No teachable
+stories" via Observer and the day is left blank.
 
 ### Check Director status
 ```bash
@@ -132,9 +134,26 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/status" \
 "One piece per day" is the product (see `docs/DECISIONS.md` — 2026-04-17
 entry on this). The admin manual trigger bypasses the duplicate-publish
 guard so you can test end-to-end during development, but that can leave
-duplicate state from multiple runs. To re-test from scratch:
+duplicate state from multiple runs.
 
-### 1. Remove today's MDX file(s) from git
+### One command
+```bash
+export ADMIN_SECRET="..."   # same as AGENTS_ADMIN_SECRET
+./scripts/reset-today.sh
+```
+The script does the three steps below (git rm + D1 clear + trigger) in
+order, pushes the cleanup commit, and prints the run's HTTP status.
+Runs in under a minute including the push wait. See
+`scripts/reset-today.sh` for what it actually executes.
+
+### Verify
+- Pipeline monitor on `/dashboard/admin/` shows step-by-step progress
+- Public pipeline data: `curl /api/dashboard/pipeline` (no auth)
+- Single piece in D1 after completion: `curl /api/dashboard/today` (no auth)
+- Live URL: `/daily/YYYY-MM-DD/` should return 200 after the post-publish deploy completes (~30s)
+
+### Manual fallback (if the script misbehaves)
+#### 1. Remove today's MDX file(s) from git
 ```bash
 git rm content/daily-pieces/$(date -u +%Y-%m-%d)-*.mdx
 git commit -m "test: reset for pipeline re-test"
@@ -142,7 +161,7 @@ git push
 # Wait ~30s for auto-deploy to strip them from the live site
 ```
 
-### 2. Clear today's D1 rows across all 5 tables
+#### 2. Clear today's D1 rows across all 5 tables
 ```bash
 DATE=$(date -u +%Y-%m-%d)
 npx wrangler d1 execute zeemish --remote --command \
@@ -162,14 +181,8 @@ still shows earlier "Published: …" events even after the underlying
 pieces are deleted — accurate history but visually confusing during a
 reset.
 
-### 3. Trigger a fresh run
+#### 3. Trigger a fresh run
 Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
-
-### 4. Verify
-- Pipeline monitor on `/dashboard/admin/` shows step-by-step progress
-- Public pipeline data: `curl /api/dashboard/pipeline` (no auth)
-- Single piece in D1 after completion: `curl /api/dashboard/today` (no auth)
-- Live URL: `/daily/YYYY-MM-DD/` should return 200 after the post-publish deploy completes (~30s)
 
 ## Check what agents have been doing
 All three endpoints are admin-only and require `ADMIN_SECRET`.

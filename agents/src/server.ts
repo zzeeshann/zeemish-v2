@@ -56,7 +56,7 @@ function corsHeaders(request: Request): Record<string, string> {
  * - /agents/* — Agent SDK routing (WebSocket, RPC)
  */
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // CORS preflight
@@ -148,24 +148,34 @@ export default {
     }
 
     // Daily piece trigger: POST /daily-trigger (requires auth)
+    //
+    // Acknowledge-and-run: the full pipeline takes minutes (Scanner → Curator
+    // → Drafter → 1-3 audit rounds → Publisher), far longer than a reasonable
+    // HTTP request. We return 202 Accepted immediately with the run id and
+    // hand the work off via ctx.waitUntil so the isolate stays alive until
+    // it completes. Caller (admin dashboard, curl, reset-today script) polls
+    // /api/dashboard/pipeline or /status for progress.
     if (url.pathname === '/daily-trigger' && request.method === 'POST') {
       try {
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        const runId = new Date().toISOString().slice(0, 10);
         // Manual admin trigger bypasses the "already published today" guard.
         // ADMIN_SECRET auth above is the control — if you got here, you meant it.
-        const result = await director.triggerDailyPiece(true);
-        if (result) {
-          return new Response(JSON.stringify({
-            status: 'success',
-            headline: result.brief.headline,
-            subject: result.brief.underlyingSubject,
-            mdxLength: result.mdx.length,
-          }), { headers: corsHeaders(request) });
-        }
-        return new Response(JSON.stringify({ status: 'skipped', reason: 'No teachable stories' }), {
+        ctx.waitUntil(
+          director.triggerDailyPiece(true).catch((err) => {
+            // Swallowing here is intentional: Director logs errors via
+            // Observer + pipeline_log already. waitUntil unhandled rejections
+            // would just surface as Cloudflare runtime noise.
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.error(`[daily-trigger] background run failed for ${runId}:`, message);
+          }),
+        );
+        return new Response(JSON.stringify({ status: 'started', runId }), {
+          status: 202,
           headers: corsHeaders(request),
         });
       } catch (err) {
+        // Only synchronous failures (e.g. DO stub creation) reach here.
         const message = err instanceof Error ? err.message : 'Unknown error';
         return new Response(JSON.stringify({ error: message }), {
           status: 500, headers: corsHeaders(request),

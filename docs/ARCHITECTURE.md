@@ -86,15 +86,13 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Home page redesign — today's piece prominent, library below
 - [x] D1 tables: daily_candidates, daily_pieces (migration 0006)
 - [x] Content collection: dailyPieces with date/newsSource/underlyingSubject schema
-- [x] Scheduled: Scanner + Director at 2am UTC weekdays
+- [x] Scheduled: Scanner + Director at 2am UTC every day (including weekends)
 - [x] First daily piece published and live
-- [ ] Weekend evergreen mode (weekdays only for now)
 
 ## What's NOT built (honest gaps)
 
 ### Small remaining items
 - Voice contract duplicated in .md and .ts — manual sync required
-- Weekend daily pieces not yet implemented
 
 ## Deviations from plan
 1. **Single Astro Worker for site + API** instead of separate workers. Avoids CORS.

@@ -17,6 +17,11 @@ const dailyPieces = defineCollection({
     beatCount: z.number(),
     description: z.string(),
     audioSrc: z.string().optional(),
+    // Set to 'low' when Director publishes a piece that failed the
+    // voice/structure/fact gates after max revisions. Library and
+    // dashboard archive views filter these out; the daily page still
+    // renders them so the day isn't blank, with a banner explaining why.
+    qualityFlag: z.enum(['low']).optional(),
   }),
 });
 

@@ -4,7 +4,12 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { formatTime, formatDate } from '../../lib/format';
 
 const pieces = await getCollection('dailyPieces');
-const sorted = [...pieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
+// Archive listing — exclude low-quality pieces (see docs/DECISIONS.md
+// 2026-04-17 "Publish-anyway"). They still render at /daily/YYYY-MM-DD/
+// directly, with a banner, so the day isn't blank.
+const sorted = [...pieces]
+  .filter((p) => p.data.qualityFlag !== 'low')
+  .sort((a, b) => b.data.date.localeCompare(a.data.date));
 ---
 
 <BaseLayout title="Daily — Zeemish" description="Today's news, explained.">

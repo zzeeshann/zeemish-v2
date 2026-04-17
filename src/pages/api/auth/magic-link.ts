@@ -25,7 +25,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const normalizedEmail = email.toLowerCase().trim();
 
   // Rate limit: 3 magic link requests per email per hour
-  const limit = checkRateLimit(`magic:${normalizedEmail}`, 3, 3600);
+  const limit = await checkRateLimit(locals.runtime.env.RATE_LIMIT_KV, `magic:${normalizedEmail}`, 3, 3600);
   if (!limit.allowed) {
     return new Response(JSON.stringify({ error: 'Too many requests. Check your email or try again later.' }), {
       status: 429,

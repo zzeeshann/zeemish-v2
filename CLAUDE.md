@@ -26,7 +26,7 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates (2 paused)
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
-7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every weekday at 2am UTC
+7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every day at 2am UTC
 8. **Dashboard:** Public factory floor (/dashboard/) + admin control room (/dashboard/admin/)
 
 ## Architecture
@@ -49,7 +49,7 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher. Audio agents excluded from the pipeline (paused). Observer receives events throughout. Learner runs off-pipeline, watching readers.
 
 1. **ScannerAgent** — reads the news every morning
-2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Scheduled daily 2am UTC weekdays.
+2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Scheduled 2am UTC every day.
 3. **CuratorAgent** — picks the most teachable story from today's candidates, plans beats + hook + teaching angle
 4. **DrafterAgent** — writes the MDX from the brief, enforces `<lesson-shell>` / `<lesson-beat>` format
 5. **VoiceAuditorAgent** — voice compliance gate (≥85/100)
@@ -115,20 +115,16 @@ docs/handoff/           Original architecture + specs
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
-- Weekend daily pieces not yet implemented (weekdays only)
-- Rate limiter is in-memory (resets on Worker restart)
+- Rate limiter is KV-backed (Workers KV, eventually consistent)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
 - Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
 - Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
 
 ## Dev-mode testing
-See `docs/RUNBOOK.md` → "Reset today" for the 3-step reset procedure (git
-rm MDX + D1 DELETE + trigger). Zishan has requested a single reset
-script/button for next session so the procedure is one command, not three.
-Candidates for how:
-- `scripts/reset-today.sh` that runs git rm + wrangler d1 execute in sequence
-- Admin dashboard button "Reset today" that wipes D1 rows (MDX still manual via git)
-- Combined: script that does everything including auto-triggering the pipeline after
+One-command reset: `ADMIN_SECRET=... ./scripts/reset-today.sh` (git rm
+MDX + D1 clear across 5 tables + trigger fresh pipeline). See
+`docs/RUNBOOK.md` → "Reset today" for what it does and the manual
+fallback.
 
 ## Hard rule
 **Published pieces are permanent. No agent writes to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**

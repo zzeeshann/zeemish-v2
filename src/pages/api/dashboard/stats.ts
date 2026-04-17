@@ -7,8 +7,11 @@ export const GET: APIRoute = async ({ locals }) => {
   const db = locals.runtime.env.DB;
 
   try {
+    // All counters reflect the *archived* catalogue — low-quality pieces
+    // (audit failed after max revisions) are excluded so public stats
+    // advertise the clean library, not the raw publish count.
     const countResult = await db
-      .prepare('SELECT COUNT(*) as total FROM daily_pieces')
+      .prepare('SELECT COUNT(*) as total FROM daily_pieces WHERE quality_flag IS NULL')
       .first<{ total: number }>();
 
     const avgVoice = await db
@@ -17,11 +20,11 @@ export const GET: APIRoute = async ({ locals }) => {
       .first<{ avg_score: number | null }>();
 
     const subjects = await db
-      .prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL')
+      .prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL AND quality_flag IS NULL')
       .all<{ underlying_subject: string }>();
 
     const firstPiece = await db
-      .prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1')
+      .prepare('SELECT date FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date ASC LIMIT 1')
       .first<{ date: string }>();
 
     return new Response(JSON.stringify({

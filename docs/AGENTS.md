@@ -45,7 +45,7 @@ Learner: runs off-pipeline on reader engagement data
 ### 2. DirectorAgent
 - **Role:** Pure orchestrator. Routes work between agents. Zero LLM calls.
 - **State:** `{ status: 'idle' | 'running' | 'error', currentPhase, currentTask, lastDailyPiece, error }`
-- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC weekdays)
+- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC every day)
 - **Spawns:** Scanner, Curator, Drafter, auditors, Integrator, Publisher, Observer as sub-agents
 - **Writes `pipeline_log`:** step-by-step log visible in admin dashboard
 - **File:** `agents/src/director.ts`
@@ -182,4 +182,3 @@ wrangler deploy
 - Voice contract duplicated in `.md` and `.ts` (manual sync required)
 - Fact-Checker web search uses DuckDuckGo instant answers (limited depth)
 - Scanner XML parsing uses regex (fragile with malformed RSS)
-- Weekend daily pieces not yet implemented (weekdays only)

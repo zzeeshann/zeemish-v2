@@ -217,7 +217,16 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
     if (d.commitUrl) detail = `<a href="${d.commitUrl}" class="text-zee-primary hover:underline" target="_blank">View commit</a>`;
     if (d.reason) detail = d.reason;
     if (d.error) detail = d.error;
-    if (step.step === 'done' && d.voiceScore) detail = `Voice: ${d.voiceScore}/100 · ${d.revisions} revision${d.revisions !== 1 ? 's' : ''}`;
+    if (step.step === 'done' && d.voiceScore) {
+      detail = `Voice: ${d.voiceScore}/100 · ${d.revisions} revision${d.revisions !== 1 ? 's' : ''}`;
+      if (d.qualityFlag === 'low') {
+        detail += ` · <span class="text-yellow-700 font-medium">LOW QUALITY</span>`;
+        if (d.failedGates) detail += ` (failed: ${d.failedGates.join(', ')})`;
+      }
+    }
+    if (step.step === 'publishing' && step.status === 'done' && d.qualityFlag === 'low') {
+      detail += ` <span class="text-yellow-700 font-medium">[low quality]</span>`;
+    }
 
     return `<div class="flex items-start gap-3 py-2">
       <span class="text-lg leading-none mt-0.5">${icon}</span>
@@ -249,21 +258,38 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
     } catch { /* silent */ }
   }
 
-  // Trigger
+  // Trigger — awaits the 202 ack, then polls for progress.
+  // The trigger endpoint now returns immediately via ctx.waitUntil on the
+  // agents worker, so this fetch is fast. Any failure (401/500/network) is
+  // surfaced to the admin instead of leaving the UI stuck on "Starting...".
   triggerBtn?.addEventListener('click', async () => {
     triggerBtn.disabled = true;
     statusEl!.textContent = 'Starting pipeline...';
     stepsEl!.innerHTML = '<p class="text-sm text-zee-muted">⏳ Starting...</p>';
 
-    // Start polling immediately
-    pollInterval = setInterval(pollPipeline, 5000) as unknown as number;
-
     try {
-      fetch('/api/agents/trigger', { method: 'POST' }); // Fire and forget
-      // Don't await — let polling show progress
-      setTimeout(pollPipeline, 2000); // First poll after 2s
-    } catch {
-      statusEl!.textContent = 'Failed to trigger';
+      const res = await fetch('/api/agents/trigger', { method: 'POST' });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const body = await res.json() as { error?: string };
+          if (body.error) detail = body.error;
+        } catch { /* body wasn't JSON */ }
+        statusEl!.textContent = `Failed: ${res.status} ${detail}`;
+        stepsEl!.innerHTML = `<p class="text-sm text-red-600">Trigger failed — ${res.status} ${detail}</p>`;
+        triggerBtn.disabled = false;
+        return;
+      }
+
+      const body = await res.json() as { runId?: string; status?: string };
+      statusEl!.textContent = body.runId ? `Started (run ${body.runId})` : 'Started';
+      // Begin polling now that we know the run is underway.
+      pollInterval = setInterval(pollPipeline, 5000) as unknown as number;
+      setTimeout(pollPipeline, 2000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Network error';
+      statusEl!.textContent = `Failed: ${message}`;
+      stepsEl!.innerHTML = `<p class="text-sm text-red-600">Trigger failed — ${message}</p>`;
       triggerBtn.disabled = false;
     }
   });

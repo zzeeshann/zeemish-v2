@@ -6,7 +6,11 @@ import { formatTime, formatDate } from '../lib/format';
 const dailyPieces = await getCollection('dailyPieces');
 const sorted = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
 const todaysPiece = sorted[0];
-const recentPieces = sorted.slice(1, 6);
+// "From the library" is the archive strip — filter low-quality pieces out
+// same as /library/. The "Today" slot above keeps showing today's piece
+// even if it's low (the day shouldn't be blank), and /daily/[date]/
+// surfaces a banner on that page.
+const recentPieces = sorted.slice(1, 6).filter((p) => p.data.qualityFlag !== 'low');
 ---
 
 <BaseLayout title="Zeemish" description="Educate yourself for humble decisions.">

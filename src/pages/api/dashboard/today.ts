@@ -34,6 +34,9 @@ export const GET: APIRoute = async ({ locals }) => {
         underlyingSubject: (piece as any).underlying_subject,
         wordCount: (piece as any).word_count,
         beatCount: (piece as any).beat_count,
+        // Exposed so the dashboard can badge low-quality publishes.
+        // Null for normal, 'low' when gates failed after max revisions.
+        qualityFlag: (piece as any).quality_flag ?? null,
       } : null,
       scores: {
         voice: voiceAudit ? { score: (voiceAudit as any).score, passed: !!(voiceAudit as any).passed } : null,

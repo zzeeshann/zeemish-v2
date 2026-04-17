@@ -24,9 +24,13 @@ export const GET: APIRoute = async ({ locals, url }) => {
       time: row.created_at,
     }));
 
-    // Is the pipeline still running? Check if last step is a terminal state
+    // Is the pipeline still running? Director writes three terminal-marker
+    // steps: 'done' (all gates passed + published), 'error' (failed after max
+    // revisions), or 'skipped' (Scanner/Curator found nothing teachable).
+    // Anything else — including an audit round with status='failed' — is mid-
+    // pipeline because Integrator + next round will follow.
     const lastStep = steps[steps.length - 1];
-    const isRunning = lastStep && !['done', 'error', 'skipped'].includes(lastStep.step) && lastStep.status !== 'failed';
+    const isRunning = !!lastStep && !['done', 'error', 'skipped'].includes(lastStep.step);
 
     return new Response(JSON.stringify({ runId, steps, isRunning }), {
       headers: { 'Content-Type': 'application/json' },

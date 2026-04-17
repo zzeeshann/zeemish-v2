@@ -35,7 +35,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   const userId = locals.userId;
 
   // Rate limit: 20 messages per 15 min per user (Claude API costs money)
-  const limit = checkRateLimit(`zita:${userId}`, 20, 900);
+  const limit = await checkRateLimit(locals.runtime.env.RATE_LIMIT_KV, `zita:${userId}`, 20, 900);
   if (!limit.allowed) {
     return new Response(JSON.stringify({ error: 'Slow down — try again in a few minutes.' }), { status: 429 });
   }

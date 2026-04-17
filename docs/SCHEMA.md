@@ -181,10 +181,11 @@ Published daily teaching pieces.
 | fact_check_passed | INTEGER | |
 | has_interactive | INTEGER | 0 or 1 |
 | reading_minutes | INTEGER | |
+| quality_flag | TEXT | NULL = normal, 'low' = audit failed after max revisions |
 | published_at | INTEGER | |
 | created_at | INTEGER | |
 
-Migration: `0006_daily_pieces.sql`
+Migrations: `0006_daily_pieces.sql`, `0009_quality_flag.sql`
 
 ### pipeline_log
 Step-by-step record of each daily piece run. The admin dashboard polls this for the live pipeline monitor.
@@ -209,3 +210,4 @@ Migration: `0007_pipeline_log.sql`
 - `0006_daily_pieces.sql` — daily_candidates, daily_pieces
 - `0007_pipeline_log.sql` — pipeline_log for admin monitor
 - `0008_drop_agent_tasks.sql` — dropped unused `agent_tasks` (course-era); recreated `audit_results` without its FK so Director can write the audit trail
+- `0009_quality_flag.sql` — added `daily_pieces.quality_flag` so Director can publish-anyway on max-revision audit failure and mark the piece for archive-view filtering

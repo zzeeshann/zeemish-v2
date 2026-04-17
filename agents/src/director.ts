@@ -26,7 +26,7 @@ const MAX_REVISIONS = 3;
  * Audio Producer + Auditor are paused (by design, for cost control)
  * and deliberately excluded from this pipeline.
  *
- * Scheduled at 2:00 AM UTC weekdays.
+ * Scheduled at 2:00 AM UTC every day.
  */
 export class DirectorAgent extends Agent<Env, DirectorState> {
   initialState: DirectorState = {
@@ -48,15 +48,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   }
 
   /**
-   * Daily run — scheduled at 2:00 AM UTC.
-   * Weekdays: news-driven piece.
-   * Weekends: skip.
+   * Daily run — scheduled at 2:00 AM UTC, every day including weekends.
+   * News-driven piece. If the news is thin, Curator's skip path logs
+   * "No teachable stories" via Observer and the day is left blank.
    */
   async dailyRun() {
-    const dayOfWeek = new Date().getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    if (isWeekend) return;
-
     try {
       await this.triggerDailyPiece();
     } catch (err) {
@@ -210,40 +206,77 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     // ─── Phase 5: Publisher ──────────────────────────────────────────
+    //
+    // Publish-anyway on audit failure: previously the else branch stopped
+    // here with Director in 'error' state and no piece for the day. A
+    // daily-cadence product can't have "no piece" days. Instead, when gates
+    // fail after max revisions, we stamp `qualityFlag: "low"` into the MDX
+    // frontmatter and publish the best revision we have. Library + recent
+    // queries filter it out of the archive; /daily/YYYY-MM-DD/ still
+    // renders it with a banner so the day isn't blank. Hard rule intact:
+    // we never revise a piece after publish — a low piece is permanent,
+    // just filtered from archive views.
     const observer = await this.subAgent(ObserverAgent, 'observer');
-    if (passed) {
-      this.enterPhase('publisher');
-      await this.logStep(today, 'publishing', 'running', {});
-      const publisher = await this.subAgent(PublisherAgent, `publisher-daily-${today}`);
-      const slug = brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
-      const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
-      const commitMsg = `feat(daily): ${today} — ${brief.headline}`;
+    const qualityFlag: 'low' | null = passed ? null : 'low';
 
-      const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
-
-      // Log to daily_pieces table with actual audit data
-      await this.env.DB
-        .prepare(
-          `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, published_at, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
-          currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, 1, Date.now(), Date.now())
-        .run().catch(() => {});
-
-      await this.logStep(today, 'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath });
-      await this.logStep(today, 'done', 'done', { headline: brief.headline, date: today, voiceScore: lastVoiceScore, revisions: totalRounds - 1 });
-
-      await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
-      this.setState({
-        ...this.state, status: 'idle', currentPhase: null, currentTask: null,
-        lastDailyPiece: { title: brief.headline, date: today },
-      });
-    } else {
-      await this.logStep(today, 'error', 'failed', { headline: brief.headline, failedGates, voiceScore: lastVoiceScore, rounds: totalRounds });
+    if (!passed) {
+      // Splice `qualityFlag: "low"` into the frontmatter so the content
+      // collection schema picks it up at build time. Matches the same
+      // pattern Drafter uses to force `date` in frontmatter.
+      currentMdx = currentMdx.replace(
+        /^(---\n[\s\S]*?)(\n---\n)/,
+        `$1\nqualityFlag: "low"$2`,
+      );
+      // Log escalation — Zishan still needs to know when a piece shipped
+      // low. Publisher runs after this so the Observer entry exists
+      // regardless of whether the git commit succeeds.
       await observer.logEscalation('daily', 0, brief.headline, lastVoiceScore, totalRounds, failedGates);
-      this.setState({ ...this.state, status: 'error', currentPhase: null, currentTask: null, error: 'Daily piece failed audit' });
     }
+
+    this.enterPhase('publisher');
+    await this.logStep(today, 'publishing', 'running', { qualityFlag });
+    const publisher = await this.subAgent(PublisherAgent, `publisher-daily-${today}`);
+    const slug = brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+    const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
+    const commitMsg = passed
+      ? `feat(daily): ${today} — ${brief.headline}`
+      : `feat(daily): ${today} — ${brief.headline} [low-quality, gates: ${failedGates.join('/')}]`;
+
+    const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
+
+    // Log to daily_pieces table. fact_check_passed reflects the last
+    // audit round, not an assumption.
+    const factsPassed = failedGates.includes('facts') ? 0 : 1;
+    await this.env.DB
+      .prepare(
+        `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, quality_flag, published_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
+        currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, Date.now(), Date.now())
+      .run().catch(() => {});
+
+    await this.logStep(today, 'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath, qualityFlag });
+    await this.logStep(today, 'done', 'done', {
+      headline: brief.headline,
+      date: today,
+      voiceScore: lastVoiceScore,
+      revisions: totalRounds - 1,
+      qualityFlag,
+      ...(passed ? {} : { failedGates }),
+    });
+
+    // Observer notification — differentiated so the admin feed shows a
+    // low-quality publish distinctly from a clean one (escalation already
+    // logged above in the !passed branch).
+    if (passed) {
+      await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
+    }
+
+    this.setState({
+      ...this.state, status: 'idle', currentPhase: null, currentTask: null,
+      lastDailyPiece: { title: brief.headline, date: today },
+    });
 
     return { brief, mdx: currentMdx };
   }

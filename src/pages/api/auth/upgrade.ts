@@ -11,7 +11,7 @@ export const prerender = false;
  */
 export const POST: APIRoute = async ({ locals, request }) => {
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
-  const limit = checkRateLimit(`upgrade:${ip}`, 5, 900);
+  const limit = await checkRateLimit(locals.runtime.env.RATE_LIMIT_KV, `upgrade:${ip}`, 5, 900);
   if (!limit.allowed) {
     return new Response(JSON.stringify({ error: 'Too many attempts. Try again later.' }), { status: 429 });
   }
