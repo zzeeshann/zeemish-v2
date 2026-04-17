@@ -1,0 +1,176 @@
+/*
+ * Zita chat widget CSS — standalone, not Tailwind-processed.
+ * Custom element selectors get purged by Tailwind, so this
+ * lives outside the Tailwind pipeline.
+ */
+
+zita-chat {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 50;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.zita-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: #1A6B62;
+  color: white;
+  border-radius: 9999px;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  font-size: 0.875rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.zita-toggle-btn:hover {
+  opacity: 0.9;
+}
+
+.zita-icon-svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  opacity: 0.9;
+}
+
+.zita-panel {
+  background: white;
+  border-radius: 1rem;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+  border: 1px solid #E8E4DE;
+  overflow: hidden;
+  width: 340px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+}
+
+.zita-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #E8E4DE;
+}
+
+.zita-name {
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: #1A6B62;
+}
+
+.zita-desc {
+  font-size: 0.75rem;
+  color: #6B6B6B;
+  flex: 1;
+}
+
+.zita-close {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6B6B6B;
+  border-radius: 0.25rem;
+  font-size: 1.125rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.zita-close:hover {
+  color: #1A1A1A;
+}
+
+.zita-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  max-height: 340px;
+}
+
+.zita-messages > * + * {
+  margin-top: 0.75rem;
+}
+
+.zita-msg {
+  font-size: 0.875rem;
+  line-height: 1.625;
+  max-width: 85%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+}
+
+.zita-msg-user {
+  background: #1A6B62;
+  color: white;
+  margin-left: auto;
+}
+
+.zita-msg-assistant {
+  background: #FAF8F4;
+  color: #1A1A1A;
+}
+
+.zita-typing {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.zita-input {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-top: 1px solid #E8E4DE;
+}
+
+.zita-input input {
+  flex: 1;
+  font-size: 0.875rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid #E8E4DE;
+  background: #FAF8F4;
+  outline: none;
+}
+
+.zita-input input:focus {
+  border-color: #1A6B62;
+  box-shadow: 0 0 0 2px rgba(26, 107, 98, 0.15);
+}
+
+.zita-input button {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1A6B62;
+  color: white;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.zita-input button:hover {
+  opacity: 0.9;
+}
+
+@media (max-width: 400px) {
+  .zita-panel {
+    width: calc(100vw - 2rem);
+  }
+}
