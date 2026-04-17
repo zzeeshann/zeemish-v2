@@ -27,7 +27,7 @@ const dailyPieces = defineCollection({
   loader: glob({ pattern: '**/*.mdx', base: './content/daily-pieces' }),
   schema: z.object({
     title: z.string(),
-    date: z.coerce.string(),
+    date: z.string().or(z.date().transform((d) => d.toISOString().slice(0, 10))),
     newsSource: z.string().optional(),
     underlyingSubject: z.string().optional(),
     estimatedTime: z.coerce.string(),

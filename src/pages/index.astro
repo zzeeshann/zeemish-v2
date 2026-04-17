@@ -1,6 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
+import { formatTime, formatDate } from '../lib/format';
 
 const dailyPieces = await getCollection('dailyPieces');
 const sorted = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
@@ -20,7 +21,7 @@ const recentPieces = sorted.slice(1, 6);
         </h1>
         <p class="text-lg text-zee-muted mt-3 max-w-xl leading-relaxed">{todaysPiece.data.description}</p>
         <div class="flex items-center gap-3 mt-4 text-sm text-zee-muted">
-          <span>{todaysPiece.data.estimatedTime}</span>
+          <span>{formatTime(todaysPiece.data.estimatedTime)}</span>
           {todaysPiece.data.underlyingSubject && (
             <>
               <span>&middot;</span>
@@ -53,13 +54,13 @@ const recentPieces = sorted.slice(1, 6);
       <div class="space-y-2">
         {recentPieces.map((piece) => (
           <a
-            href={`/daily/${piece.data.date}/`}
+            href={`/daily/${formatDate(piece.data.date)}/`}
             class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
           >
             <span class="font-medium group-hover:text-zee-primary transition-colors text-sm flex-1">
               {piece.data.title}
             </span>
-            <span class="text-xs text-zee-muted ml-4 shrink-0">{piece.data.date}</span>
+            <span class="text-xs text-zee-muted ml-4 shrink-0">{formatDate(piece.data.date)}</span>
           </a>
         ))}
       </div>

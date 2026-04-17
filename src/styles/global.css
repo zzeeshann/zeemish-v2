@@ -9,7 +9,8 @@
   }
 
   .prose p {
-    @apply mb-6 text-base md:text-lg leading-relaxed;
+    @apply text-base md:text-lg leading-relaxed;
+    margin-bottom: 1.25rem;
   }
 
   .prose h1 {
@@ -46,59 +47,8 @@
 }
 
 @layer components {
-  /* Beat containers — visible by default (progressive enhancement) */
-  lesson-beat {
-    display: block;
-    padding: 1rem 0;
-  }
 
-  /* When lesson-shell is active (JS loaded), hide inactive beats */
-  lesson-shell[data-active] lesson-beat {
-    display: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-
-  lesson-shell[data-active] lesson-beat[data-visible] {
-    display: block;
-    opacity: 1;
-  }
-
-  /* Beat navigation bar */
-  .beat-nav {
-    @apply mt-8 pt-6 border-t border-zee-border;
-  }
-
-  .beat-nav-inner {
-    @apply flex items-center justify-between;
-  }
-
-  .beat-nav-btn {
-    @apply flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-lg transition-colors;
-    @apply text-zee-text bg-zee-border/50 hover:bg-zee-border;
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  .beat-nav-btn:disabled {
-    @apply opacity-30 cursor-not-allowed hover:bg-zee-border/50;
-  }
-
-  .beat-nav-next:not(:disabled) {
-    @apply bg-zee-primary text-white hover:opacity-90;
-  }
-
-  .beat-nav-progress {
-    @apply text-sm text-zee-muted;
-  }
-
-  .beat-nav-bar {
-    @apply mt-4 h-1 bg-zee-border rounded-full overflow-hidden;
-  }
-
-  .beat-nav-fill {
-    @apply h-full bg-zee-primary rounded-full transition-all duration-300;
-  }
+  /* Beat navigation styles are in src/styles/beats.css (standalone, not Tailwind-processed) */
 
   /* Zita chat widget */
   zita-chat {

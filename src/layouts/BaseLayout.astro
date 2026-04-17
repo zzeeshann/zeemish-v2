@@ -10,6 +10,12 @@ const { title, description } = Astro.props;
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <style is:inline>
+      /* Beat CSS — inlined to prevent Tailwind purging */
+      lesson-beat{display:block;padding:1rem 0}
+      lesson-shell[data-active] lesson-beat{display:none!important;opacity:0;transition:opacity .3s ease}
+      lesson-shell[data-active] lesson-beat[data-visible]{display:block!important;opacity:1}
+    </style>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
