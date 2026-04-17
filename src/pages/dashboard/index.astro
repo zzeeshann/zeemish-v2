@@ -1,0 +1,189 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getUser } from '../../lib/db';
+import { formatDate } from '../../lib/format';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+const isAdmin = user?.email === ADMIN_EMAIL;
+const today = new Date().toISOString().slice(0, 10);
+
+// Fetch data directly from D1 (server-rendered)
+let todaysPiece: any = null;
+let recentPieces: any[] = [];
+let stats = { totalPieces: 0, avgVoiceScore: 0, subjects: [] as string[], runningSince: '' };
+let todayScores = { voice: null as any, facts: null as any, structure: null as any };
+
+try {
+  todaysPiece = await db.prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1').bind(today).first();
+
+  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces ORDER BY date DESC LIMIT 7').all();
+  recentPieces = recent.results;
+
+  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces').first<{ total: number }>();
+  const avgVoice = await db.prepare("SELECT AVG(score) as avg FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number }>();
+  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL').all<{ underlying_subject: string }>();
+  const firstPiece = await db.prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1').first<{ date: string }>();
+
+  stats = {
+    totalPieces: countResult?.total ?? 0,
+    avgVoiceScore: avgVoice?.avg ? Math.round(avgVoice.avg) : 0,
+    subjects: subjectsResult.results.map((s) => s.underlying_subject),
+    runningSince: firstPiece?.date ?? '',
+  };
+
+  if (todaysPiece) {
+    const audits = await db.prepare("SELECT auditor, passed, score FROM audit_results WHERE task_id LIKE ?").bind(`daily/${today}%`).all();
+    const v = audits.results.find((a: any) => a.auditor === 'voice');
+    const f = audits.results.find((a: any) => a.auditor === 'fact');
+    const s = audits.results.find((a: any) => a.auditor === 'structure');
+    todayScores = {
+      voice: v ? { score: (v as any).score, passed: !!(v as any).passed } : null,
+      facts: f ? { passed: !!(f as any).passed } : null,
+      structure: s ? { passed: !!(s as any).passed } : null,
+    };
+  }
+} catch { /* D1 may not have data yet */ }
+
+// Agent team (static — always same 13 public agents)
+const agents = [
+  { name: 'Scanner', job: 'Reads the news every morning' },
+  { name: 'Director', job: 'Picks the most teachable story' },
+  { name: 'Curator', job: 'Plans the lesson structure' },
+  { name: 'Drafter', job: 'Writes the piece' },
+  { name: 'Voice Auditor', job: 'Checks it sounds like Zeemish' },
+  { name: 'Fact Checker', job: 'Verifies every claim' },
+  { name: 'Structure Editor', job: 'Reviews the flow and pacing' },
+  { name: 'Integrator', job: 'Handles revisions' },
+  { name: 'Audio Producer', job: 'Generates the audio version' },
+  { name: 'Audio Auditor', job: 'Checks pronunciation' },
+  { name: 'Publisher', job: 'Puts it live on the site' },
+  { name: 'Engagement Analyst', job: 'Watches how readers interact' },
+  { name: 'Reviser', job: 'Improves weak pieces over time' },
+];
+---
+
+<BaseLayout title="Dashboard — Zeemish" description="How Zeemish works. The factory floor.">
+
+  <h1 class="text-2xl md:text-3xl font-bold mb-2">Dashboard</h1>
+  <p class="text-zee-muted text-sm mb-8">How Zeemish works. What it did today.</p>
+
+  {isAdmin && (
+    <a href="/dashboard/admin/" class="inline-block mb-8 px-4 py-2 text-sm font-medium bg-zee-primary text-white rounded-lg hover:opacity-90 transition-opacity">
+      Admin panel &rarr;
+    </a>
+  )}
+
+  <!-- Section 1: Today's pipeline -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Today's Pipeline</h2>
+    <div class="p-5 rounded-xl border border-zee-border">
+      <div class="flex items-center gap-3 mb-3">
+        <span class={`w-2.5 h-2.5 rounded-full ${todaysPiece ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+        <span class="font-medium">{todaysPiece ? 'Published' : 'No piece today yet'}</span>
+      </div>
+      {todaysPiece && (
+        <div>
+          <a href={`/daily/${today}/`} class="text-lg font-bold text-zee-primary hover:underline">
+            {(todaysPiece as any).headline}
+          </a>
+          <p class="text-sm text-zee-muted mt-1">{(todaysPiece as any).underlying_subject}</p>
+          <p class="text-sm text-zee-muted mt-1">
+            {(todaysPiece as any).word_count} words · {(todaysPiece as any).beat_count} beats
+          </p>
+        </div>
+      )}
+    </div>
+  </section>
+
+  <!-- Section 2: Quality scores -->
+  {todaysPiece && (
+    <section class="mb-10">
+      <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Quality Scores</h2>
+      <div class="grid grid-cols-3 gap-4">
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold text-zee-primary">{todayScores.voice?.score ?? '—'}</div>
+          <div class="text-sm text-zee-muted">Voice</div>
+          {todayScores.voice && (
+            <div class="mt-2 h-1.5 bg-zee-border rounded-full overflow-hidden">
+              <div class="h-full bg-zee-primary rounded-full" style={`width: ${todayScores.voice.score}%`}></div>
+            </div>
+          )}
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold">{todayScores.facts?.passed ? '✓' : '—'}</div>
+          <div class="text-sm text-zee-muted">Facts</div>
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold">{todayScores.structure?.passed ? '✓' : '—'}</div>
+          <div class="text-sm text-zee-muted">Structure</div>
+        </div>
+      </div>
+    </section>
+  )}
+
+  <!-- Section 3: The agent team -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">The Agent Team</h2>
+    <div class="space-y-2">
+      {agents.map((agent) => (
+        <div class="flex items-baseline gap-4 py-2">
+          <span class="font-medium text-sm w-36 shrink-0">{agent.name}</span>
+          <span class="text-sm text-zee-muted">{agent.job}</span>
+        </div>
+      ))}
+    </div>
+  </section>
+
+  <!-- Section 4: Library stats -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Library</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{stats.totalPieces}</div>
+        <div class="text-sm text-zee-muted">Pieces published</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{stats.subjects.length}</div>
+        <div class="text-sm text-zee-muted">Subjects covered</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{stats.avgVoiceScore || '—'}</div>
+        <div class="text-sm text-zee-muted">Avg voice score</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-sm font-medium text-zee-primary">{stats.runningSince ? `Since ${formatDate(stats.runningSince)}` : '—'}</div>
+        <div class="text-sm text-zee-muted">Running</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 5: Recent pieces -->
+  {recentPieces.length > 0 && (
+    <section class="mb-10">
+      <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Recent Pieces</h2>
+      <div class="space-y-2">
+        {recentPieces.map((piece: any) => (
+          <a
+            href={`/daily/${piece.date}/`}
+            class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
+          >
+            <span class="font-medium text-sm group-hover:text-zee-primary transition-colors flex-1">{piece.headline}</span>
+            <span class="text-xs text-zee-muted ml-4 shrink-0">{formatDate(piece.date)}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  )}
+
+  <!-- Footer -->
+  <section class="py-8 border-t border-zee-border">
+    <p class="text-sm text-zee-muted italic">
+      Zeemish is produced by a team of AI agents, guided by one human. Every piece is audited for voice, accuracy, and structure before it goes live. No piece publishes without passing all three.
+    </p>
+  </section>
+</BaseLayout>

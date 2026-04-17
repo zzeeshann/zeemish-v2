@@ -1,0 +1,209 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getUser } from '../../lib/db';
+import { formatDate } from '../../lib/format';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+
+// Admin gate
+if (!user?.email || user.email !== ADMIN_EMAIL) {
+  return Astro.redirect('/login/?redirect=/dashboard/admin/');
+}
+
+// Fetch admin data
+let observerEvents: any[] = [];
+let engagementData: any[] = [];
+let recentTasks: any[] = [];
+
+try {
+  const events = await db.prepare('SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 20').all();
+  observerEvents = events.results;
+} catch { /* */ }
+
+try {
+  const engagement = await db.prepare('SELECT * FROM engagement ORDER BY date DESC LIMIT 14').all();
+  engagementData = engagement.results;
+} catch { /* */ }
+
+try {
+  const tasks = await db.prepare('SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT 10').all();
+  recentTasks = tasks.results;
+} catch { /* */ }
+
+const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).length;
+---
+
+<BaseLayout title="Admin — Zeemish Dashboard">
+  <div class="flex items-center justify-between mb-8">
+    <div>
+      <h1 class="text-2xl md:text-3xl font-bold">Admin</h1>
+      <p class="text-zee-muted text-sm">The control room. Is Zeemish working?</p>
+    </div>
+    <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary">&larr; Public dashboard</a>
+  </div>
+
+  <!-- Section 1: Pipeline controls -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Pipeline Controls</h2>
+    <div class="flex flex-wrap gap-3">
+      <button id="daily-trigger-btn"
+        class="px-5 py-3 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
+        Trigger Daily Piece
+      </button>
+      <span id="trigger-status" class="text-sm text-zee-muted self-center"></span>
+    </div>
+  </section>
+
+  <!-- Section 2: Observer events -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">
+      Observer Events {unacknowledged > 0 && <span class="text-zee-primary">({unacknowledged} new)</span>}
+    </h2>
+    {observerEvents.length === 0 ? (
+      <p class="text-zee-muted italic text-sm">No events yet.</p>
+    ) : (
+      <div class="space-y-3">
+        {observerEvents.map((event: any) => (
+          <div class={`p-4 rounded-xl border ${
+            !event.acknowledged_at ? 'border-zee-primary/30 bg-zee-primary/5' :
+            event.severity === 'info' ? 'border-zee-border' :
+            event.severity === 'escalation' ? 'border-yellow-500/20 bg-yellow-50' :
+            'border-red-500/20 bg-red-50'
+          }`}>
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <span class={`text-xs font-medium uppercase px-2 py-0.5 rounded ${
+                  event.severity === 'info' ? 'bg-zee-primary/10 text-zee-primary' :
+                  event.severity === 'escalation' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-red-100 text-red-700'
+                }`}>{event.severity}</span>
+                <span class="text-xs text-zee-muted">{new Date(event.created_at).toLocaleString()}</span>
+              </div>
+              {!event.acknowledged_at && (
+                <button class="ack-btn text-xs text-zee-primary hover:underline" data-id={event.id}>
+                  Acknowledge
+                </button>
+              )}
+            </div>
+            <h3 class="font-medium text-sm">{event.title}</h3>
+            <p class="text-sm text-zee-muted mt-1">{String(event.body).slice(0, 300)}</p>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+
+  <!-- Section 3: Engagement -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Engagement (14 days)</h2>
+    {engagementData.length === 0 ? (
+      <p class="text-zee-muted italic text-sm">No engagement data yet.</p>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-zee-border text-left text-zee-muted">
+              <th class="pb-2 pr-4">Date</th>
+              <th class="pb-2 pr-4">Piece</th>
+              <th class="pb-2 pr-4">Views</th>
+              <th class="pb-2 pr-4">Completions</th>
+              <th class="pb-2">Drop-off</th>
+            </tr>
+          </thead>
+          <tbody>
+            {engagementData.map((row: any) => (
+              <tr class="border-b border-zee-border/50">
+                <td class="py-2 pr-4 text-zee-muted">{row.date}</td>
+                <td class="py-2 pr-4">{row.lesson_id}</td>
+                <td class="py-2 pr-4">{row.views}</td>
+                <td class="py-2 pr-4">{row.completions}</td>
+                <td class="py-2 text-zee-muted">{row.drop_off_beat ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+
+  <!-- Section 4: Recent agent tasks -->
+  <section class="mb-10">
+    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Recent Agent Tasks</h2>
+    {recentTasks.length === 0 ? (
+      <p class="text-zee-muted italic text-sm">No tasks recorded yet.</p>
+    ) : (
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-zee-border text-left text-zee-muted">
+              <th class="pb-2 pr-4">Agent</th>
+              <th class="pb-2 pr-4">Type</th>
+              <th class="pb-2 pr-4">Status</th>
+              <th class="pb-2">Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recentTasks.map((task: any) => (
+              <tr class="border-b border-zee-border/50">
+                <td class="py-2 pr-4 font-medium">{task.agent_name}</td>
+                <td class="py-2 pr-4">{task.task_type}</td>
+                <td class="py-2 pr-4">
+                  <span class={`text-xs font-medium px-2 py-0.5 rounded ${
+                    task.status === 'succeeded' ? 'bg-green-100 text-green-700' :
+                    task.status === 'failed' ? 'bg-red-100 text-red-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>{task.status}</span>
+                </td>
+                <td class="py-2 text-zee-muted text-xs">{new Date(task.created_at).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+</BaseLayout>
+
+<script>
+  // Trigger daily piece
+  const triggerBtn = document.getElementById('daily-trigger-btn') as HTMLButtonElement;
+  const statusEl = document.getElementById('trigger-status');
+
+  triggerBtn?.addEventListener('click', async () => {
+    triggerBtn.disabled = true;
+    statusEl!.textContent = 'Running pipeline (60-120s)...';
+    try {
+      const res = await fetch('/api/agents/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'daily' }),
+      });
+      const data = await res.json();
+      statusEl!.textContent = data.headline ? `Published: ${data.headline}` : data.error ?? 'Done';
+    } catch {
+      statusEl!.textContent = 'Network error';
+    } finally {
+      triggerBtn.disabled = false;
+    }
+  });
+
+  // Acknowledge observer events
+  document.querySelectorAll('.ack-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const eventId = (btn as HTMLElement).dataset.id;
+      await fetch('/api/dashboard/observer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId }),
+      });
+      (btn as HTMLElement).textContent = 'Done';
+      (btn as HTMLElement).classList.remove('text-zee-primary');
+      (btn as HTMLElement).classList.add('text-zee-muted');
+    });
+  });
+</script>
