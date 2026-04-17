@@ -66,25 +66,6 @@ Migration: `0001_init.sql`
 
 ## Agent-side tables
 
-### agent_tasks
-Log of every pipeline run (for observability).
-
-| Column | Type | Notes |
-|--------|------|-------|
-| id | TEXT PK | UUID |
-| parent_task_id | TEXT | Null for root tasks |
-| agent_name | TEXT | e.g. "director" |
-| task_type | TEXT | e.g. "publish_lesson" |
-| status | TEXT | queued, running, succeeded, failed, escalated |
-| input | TEXT | JSON |
-| output | TEXT | JSON, null while running |
-| error | TEXT | Null on success |
-| started_at | INTEGER | |
-| completed_at | INTEGER | |
-| created_at | INTEGER | |
-
-Migration: `0002_observer_events.sql`
-
 ### observer_events
 What Zishan should know about — published lessons, escalations, errors.
 
@@ -138,15 +119,17 @@ One row per audit pass per draft — durable audit trail. Written by DirectorAge
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| task_id | TEXT FK→agent_tasks | Which pipeline run |
-| draft_id | TEXT | e.g. "body/lesson-3-r1" (task + round) |
+| task_id | TEXT | e.g. `daily/2026-04-17` — pipeline run ID |
+| draft_id | TEXT | e.g. `daily/2026-04-17-r1` (task + round) |
 | auditor | TEXT | voice, structure, or fact |
 | passed | INTEGER | 0 or 1 |
 | score | INTEGER | 0-100 for voice auditor, null for others |
 | notes | TEXT | JSON: violations, issues, or claims |
 | created_at | INTEGER | |
 
-Migration: `0004_audit_results.sql`
+Indexes: `idx_audit_task` on `task_id`, `idx_audit_created` on `created_at`.
+
+Migrations: `0004_audit_results.sql` (original), `0008_drop_agent_tasks.sql` (dropped the FK to the deleted `agent_tasks` table; original `audit_results` was empty across all runs because every INSERT failed the orphaned FK check).
 
 ### magic_tokens
 Time-limited tokens for magic link passwordless login.
@@ -217,11 +200,12 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 
 Migration: `0007_pipeline_log.sql`
 
-## Migrations summary (7 migrations, 13 tables)
+## Migrations summary (8 migrations, 12 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
-- `0002_observer_events.sql` — agent_tasks, observer_events
+- `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
-- `0004_audit_results.sql` — audit_results + idx_tasks_parent index
+- `0004_audit_results.sql` — audit_results (later recreated in 0008) + idx_tasks_parent index
 - `0005_magic_tokens.sql` — magic_tokens for passwordless login
 - `0006_daily_pieces.sql` — daily_candidates, daily_pieces
 - `0007_pipeline_log.sql` — pipeline_log for admin monitor
+- `0008_drop_agent_tasks.sql` — dropped unused `agent_tasks` (course-era); recreated `audit_results` without its FK so Director can write the audit trail
