@@ -125,6 +125,7 @@ docs/handoff/           Original architecture + specs
 - Homepage: hero + "made by 13 agents" pipeline strip + recent list. Mission line moved to footer (`BaseLayout`).
 - Library: month-grouped, filterable by title/subject, topic pills in gold. No quality filter — every published piece appears.
 - Dashboard: three unified quality-score cards (score + tier + bar); avg voice score shows sample size; admin button guard hardened against undefined email match.
+- Post-deploy triage (same day): avg voice score now reads `daily_pieces.voice_score` (final-round per piece) instead of `audit_results WHERE passed=1` — see DECISIONS.md. Library stats card 4 unified to match cards 1–3 (days running + "Since" subtitle). Account page: date eyebrow, title, reading stats (pieces completed / in progress), tidier actions.
 
 ## Quality surfacing (2026-04-17)
 Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.

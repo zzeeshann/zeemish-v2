@@ -356,3 +356,25 @@ Changes:
 **Reason:** Transparency is the brand. Treating one published piece as unworthy of the archive is the opposite of "educate myself for humble decisions" — it's the system hiding its own shortcomings. The tier lets a reader calibrate without being scolded, and the consistent treatment (every piece shows its tier) means the word `rough` isn't a warning singled-out on weak days — it's just information, same as the read time.
 
 **Verified:** `npm run build` clean, content schema accepts new `voiceScore` field. Today's piece (2026-04-17, QVC) renders as `Rough` via the `qualityFlag: low` fallback path without a manual voice score backfill. Library, daily index, and homepage include it chronologically. Yellow banner gone.
+
+## 2026-04-17: Avg voice score aggregated from `daily_pieces.voice_score`, not `audit_results`
+
+**Context:** After the soften-quality pass (commit 80ebe10) every public surface was switched from `quality_flag IS NULL` filtering to "every published piece counts". Two queries were missed — `voiceAgg` in `src/pages/dashboard/index.astro` and `avgVoice` in `src/pages/api/dashboard/stats.ts`. Both still read from `audit_results` with `WHERE auditor = 'voice' AND passed = 1`, which excludes every piece scoring below the 85 voice bar. Today's piece scored 78 → `passed = 0` → excluded → Avg voice card rendered `—` despite a real score existing on the piece page. Secondary issue: even with the filter removed, aggregating over `audit_results` double-counts every revision round.
+
+**Decision:** Aggregate from `daily_pieces.voice_score` instead.
+
+```sql
+SELECT AVG(voice_score) AS avg, COUNT(*) AS n
+FROM daily_pieces
+WHERE voice_score IS NOT NULL;
+```
+
+**Reason:**
+- `daily_pieces` has exactly one row per published piece.
+- Director writes `lastVoiceScore` there on every publish (`agents/src/director.ts:263-268`), so the value is the final-round score — the same number the reader sees and the same number `auditTier()` uses to derive the tier word.
+- `WHERE voice_score IS NOT NULL` cleanly excludes historical pieces from before the plumbing landed.
+- Same table already backs `totalPieces` and `subjects`, so the avg now lives in the same semantic universe as its neighbours on the Library stats strip.
+
+The API endpoint also now returns `voiceSampleSize` alongside `avgVoiceScore` so external consumers get the same honesty the dashboard UI already shows ("from N pieces").
+
+**Verified:** `npm run build` clean; local static build; live deploy confirms dashboard renders a number and "from N pieces" subtitle.

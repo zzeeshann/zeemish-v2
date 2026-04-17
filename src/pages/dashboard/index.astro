@@ -24,6 +24,7 @@ let stats = {
   subjects: [] as string[],
   runningSince: '',
 };
+let daysRunning = 0;
 let todayScores = { voice: null as any, facts: null as any, structure: null as any };
 
 try {
@@ -37,7 +38,13 @@ try {
   recentPieces = recent.results;
 
   const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces').first<{ total: number }>();
-  const voiceAgg = await db.prepare("SELECT AVG(score) as avg, COUNT(*) as n FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number; n: number }>();
+  // Avg voice reads final-round score per piece directly from daily_pieces
+  // (Director writes lastVoiceScore here on every publish — director.ts:263).
+  // One row per piece, matches what the reader sees via auditTier(), and
+  // honours the soften-quality rule that every published piece counts.
+  // The old query over audit_results WHERE passed=1 excluded Solid/Rough
+  // pieces and double-counted revision rounds — see DECISIONS.md 2026-04-17.
+  const voiceAgg = await db.prepare('SELECT AVG(voice_score) as avg, COUNT(*) as n FROM daily_pieces WHERE voice_score IS NOT NULL').first<{ avg: number; n: number }>();
   const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL').all<{ underlying_subject: string }>();
   const firstPiece = await db.prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1').first<{ date: string }>();
 
@@ -48,6 +55,15 @@ try {
     subjects: subjectsResult.results.map((s) => s.underlying_subject),
     runningSince: firstPiece?.date ?? '',
   };
+
+  // Inclusive day count: first publish date to today. Inline — only
+  // used by card 4 below.
+  if (stats.runningSince) {
+    const [fy, fm, fd] = stats.runningSince.split('-').map(Number);
+    const [ty, tm, td] = today.split('-').map(Number);
+    const diffDays = Math.floor((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
+    daysRunning = Math.max(1, diffDays + 1);
+  }
 
   if (todaysPiece) {
     // Order by created_at DESC so the first match per auditor is the
@@ -207,8 +223,11 @@ const agents = [
         )}
       </div>
       <div class="p-4 rounded-xl border border-zee-border text-center">
-        <div class="text-sm font-medium text-zee-primary">{stats.runningSince ? `Since ${formatDate(stats.runningSince)}` : '—'}</div>
-        <div class="text-sm text-zee-muted">Running</div>
+        <div class="text-2xl font-bold text-zee-primary">{daysRunning || '—'}</div>
+        <div class="text-sm text-zee-muted">{daysRunning === 1 ? 'Day' : 'Days'} running</div>
+        {stats.runningSince && (
+          <div class="text-xs text-zee-muted/70 mt-1">Since {formatDate(stats.runningSince)}</div>
+        )}
       </div>
     </div>
   </section>
