@@ -30,7 +30,7 @@ class ZitaChat extends HTMLElement {
           <span class="zita-label">Ask Zita</span>
         </button>
       </div>
-      <div class="zita-panel" hidden>
+      <div class="zita-panel" style="display:none">
         <div class="zita-header">
           <span class="zita-name">Zita</span>
           <span class="zita-desc">Your learning guide</span>
@@ -68,12 +68,12 @@ class ZitaChat extends HTMLElement {
     const panel = this.querySelector('.zita-panel') as HTMLElement;
     const toggle = this.querySelector('.zita-toggle') as HTMLElement;
     if (this.isOpen) {
-      panel?.removeAttribute('hidden');
-      toggle?.setAttribute('hidden', '');
+      if (panel) panel.style.display = 'flex';
+      if (toggle) toggle.style.display = 'none';
       (this.querySelector('.zita-input input') as HTMLInputElement)?.focus();
     } else {
-      panel?.setAttribute('hidden', '');
-      toggle?.removeAttribute('hidden');
+      if (panel) panel.style.display = 'none';
+      if (toggle) toggle.style.display = 'block';
     }
   }
 
