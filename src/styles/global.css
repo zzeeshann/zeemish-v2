@@ -9,7 +9,7 @@
   }
 
   .prose p {
-    @apply mb-5 text-base md:text-lg;
+    @apply mb-6 text-base md:text-lg leading-relaxed;
   }
 
   .prose h1 {
@@ -74,12 +74,14 @@
   }
 
   .beat-nav-btn {
-    @apply flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-    @apply text-zee-text bg-transparent hover:bg-zee-border;
+    @apply flex items-center gap-2 px-5 py-3 text-sm font-medium rounded-lg transition-colors;
+    @apply text-zee-text bg-zee-border/50 hover:bg-zee-border;
+    min-height: 44px;
+    min-width: 44px;
   }
 
   .beat-nav-btn:disabled {
-    @apply opacity-30 cursor-not-allowed hover:bg-transparent;
+    @apply opacity-30 cursor-not-allowed hover:bg-zee-border/50;
   }
 
   .beat-nav-next:not(:disabled) {
@@ -112,8 +114,8 @@
     @apply hover:opacity-90 transition-all text-sm font-medium;
   }
 
-  .zita-icon {
-    @apply w-6 h-6 flex items-center justify-center bg-white/20 rounded-full text-xs font-bold;
+  .zita-icon-svg {
+    @apply w-5 h-5 opacity-90;
   }
 
   .zita-panel {
