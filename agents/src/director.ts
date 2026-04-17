@@ -145,7 +145,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       system: DAILY_DRAFTER_PROMPT,
       messages: [{ role: 'user', content: buildDailyDrafterPrompt(brief as DailyPieceBrief, VOICE_CONTRACT) }],
     });
-    const mdx = draftResponse.content[0].type === 'text' ? draftResponse.content[0].text : '';
+    let mdx = draftResponse.content[0].type === 'text' ? draftResponse.content[0].text : '';
+    // Force correct date in frontmatter (Claude may generate a different date)
+    mdx = mdx.replace(/^(date:\s*)"?\d{4}-\d{2}-\d{2}"?/m, `$1"${today}"`);
     await this.logStep(today, 'drafting', 'done', {
       wordCount: mdx.split(/\s+/).length, beatCount: brief.beats?.length ?? 0,
     });
