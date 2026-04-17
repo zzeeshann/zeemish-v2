@@ -32,26 +32,33 @@ if (token) {
       .bind(Date.now(), token)
       .run();
 
-    // Find or create user
-    let userId = row.user_id;
-    if (!userId) {
-      // Check if user exists with this email
-      const existing = await getUserByEmail(db, row.email);
-      if (existing) {
-        userId = existing.id;
-      } else {
-        // Create new user with this email
-        userId = generateId();
-        await createUser(db, userId);
-        await db
-          .prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?')
-          .bind(row.email, Date.now(), userId)
-          .run();
-      }
+    // Find or create user with this email
+    let userId: string;
+    const anonymousId = Astro.locals.userId;
+
+    // Check if someone already has this email
+    const existing = await getUserByEmail(db, row.email);
+    if (existing) {
+      // Email already registered — log in as that user
+      userId = existing.id;
+    } else if (anonymousId) {
+      // Upgrade: add email to current anonymous user
+      userId = anonymousId;
+      await db
+        .prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?')
+        .bind(row.email, Date.now(), userId)
+        .run();
+    } else {
+      // New user entirely
+      userId = generateId();
+      await createUser(db, userId);
+      await db
+        .prepare('UPDATE users SET email = ?, updated_at = ? WHERE id = ?')
+        .bind(row.email, Date.now(), userId)
+        .run();
     }
 
-    // Merge anonymous progress if applicable
-    const anonymousId = Astro.locals.userId;
+    // Merge anonymous progress if logging in as a different user
     if (anonymousId && anonymousId !== userId) {
       await db
         .prepare(
