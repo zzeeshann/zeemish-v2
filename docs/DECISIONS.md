@@ -152,3 +152,23 @@ Append-only. Never edit old entries.
 **Context:** Security audit found the CSRF check used `origin.includes(host)` which is bypassable.
 **Decision:** Changed to `new URL(origin).host === host` for strict comparison.
 **Reason:** Substring matching allows attacker domains that contain the host string. URL parsing is correct.
+
+## 2026-04-17: Courses renamed to Library
+**Context:** Daily pieces are now the primary content, not structured courses.
+**Decision:** Rename Courses to Library. Library shows all daily pieces in reverse chronological order.
+**Reason:** Courses imply a fixed curriculum. Library implies a growing collection. Daily pieces accumulate into the library naturally.
+
+## 2026-04-17: "The body you live in" course removed
+**Context:** Placeholder content from the old architecture before daily pieces existed.
+**Decision:** Delete entirely — course metadata, all 12 lesson MDX files, course page routes.
+**Reason:** Clean slate. No dead content on a live site.
+
+## 2026-04-17: Dashboard rebuilt as admin control room
+**Context:** Running an autonomous agent pipeline without visibility is dangerous.
+**Decision:** Full dashboard rebuild with pipeline status, recent pieces table, observer events, engagement data, manual trigger.
+**Reason:** You can't run a system you can't see.
+
+## 2026-04-17: Zeemish Protocol established
+**Context:** Zishan defined Zeemish's purpose in one line.
+**Decision:** "Educate myself for humble decisions" is the founding protocol. Added to voice contract, site footer, and CLAUDE.md.
+**Reason:** Every agent, every piece, every design choice serves this purpose. It's the answer to "why does this site exist?"

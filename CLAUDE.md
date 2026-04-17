@@ -2,9 +2,15 @@
 
 **Read this first. Then read `docs/handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md` for the original architecture and `docs/handoff/ZEEMISH-DAILY-PIECES.md` for the daily content system.**
 
+## The Zeemish Protocol
+
+**"Educate myself for humble decisions."**
+
+Every piece, every agent, every design choice serves this purpose.
+
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 14 AI agents scan the news, decide what to teach, draft lessons, audit them through quality gates, generate audio, and publish — all without human intervention. Readers see a polished learning site with a daily teaching piece anchored in today's news, plus longer courses.
+An autonomous multi-agent publishing system. 14 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, generate audio, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
 
 ## Current state
 
@@ -16,10 +22,11 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 2. **Stage 2 — Reader Surface:** Beat-by-beat navigation Web Components, content collections, course pages
 3. **Stage 3 — Accounts & Progress:** Anonymous-first auth, D1 database, progress tracking, email upgrade, magic link login
 4. **Stage 4 — Agent Team:** 13 core agents + Workflows v2, full publishing pipeline with quality gates
-5. **Stage 5 — First Course:** "The body you live in" — 12 lessons produced by agents
+5. **Stage 5 — First Course:** (course content removed — daily pieces are now primary)
 6. **Stage 6 — Self-Improvement:** Engagement tracking, EngagementAnalyst + Reviser agents, learnings database
-7. **Stage 7 — Zita:** Socratic learning guide in every lesson
+7. **Stage 7 — Zita:** Socratic learning guide in every piece
 8. **Daily Pieces System:** ScannerAgent (#14), Director daily mode, news-driven teaching every weekday morning
+9. **Content Cleanup:** Courses removed, Library replaces Courses, nav: Daily · Library · Dashboard · Account
 
 ## Architecture
 

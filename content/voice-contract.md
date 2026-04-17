@@ -1,5 +1,13 @@
 # Zeemish Voice Contract
 
+## The Zeemish Protocol
+
+"Educate myself for humble decisions."
+
+Every piece serves this purpose. If a piece doesn't help someone understand the world better so they can make more humble, more informed decisions — it doesn't belong on Zeemish.
+
+---
+
 This document is the single source of truth for how Zeemish sounds. Every agent that writes or audits reader-facing text must follow these rules exactly.
 
 ## The non-negotiables

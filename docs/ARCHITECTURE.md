@@ -52,10 +52,10 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] Audit results persisted to D1 `audit_results` table
 - [x] R2 bucket `zeemish-audio` for audio storage
 
-### Stage 5 — First Real Course (complete)
-- [x] 12 lessons for "The body you live in" — all agent-authored
-- [x] Each passed voice, structure, and fact-check gates
-- [x] Published via PublisherAgent to GitHub
+### Stage 5 — First Course (removed)
+- Course content deleted — daily pieces are now the primary content unit
+- "The body you live in" served its purpose as a testing ground for the pipeline
+- Library page at /library/ replaces /courses/
 
 ### Stage 6 — Self-Improvement Loop (partially complete)
 - [x] EngagementAnalystAgent built and deployed

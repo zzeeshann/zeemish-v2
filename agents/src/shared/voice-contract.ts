@@ -8,6 +8,14 @@
  */
 export const VOICE_CONTRACT = `# Zeemish Voice Contract
 
+## The Zeemish Protocol
+
+"Educate myself for humble decisions."
+
+Every piece serves this purpose. If a piece doesn't help someone understand the world better so they can make more humble, more informed decisions — it doesn't belong on Zeemish.
+
+---
+
 ## The non-negotiables
 
 1. Plain English. No jargon without immediate translation. If you use a technical term, explain it in the same sentence or the next one.
