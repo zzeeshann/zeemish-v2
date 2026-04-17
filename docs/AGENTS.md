@@ -66,8 +66,9 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 - **File:** `agents/src/engagement-analyst.ts`
 
 ### ReviserAgent
-- **Role:** Takes engagement signals + lesson MDX, proposes revisions via Claude.
-- **Output:** Revised MDX ready for re-audit through pipeline.
+- **Role:** Analyses engagement patterns and writes learnings for future pieces. Does NOT revise published pieces — they are permanent records.
+- **Output:** Learnings written to D1 `learnings` table. The Drafter reads these when writing new content.
+- **Method:** `analyseAndLearn(lessonData)` — extracts 2-4 actionable learnings from engagement data
 - **File:** `agents/src/reviser.ts`
 
 ### AudioProducerAgent

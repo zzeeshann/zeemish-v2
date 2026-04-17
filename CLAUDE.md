@@ -55,7 +55,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 10. **PublisherAgent** — commits MDX to GitHub via Contents API
 11. **ObserverAgent** — event logging, daily digest
 12. **EngagementAnalystAgent** — reads completion/drop-off data
-13. **ReviserAgent** — proposes improvements from engagement signals
+13. **ReviserAgent** — analyses engagement patterns, writes learnings for future pieces (does NOT revise published pieces)
 14. **ScannerAgent** — fetches Google News RSS, stores daily candidates
 
 ### Dashboard

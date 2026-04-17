@@ -172,3 +172,8 @@ Append-only. Never edit old entries.
 **Context:** Zishan defined Zeemish's purpose in one line.
 **Decision:** "Educate myself for humble decisions" is the founding protocol. Added to voice contract, site footer, and CLAUDE.md.
 **Reason:** Every agent, every piece, every design choice serves this purpose. It's the answer to "why does this site exist?"
+
+## 2026-04-17: Reviser does NOT revise published pieces
+**Context:** Zishan clarified that published pieces are permanent records.
+**Decision:** Reviser's role changed from "propose revisions to existing pieces" to "analyse engagement patterns and write learnings for future pieces." It feeds the learnings database only.
+**Reason:** Published content is a permanent record. The way to improve is not to rewrite the past but to make the future better. The Drafter reads learnings when writing new pieces — that's the improvement loop.

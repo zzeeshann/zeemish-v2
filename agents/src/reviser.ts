@@ -1,86 +1,104 @@
 import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
-import { VOICE_CONTRACT } from './shared/voice-contract';
+import { writeLearning } from './shared/learnings';
 import type { UnderperformingLesson } from './engagement-analyst';
 
-export interface RevisionProposal {
+export interface EngagementLearning {
   lessonId: string;
   problem: string;
-  proposedChanges: string[];
-  revisedMdx: string | null; // null if only proposing, not rewriting
+  learnings: string[];
 }
 
 interface ReviserState {
-  proposalCount: number;
+  learningsWritten: number;
 }
 
 /**
- * ReviserAgent — takes engagement signals and proposes lesson revisions.
- * Analyses WHY a lesson underperforms (drop-off beat, low completion)
- * and suggests specific improvements.
+ * ReviserAgent — analyses engagement patterns and writes learnings
+ * for future pieces. Does NOT revise or update published pieces.
+ * Published pieces are permanent records.
  *
- * Can either propose changes (for human review) or generate a revised
- * draft that goes back through the audit pipeline.
+ * The Reviser's only job: make future pieces better based on what
+ * readers did with past ones. It feeds the learnings database,
+ * which the Drafter reads when writing new content.
  */
 export class ReviserAgent extends Agent<Env, ReviserState> {
-  initialState: ReviserState = { proposalCount: 0 };
+  initialState: ReviserState = { learningsWritten: 0 };
 
-  /** Propose revisions for an underperforming lesson */
-  async proposeRevision(
-    lessonData: UnderperformingLesson,
-    currentMdx: string,
-  ): Promise<RevisionProposal> {
+  /** Analyse an underperforming piece and extract learnings for future pieces */
+  async analyseAndLearn(lessonData: UnderperformingLesson): Promise<EngagementLearning> {
     const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 8000,
-      system: `You are the Reviser agent for Zeemish. Your job is to improve underperforming lessons based on engagement data.
+      max_tokens: 1500,
+      system: `You analyse reader engagement data to extract learnings for future writing.
 
-${VOICE_CONTRACT}
+You do NOT revise existing pieces. Published pieces are permanent records.
+Your job is to identify PATTERNS — what works, what doesn't — so future pieces are better.
 
-Given engagement signals (completion rate, drop-off beat), analyse WHY the lesson might be losing readers and produce a REVISED version.
+Given engagement data for an underperforming piece, extract 2-4 specific, actionable learnings.
 
-Common problems and fixes:
-- Low completion + drop-off at hook → Hook isn't compelling enough. Make it more specific and surprising.
-- Drop-off at teaching beats → Too long, too dense, or too abstract. Shorten, add concrete examples, break into smaller beats.
-- Drop-off at practice → Practice is too demanding or unclear. Simplify or make optional.
-- Overall low completion → Lesson may not be interesting enough on its topic. Consider a different angle.
+Examples of good learnings:
+- "Hooks that open with a specific number get 20% higher completion than hooks that open with a question"
+- "Teaching beats longer than 400 words show sharp drop-off — keep under 350"
+- "Readers drop off when the subject shifts from concrete to abstract without a bridge example"
 
-Return the COMPLETE revised MDX file. Start with --- frontmatter.`,
+Return JSON:
+{
+  "learnings": [
+    "specific actionable learning 1",
+    "specific actionable learning 2"
+  ]
+}`,
       messages: [
         {
           role: 'user',
-          content: `## Engagement data
+          content: `## Underperforming piece
+- Piece: ${lessonData.lessonId}
 - Completion rate: ${lessonData.completionRate}%
 - Views: ${lessonData.views}
 - Drop-off beat: ${lessonData.dropOffBeat ?? 'unknown'}
 - Problem: ${lessonData.reason}
 
-## Current lesson MDX:
-
-${currentMdx}
-
-## Your task
-Revise this lesson to improve engagement. Return the complete revised MDX.`,
+Extract learnings for future pieces. What should the Drafter do differently next time?`,
         },
       ],
     });
 
-    const revisedMdx = response.content[0].type === 'text' ? response.content[0].text : null;
+    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    let parsed: { learnings: string[] };
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      parsed = match ? JSON.parse(match[0]) : { learnings: [] };
+    } catch {
+      parsed = { learnings: [] };
+    }
 
-    this.setState({ proposalCount: this.state.proposalCount + 1 });
+    // Write each learning to D1
+    for (const learning of parsed.learnings) {
+      try {
+        await writeLearning(
+          this.env.DB,
+          'engagement',
+          learning,
+          {
+            source: lessonData.lessonId,
+            completionRate: lessonData.completionRate,
+            dropOffBeat: lessonData.dropOffBeat,
+          },
+          70,
+        );
+      } catch { /* learning write shouldn't break */ }
+    }
+
+    this.setState({ learningsWritten: this.state.learningsWritten + parsed.learnings.length });
 
     return {
       lessonId: lessonData.lessonId,
       problem: lessonData.reason,
-      proposedChanges: [
-        `Completion rate was ${lessonData.completionRate}%`,
-        lessonData.dropOffBeat ? `Readers dropping off at: ${lessonData.dropOffBeat}` : 'General low engagement',
-        'Revised content generated',
-      ],
-      revisedMdx,
+      learnings: parsed.learnings,
     };
   }
 }

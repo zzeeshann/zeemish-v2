@@ -45,7 +45,7 @@ The canonical architecture is in `handoff/ZEEMISH-V2-ARCHITECTURE-REVISED.md`. T
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
 - [x] EngagementAnalystAgent — reads completion/drop-off data from D1
-- [x] ReviserAgent — proposes revisions from engagement signals via Claude
+- [x] ReviserAgent — analyses engagement patterns, writes learnings for future pieces (does not revise published content)
 - [x] Full pipeline: Curate → Draft → 3 parallel auditors → Revise → Audio → Publish
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
 - [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
