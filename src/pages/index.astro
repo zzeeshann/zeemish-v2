@@ -54,7 +54,7 @@ const recentPieces = sorted.slice(1, 6);
       <div class="space-y-2">
         {recentPieces.map((piece) => (
           <a
-            href={`/daily/${formatDate(piece.data.date)}/`}
+            href={`/daily/${piece.data.date}/`}
             class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
           >
             <span class="font-medium group-hover:text-zee-primary transition-colors text-sm flex-1">
