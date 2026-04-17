@@ -221,11 +221,16 @@ class MadeDrawer extends HTMLElement {
     // --- Timeline ------------------------------------------------------
     if (env.timeline.length > 0) {
       const start = env.timeline[0].t;
+      // Each phase logs a 'running' row and a terminal row (done / failed /
+      // skipped). Collapse pairs into one row per phase. Prefer the terminal
+      // row for status, detail, and timestamp; fall back to the running row
+      // when the phase is still in progress.
+      const collapsed = collapseTimeline(env.timeline);
       html.push(`
         <section class="made-section">
           <h3 class="made-section-header">Timeline</h3>
           <ol class="made-timeline">
-            ${env.timeline.map((s) => renderStep(s, start)).join('')}
+            ${collapsed.map((s) => renderStep(s, start)).join('')}
           </ol>
         </section>
       `);
@@ -318,6 +323,37 @@ class MadeDrawer extends HTMLElement {
 }
 
 // --- Render helpers (pure functions, kept outside the class) ---------
+
+/**
+ * Collapse paired running/done rows per phase into a single displayable
+ * row. Each phase (scanning, curating, drafting, auditing_rN, …) writes
+ * a 'running' row when it starts and a terminal row (done/failed/skipped)
+ * when it ends. Showing both doubles the timeline length with no extra
+ * information — prefer the terminal row (richer data) and keep the
+ * 'running' row only when a phase is still in progress at fetch time.
+ */
+function collapseTimeline(
+  steps: MadeEnvelope['timeline'],
+): MadeEnvelope['timeline'] {
+  const byStep = new Map<string, MadeEnvelope['timeline'][number]>();
+  const order: string[] = [];
+  for (const s of steps) {
+    if (!byStep.has(s.step)) {
+      order.push(s.step);
+      byStep.set(s.step, s);
+      continue;
+    }
+    const prev = byStep.get(s.step)!;
+    // Terminal status always wins over 'running'. If both are terminal
+    // (shouldn't happen for a well-formed run), keep the latest.
+    const prevTerminal = prev.status !== 'running';
+    const thisTerminal = s.status !== 'running';
+    if (thisTerminal || (!prevTerminal && s.t > prev.t)) {
+      byStep.set(s.step, s);
+    }
+  }
+  return order.map((k) => byStep.get(k)!);
+}
 
 function renderStep(s: MadeEnvelope['timeline'][number], startMs: number): string {
   const label = pipelineStepLabel(s.step);
