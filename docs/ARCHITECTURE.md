@@ -27,7 +27,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
-- [x] D1 database: 13 tables (see `docs/SCHEMA.md`)
+- [x] D1 database: 12 tables (see `docs/SCHEMA.md`)
 - [x] Anonymous-first auth middleware (cookie on first API call)
 - [x] Progress API: save beat, mark complete, fetch progress
 - [x] Auth API: email upgrade, login, logout
@@ -42,20 +42,21 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] DirectorAgent — pure orchestrator, zero LLM calls, scheduled daily at 2am UTC, manual trigger
 - [x] CuratorAgent — picks most teachable story, plans beats (restored from v10 deletion; owns its prompt file)
 - [x] DrafterAgent — writes MDX from brief (restored from v10 deletion; owns its prompt file)
-- [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass
-- [x] StructureEditorAgent — reviews beat structure, pacing
-- [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search)
-- [x] IntegratorAgent — merges audit feedback, revises draft, up to 3 rounds
+- [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass (owns its prompt file)
+- [x] StructureEditorAgent — reviews beat structure, pacing; writes learnings for both passing (confidence 60) and failing (40) drafts (owns its prompt file)
+- [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search); exposes `searchAvailable` on result, Director logs an Observer warn when search fails so the pipeline honours the "no silent failure" principle (owns its prompt file)
+- [x] IntegratorAgent — merges audit feedback, revises draft, up to 3 rounds; stateless (fresh DO per day: `integrator-daily-${today}`) (owns its prompt file)
 - [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey), saves MP3 to R2 — **paused** (excluded from pipeline)
 - [x] AudioAuditorAgent — verifies audio files in R2, checks sizes — **paused** (excluded from pipeline)
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
-- [x] LearnerAgent — watches engagement + writes learnings for future pieces (merged from EngagementAnalyst + Reviser)
+- [x] LearnerAgent — watches engagement + writes learnings for future pieces; uses shared `extractJson` parser (merged from EngagementAnalyst + Reviser; owns its prompt file)
 - [x] Full pipeline: Scanner → Curator → Drafter → 3 parallel auditors → Integrator (if any gate fails) → Publisher
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
 - [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
-- [x] Audit results persisted to D1 `audit_results` table
+- [x] Audit results persisted to D1 `audit_results` table (migration 0008 fixed the orphaned FK that had silently blocked all writes — see DECISIONS.md)
 - [x] R2 bucket `zeemish-audio` for audio storage (unused while audio paused)
+- [x] Optional `SCANNER_RSS_FEEDS_JSON` env override lets ops change Scanner's feed list without a redeploy
 
 ### Stage 5 — First Course (removed)
 - Course content deleted — daily pieces are now the primary content unit
@@ -68,8 +69,9 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Engagement tracking API (`/api/engagement/track`)
 - [x] lesson-shell tracks views and completions
 - [x] D1 tables: engagement, learnings
-- [ ] Learnings database not yet populated by any agent
-- [ ] Prompt-improvement loop not yet built
+- [x] StructureEditorAgent writes learnings (both passing and failing drafts) into the learnings DB
+- [x] LearnerAgent writes engagement-driven learnings (when underperforming pieces are analysed)
+- [ ] Prompt-improvement loop not yet built — Director doesn't consume learnings to propose prompt edits
 
 ### Stage 7 — Zita (complete)
 - [x] Zita chat API (`/api/zita/chat`) — Socratic guide via Claude API
@@ -103,4 +105,5 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 6. **Daily pieces only** — courses removed, daily news-driven teaching is the only content type.
 7. **Audio failure doesn't block publishing** — text lesson still ships, audio issue logged (audio currently paused anyway).
 8. **Audio agents paused by design** — Audio Producer and Audio Auditor exist as files but are not wired into Director's pipeline. Cost control until text pipeline is fully trusted.
-9. **Per-agent prompt files** — `curator-prompt.ts`, `drafter-prompt.ts` sit next to their owners. `shared/prompts.ts` is a tombstone.
+9. **Per-agent prompt files** — every pipeline agent owns its prompt file: `curator-prompt.ts`, `drafter-prompt.ts`, `voice-auditor-prompt.ts`, `structure-editor-prompt.ts`, `fact-checker-prompt.ts`, `integrator-prompt.ts`, `learner-prompt.ts`. Matches the "one prompt per agent, co-located" principle in AGENTS.md. `shared/prompts.ts` is a tombstone.
+10. **No silent failure enforcement** — Director logs an Observer warn (severity='warn') when FactChecker's web search is unavailable, so the draft is known to have been assessed by Claude's first-pass only.
