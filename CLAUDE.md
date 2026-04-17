@@ -112,12 +112,22 @@ docs/handoff/           Original architecture + specs
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
 
+## Next planned work
+**Decouple piece identity from publication date.** Currently URLs, Director's
+guard, and the admin monitor all treat `date` as identity — two pieces on the
+same date cause a URL collision (only one reachable). Multiple pieces per day
+is the product vision, "one per day" was a temporary scaffold. Plan +
+implement in the next session. Full context: `docs/DECISIONS.md` entry dated
+2026-04-17.
+
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
 - Weekend daily pieces not yet implemented (weekdays only)
 - Rate limiter is in-memory (resets on Worker restart)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
+- Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
+- Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
 
 ## Hard rule
 **Published pieces are permanent. No agent writes to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
