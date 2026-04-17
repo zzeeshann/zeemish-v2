@@ -11,7 +11,7 @@ binding = "ASSETS"
 
 # When you verify zeemish.io on Resend, change this:
 [vars]
-EMAIL_FROM = "Zeemish <onboarding@resend.dev>"
+EMAIL_FROM = "Zeemish <hello@zeemish.io>"
 
 [observability]
 enabled = true
