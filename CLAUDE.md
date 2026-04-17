@@ -121,6 +121,15 @@ docs/handoff/           Original architecture + specs
 - Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
 - Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
 
+## Dev-mode testing
+See `docs/RUNBOOK.md` → "Reset today" for the 3-step reset procedure (git
+rm MDX + D1 DELETE + trigger). Zishan has requested a single reset
+script/button for next session so the procedure is one command, not three.
+Candidates for how:
+- `scripts/reset-today.sh` that runs git rm + wrangler d1 execute in sequence
+- Admin dashboard button "Reset today" that wipes D1 rows (MDX still manual via git)
+- Combined: script that does everything including auto-triggering the pipeline after
+
 ## Hard rule
 **Published pieces are permanent. No agent writes to, revises, regenerates, or updates any published piece. All improvements feed forward into the learnings database and improve future pieces only.**
 

@@ -116,6 +116,40 @@ The Director runs daily at 2:00 AM UTC. It scans news, picks the most teachable 
 - Archive: https://zeemish-v2.zzeeshann.workers.dev/daily/
 - Single piece: https://zeemish-v2.zzeeshann.workers.dev/daily/YYYY-MM-DD/
 
+## Reset today (clean slate for a dev-mode re-test)
+
+"One piece per day" is the product (see `docs/DECISIONS.md` — 2026-04-17
+entry on this). The admin manual trigger bypasses the duplicate-publish
+guard so you can test end-to-end during development, but that can leave
+duplicate state from multiple runs. To re-test from scratch:
+
+### 1. Remove today's MDX file(s) from git
+```bash
+git rm content/daily-pieces/$(date -u +%Y-%m-%d)-*.mdx
+git commit -m "test: reset for pipeline re-test"
+git push
+# Wait ~30s for auto-deploy to strip them from the live site
+```
+
+### 2. Clear today's D1 rows across all 4 tables
+```bash
+DATE=$(date -u +%Y-%m-%d)
+npx wrangler d1 execute zeemish --remote --command \
+  "DELETE FROM daily_pieces WHERE date = '$DATE'; \
+   DELETE FROM daily_candidates WHERE date = '$DATE'; \
+   DELETE FROM pipeline_log WHERE run_id = '$DATE'; \
+   DELETE FROM audit_results WHERE task_id LIKE 'daily/$DATE%';"
+```
+
+### 3. Trigger a fresh run
+Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
+
+### 4. Verify
+- Pipeline monitor on `/dashboard/admin/` shows step-by-step progress
+- Public pipeline data: `curl /api/dashboard/pipeline` (no auth)
+- Single piece in D1 after completion: `curl /api/dashboard/today` (no auth)
+- Live URL: `/daily/YYYY-MM-DD/` should return 200 after the post-publish deploy completes (~30s)
+
 ## Check what agents have been doing
 ```bash
 # Last 24 hours digest
