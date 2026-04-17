@@ -8,7 +8,7 @@ An autonomous multi-agent publishing system. 13 AI agents decide what to publish
 
 ## Current state
 
-**Complete.** All 7 stages built, all 13 agents deployed, 12-lesson course live, security hardened.
+**Complete.** All 7 stages built + Daily Pieces system. 14 agents deployed, 12-lesson course + daily news-driven teaching. Security hardened.
 
 ## What was built (in order)
 
@@ -35,7 +35,7 @@ An autonomous multi-agent publishing system. 13 AI agents decide what to publish
 - Email: Resend (magic link login from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy on push)
 
-### The 13 Agents
+### The 14 Agents
 1. **DirectorAgent** — supervisor, scheduled daily 8am UTC, orchestrates pipeline
 2. **CuratorAgent** — plans lessons from subject values
 3. **DrafterAgent** — writes MDX via Claude
@@ -49,11 +49,13 @@ An autonomous multi-agent publishing system. 13 AI agents decide what to publish
 11. **ObserverAgent** — event logging, daily digest
 12. **EngagementAnalystAgent** — reads completion/drop-off data
 13. **ReviserAgent** — proposes improvements from engagement signals
+14. **ScannerAgent** — fetches Google News RSS, stores daily candidates in D1
 
 ### Database (D1 — 10 tables)
 See `docs/SCHEMA.md` for full details.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: agent_tasks, observer_events, engagement, learnings, audit_results
+- Daily: daily_candidates, daily_pieces
 
 ### Key directories
 ```
@@ -62,6 +64,7 @@ src/interactive/     Web Components (lesson-shell, lesson-beat, zita-chat)
 src/lib/             Auth, DB helpers, rate limiting
 src/layouts/         BaseLayout, LessonLayout
 content/lessons/     MDX lesson files (by course)
+content/daily-pieces/ Daily teaching pieces (YYYY-MM-DD-slug.mdx)
 content/courses/     Course metadata
 agents/src/          All 13 agent files + workflows + shared code
 migrations/          D1 schema migrations (0001-0005)

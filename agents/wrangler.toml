@@ -82,9 +82,17 @@ class_name = "AudioAuditorAgent"
 tag = "v5"
 new_sqlite_classes = ["EngagementAnalystAgent", "ReviserAgent"]
 
+[[durable_objects.bindings]]
+name = "SCANNER"
+class_name = "ScannerAgent"
+
 [[migrations]]
 tag = "v6"
 new_sqlite_classes = ["AudioProducerAgent", "AudioAuditorAgent"]
+
+[[migrations]]
+tag = "v7"
+new_sqlite_classes = ["ScannerAgent"]
 
 # Workflow bindings
 [[workflows]]

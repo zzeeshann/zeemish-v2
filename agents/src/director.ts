@@ -9,7 +9,8 @@ import { PublisherAgent } from './publisher';
 import { ObserverAgent } from './observer';
 import { AudioProducerAgent } from './audio-producer';
 import { AudioAuditorAgent } from './audio-auditor';
-import type { Env, DirectorState, LessonBrief, DraftResult } from './types';
+import { ScannerAgent } from './scanner';
+import type { Env, DirectorState, LessonBrief, DraftResult, DailyPieceBrief, DailyCandidate } from './types';
 import type { PublishResult } from './publisher';
 import type { AudioResult } from './audio-producer';
 import type { AudioAuditResult } from './audio-auditor';
@@ -18,6 +19,9 @@ import type { StructureAuditResult } from './structure-editor';
 import type { FactCheckResult } from './fact-checker';
 
 import { VOICE_CONTRACT } from './shared/voice-contract';
+import { DAILY_DIRECTOR_PROMPT, DAILY_DRAFTER_PROMPT, buildDailyDirectorPrompt, buildDailyDrafterPrompt } from './shared/prompts';
+import { extractJson } from './shared/parse-json';
+import Anthropic from '@anthropic-ai/sdk';
 import subjectValuesJson from '../../content/subject-values.json';
 
 const MAX_REVISIONS = 3;
@@ -58,10 +62,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     error: null,
   };
 
-  /** Set up daily scheduled run on first activation */
+  /** Set up daily scheduled runs on first activation */
   async onStart() {
-    // Schedule daily autonomous run at 8am UTC
-    await this.schedule('0 8 * * *', 'autonomousRun', { type: 'daily' });
+    // Scanner runs at 6:00 AM UTC
+    await this.schedule('0 6 * * *', 'dailyRun', { type: 'daily-piece' });
+    // Course lessons at 8:00 AM UTC
+    await this.schedule('0 8 * * *', 'autonomousRun', { type: 'course-lesson' });
   }
 
   /**
@@ -98,6 +104,166 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // After producing lessons, review patterns for recurring issues
     await this.reviewPatterns();
+  }
+
+  /**
+   * Daily piece pipeline — runs at 6:00 AM UTC.
+   * Scans news, picks the most teachable story, drafts + audits + publishes.
+   * Weekend mode: uses subject-values for evergreen content instead of news.
+   */
+  async dailyRun() {
+    const today = new Date().toISOString().slice(0, 10);
+    const dayOfWeek = new Date().getDay(); // 0=Sun, 6=Sat
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+    try {
+      if (isWeekend) {
+        // Weekend mode: evergreen piece from subject-values
+        await this.triggerLesson('body', Math.floor(Math.random() * 12) + 1);
+        return;
+      }
+
+      // Weekday: news-driven piece
+      await this.triggerDailyPiece();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Daily run failed';
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError('daily', 0, message);
+    }
+  }
+
+  /**
+   * Produce one daily teaching piece from today's news.
+   */
+  async triggerDailyPiece(): Promise<{ brief: DailyPieceBrief; mdx: string } | null> {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Step 1: Scanner fetches news
+    this.setState({ ...this.state, status: 'scanning', currentTask: `daily/${today}` });
+    const scanner = await this.subAgent(ScannerAgent, 'scanner');
+    const candidates = await scanner.scan();
+
+    if (candidates.length === 0) {
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError('daily', 0, 'Scanner found no candidates');
+      this.setState({ ...this.state, status: 'idle', currentTask: null });
+      return null;
+    }
+
+    // Step 2: Director picks the best story
+    this.setState({ ...this.state, status: 'curating' });
+    const recentPieces = await this.getRecentDailyPieces(30);
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+
+    const evalResponse = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 3000,
+      system: DAILY_DIRECTOR_PROMPT,
+      messages: [{ role: 'user', content: buildDailyDirectorPrompt(candidates, recentPieces) }],
+    });
+
+    const evalText = evalResponse.content[0].type === 'text' ? evalResponse.content[0].text : '{}';
+    const brief = extractJson<DailyPieceBrief & { skip?: boolean; selectedCandidateId?: string }>(evalText);
+
+    if (brief.skip) {
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError('daily', 0, 'No teachable stories today — skipping');
+      this.setState({ ...this.state, status: 'idle', currentTask: null });
+      return null;
+    }
+
+    // Mark selected candidate in D1
+    if (brief.selectedCandidateId) {
+      await this.env.DB
+        .prepare('UPDATE daily_candidates SET selected = 1, teachability_score = 100 WHERE id = ?')
+        .bind(brief.selectedCandidateId)
+        .run().catch(() => {});
+    }
+
+    // Step 3: Draft the piece
+    this.setState({ ...this.state, status: 'drafting' });
+    const drafter = await this.subAgent(DrafterAgent, `drafter-daily-${today}`);
+    const draftResponse = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 8000,
+      system: DAILY_DRAFTER_PROMPT,
+      messages: [{ role: 'user', content: buildDailyDrafterPrompt(brief as DailyPieceBrief, VOICE_CONTRACT) }],
+    });
+    const mdx = draftResponse.content[0].type === 'text' ? draftResponse.content[0].text : '';
+
+    // Step 4: Audit (reuse existing parallel audit)
+    this.setState({ ...this.state, status: 'auditing' });
+    const taskId = `daily/${today}`;
+    let currentMdx = mdx;
+    let passed = false;
+
+    for (let round = 1; round <= MAX_REVISIONS; round++) {
+      const [voiceResult, structureResult, factResult] = await Promise.all([
+        (await this.subAgent(VoiceAuditorAgent, `voice-daily-r${round}`)).audit(currentMdx),
+        (await this.subAgent(StructureEditorAgent, `struct-daily-r${round}`)).review(currentMdx),
+        (await this.subAgent(FactCheckerAgent, `fact-daily-r${round}`)).check(currentMdx),
+      ]);
+
+      await this.saveAuditResults(taskId, round, voiceResult, structureResult, factResult);
+
+      if (voiceResult.passed && structureResult.passed && factResult.passed) {
+        passed = true;
+        break;
+      }
+
+      if (round < MAX_REVISIONS) {
+        this.setState({ ...this.state, status: 'revising' });
+        const integrator = await this.subAgent(IntegratorAgent, 'integrator-daily');
+        const revision = await integrator.revise(currentMdx, voiceResult, structureResult, factResult);
+        currentMdx = revision.revisedMdx;
+      }
+    }
+
+    // Step 5: Publish if passed
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    if (passed) {
+      this.setState({ ...this.state, status: 'publishing' });
+      const publisher = await this.subAgent(PublisherAgent, `publisher-daily-${today}`);
+      const slug = brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+      const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
+      const commitMsg = `feat(daily): ${today} — ${brief.headline}`;
+
+      await publisher.publishToPath(filePath, currentMdx, commitMsg);
+
+      // Log to daily_pieces table
+      await this.env.DB
+        .prepare(
+          `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, published_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
+          currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, Date.now(), Date.now())
+        .run().catch(() => {});
+
+      await observer.logPublished('daily', 0, brief.headline, 0, 0, '');
+      this.setState({
+        ...this.state, status: 'idle', currentTask: null,
+        lastDailyPiece: { title: brief.headline, date: today },
+      });
+    } else {
+      await observer.logEscalation('daily', 0, brief.headline, 0, MAX_REVISIONS, ['audit']);
+      this.setState({ ...this.state, status: 'idle', currentTask: null, error: 'Daily piece failed audit' });
+    }
+
+    return { brief: brief as DailyPieceBrief, mdx: currentMdx };
+  }
+
+  /** Get recent daily piece headlines to avoid repetition */
+  private async getRecentDailyPieces(days: number): Promise<string[]> {
+    try {
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      const result = await this.env.DB
+        .prepare('SELECT headline FROM daily_pieces WHERE date >= ? ORDER BY date DESC')
+        .bind(since.toISOString().slice(0, 10))
+        .all<{ headline: string }>();
+      return result.results.map((r) => r.headline);
+    } catch { return []; }
   }
 
   /**

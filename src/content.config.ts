@@ -33,4 +33,23 @@ const lessons = defineCollection({
   }),
 });
 
-export const collections = { courses, lessons };
+/**
+ * Daily pieces collection — news-driven teaching pieces.
+ * Lives in content/daily-pieces/
+ * Filename format: YYYY-MM-DD-{slug}.mdx
+ */
+const dailyPieces = defineCollection({
+  loader: glob({ pattern: '**/*.mdx', base: './content/daily-pieces' }),
+  schema: z.object({
+    title: z.string(),
+    date: z.coerce.string(),
+    newsSource: z.string().optional(),
+    underlyingSubject: z.string().optional(),
+    estimatedTime: z.coerce.string(),
+    beatCount: z.number(),
+    description: z.string(),
+    audioSrc: z.string().optional(),
+  }),
+});
+
+export const collections = { courses, lessons, dailyPieces };

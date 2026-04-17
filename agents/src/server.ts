@@ -19,6 +19,7 @@ export { EngagementAnalystAgent } from './engagement-analyst';
 export { ReviserAgent } from './reviser';
 export { AudioProducerAgent } from './audio-producer';
 export { AudioAuditorAgent } from './audio-auditor';
+export { ScannerAgent } from './scanner';
 export { PublishLessonWorkflow } from './workflows/publish-lesson';
 
 /** Check admin auth — bearer token only (no query params — they leak in logs) */
@@ -49,7 +50,7 @@ export default {
     const url = new URL(request.url);
 
     // Admin endpoints require auth
-    const adminPaths = ['/trigger', '/status', '/digest', '/events', '/engagement'];
+    const adminPaths = ['/trigger', '/daily-trigger', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -165,6 +166,30 @@ export default {
         const message = err instanceof Error ? err.message : 'Unknown error';
         return new Response(JSON.stringify({ error: message }), {
           status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // Daily piece trigger: POST /daily-trigger (requires auth)
+    if (url.pathname === '/daily-trigger' && request.method === 'POST') {
+      try {
+        const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        const result = await director.triggerDailyPiece();
+        if (result) {
+          return new Response(JSON.stringify({
+            status: 'success',
+            headline: result.brief.headline,
+            subject: result.brief.underlyingSubject,
+            mdxLength: result.mdx.length,
+          }), { headers: CORS_HEADERS });
+        }
+        return new Response(JSON.stringify({ status: 'skipped', reason: 'No teachable stories' }), {
+          headers: CORS_HEADERS,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: CORS_HEADERS,
         });
       }
     }

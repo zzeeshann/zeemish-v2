@@ -73,6 +73,50 @@ export class PublisherAgent extends Agent<Env, PublisherState> {
     return result;
   }
 
+  /** Publish to a specific file path (for daily pieces) */
+  async publishToPath(filePath: string, mdx: string, commitMessage: string): Promise<PublishResult> {
+    const existingSha = await this.getFileSha(filePath);
+
+    const response = await fetch(
+      `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${filePath}`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${this.env.GITHUB_TOKEN}`,
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'User-Agent': 'zeemish-agents',
+        },
+        body: JSON.stringify({
+          message: commitMessage,
+          content: btoa(unescape(encodeURIComponent(mdx))),
+          branch: BRANCH,
+          ...(existingSha ? { sha: existingSha } : {}),
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`GitHub API error (${response.status}): ${error}`);
+    }
+
+    const data = await response.json() as {
+      commit: { sha: string; html_url: string };
+      content: { path: string };
+    };
+
+    const result: PublishResult = {
+      published: true,
+      filePath: data.content.path,
+      commitSha: data.commit.sha,
+      commitUrl: data.commit.html_url,
+    };
+
+    this.setState({ lastPublish: result });
+    return result;
+  }
+
   /** Check if a file exists in the repo and get its SHA (needed for updates) */
   private async getFileSha(filePath: string): Promise<string | null> {
     const response = await fetch(

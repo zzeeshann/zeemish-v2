@@ -21,6 +21,7 @@ export interface Env {
   AUDIO_AUDITOR: DurableObjectNamespace;
   AUDIO_BUCKET: R2Bucket;
   GITHUB_TOKEN: string;
+  SCANNER: DurableObjectNamespace;
   ADMIN_SECRET: string;
   ELEVENLABS_API_KEY: string;
   MAX_LESSONS_PER_DAY?: string;
@@ -54,10 +55,36 @@ export interface DraftResult {
 
 /** Director agent state */
 export interface DirectorState {
-  status: 'idle' | 'curating' | 'drafting' | 'auditing' | 'publishing' | 'error';
+  status: 'idle' | 'scanning' | 'curating' | 'drafting' | 'auditing' | 'revising' | 'generating_audio' | 'publishing' | 'error';
   currentTask: string | null;
   lastLesson: { courseSlug: string; lessonNumber: number; title: string } | null;
+  lastDailyPiece: { title: string; date: string } | null;
   error: string | null;
+}
+
+/** A daily piece brief — news-anchored teaching */
+export interface DailyPieceBrief {
+  date: string;
+  headline: string;
+  newsSource: string;
+  underlyingSubject: string;
+  teachingAngle: string;
+  hooks: string[];
+  beats: BeatPlan[];
+  estimatedTime: string;
+  toneNote: string;
+  avoid: string;
+}
+
+/** A news candidate from the Scanner */
+export interface DailyCandidate {
+  id: string;
+  headline: string;
+  source: string;
+  category: string;
+  summary: string;
+  url: string;
+  teachabilityScore?: number;
 }
 
 /** Subject from subject-values.json */

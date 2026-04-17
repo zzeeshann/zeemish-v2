@@ -1,0 +1,30 @@
+---
+import { getCollection, render } from 'astro:content';
+import LessonLayout from '../../layouts/LessonLayout.astro';
+
+export async function getStaticPaths() {
+  const pieces = await getCollection('dailyPieces');
+  return pieces.map((piece) => ({
+    params: { date: piece.data.date },
+    props: { piece },
+  }));
+}
+
+const { piece } = Astro.props;
+const { Content } = await render(piece);
+---
+
+<LessonLayout
+  title={piece.data.title}
+  courseTitle="Daily"
+  courseSlug="daily"
+  lessonNumber={0}
+  estimatedTime={piece.data.estimatedTime}
+  audioSrc={piece.data.audioSrc}
+>
+  <Content />
+</LessonLayout>
+
+<script>
+  import '../../interactive/register';
+</script>

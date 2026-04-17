@@ -1,0 +1,37 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const pieces = await getCollection('dailyPieces');
+const sorted = [...pieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
+---
+
+<BaseLayout title="Daily — Zeemish" description="Today's news, explained.">
+  <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight">Daily Pieces</h1>
+  <p class="text-lg text-zee-muted mb-10">Today's news, explained. One piece, every morning.</p>
+
+  {sorted.length === 0 ? (
+    <p class="text-zee-muted italic">No daily pieces yet. The first one is coming soon.</p>
+  ) : (
+    <div class="space-y-4">
+      {sorted.map((piece) => (
+        <a
+          href={`/daily/${piece.data.date}/`}
+          class="block p-5 rounded-xl border border-zee-border hover:border-zee-primary/30 hover:shadow-sm transition-all group"
+        >
+          <div class="flex items-baseline justify-between mb-1">
+            <span class="text-xs text-zee-muted">{piece.data.date}</span>
+            <span class="text-xs text-zee-muted">{piece.data.estimatedTime}</span>
+          </div>
+          <h2 class="text-lg font-bold group-hover:text-zee-primary transition-colors">
+            {piece.data.title}
+          </h2>
+          <p class="text-sm text-zee-muted mt-1">{piece.data.description}</p>
+          {piece.data.newsSource && (
+            <span class="text-xs text-zee-muted mt-2 inline-block">Source: {piece.data.newsSource}</span>
+          )}
+        </a>
+      ))}
+    </div>
+  )}
+</BaseLayout>
