@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
-import { formatTime, formatDate } from '../../lib/format';
+import { formatTime } from '../../lib/format';
 
 const dailyPieces = await getCollection('dailyPieces');
 // Exclude pieces that failed audit gates after max revisions. They still
@@ -10,34 +10,135 @@ const dailyPieces = await getCollection('dailyPieces');
 const sorted = [...dailyPieces]
   .filter((p) => p.data.qualityFlag !== 'low')
   .sort((a, b) => b.data.date.localeCompare(a.data.date));
+
+// Group by month — "April 2026" buckets. Preserves sort order within bucket.
+type Piece = typeof sorted[number];
+const months: { label: string; pieces: Piece[] }[] = [];
+const monthNames = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+for (const piece of sorted) {
+  const [year, monthStr] = piece.data.date.split('-');
+  const label = `${monthNames[parseInt(monthStr, 10) - 1]} ${year}`;
+  const last = months[months.length - 1];
+  if (last && last.label === label) {
+    last.pieces.push(piece);
+  } else {
+    months.push({ label, pieces: [piece] });
+  }
+}
+
+const totalPieces = sorted.length;
+const subjects = new Set(sorted.map((p) => p.data.underlyingSubject).filter(Boolean));
 ---
 
 <BaseLayout title="Library — Zeemish" description="Every piece we've published. The library grows every day.">
-  <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight">Library</h1>
-  <p class="text-lg text-zee-muted mb-10">Every piece we've published. Growing every day.</p>
+  <div class="pt-6 pb-10">
+    <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">Library</h1>
+    <p class="text-lg text-zee-muted mb-6">Every piece we've published. Growing every day.</p>
+    {totalPieces > 0 && (
+      <p class="text-sm text-zee-muted">
+        <span class="text-zee-text font-medium">{totalPieces}</span> {totalPieces === 1 ? 'piece' : 'pieces'}
+        <span class="mx-2 opacity-40" aria-hidden="true">·</span>
+        <span class="text-zee-text font-medium">{subjects.size}</span> {subjects.size === 1 ? 'subject' : 'subjects'}
+      </p>
+    )}
+  </div>
 
-  {sorted.length === 0 ? (
-    <p class="text-zee-muted italic">The library is empty. The first piece is coming soon.</p>
-  ) : (
-    <div class="space-y-3">
-      {sorted.map((piece) => (
-        <a
-          href={`/daily/${piece.data.date}/`}
-          class="block p-5 rounded-xl border border-zee-border hover:border-zee-primary/30 hover:shadow-sm transition-all group"
-        >
-          <div class="flex items-baseline justify-between mb-1">
-            <span class="text-xs text-zee-muted">{formatDate(piece.data.date)}</span>
-            <span class="text-xs text-zee-muted">{formatTime(piece.data.estimatedTime)}</span>
-          </div>
-          <h2 class="text-lg font-bold group-hover:text-zee-primary transition-colors">
-            {piece.data.title}
-          </h2>
-          <p class="text-sm text-zee-muted mt-1">{piece.data.description}</p>
-          {piece.data.underlyingSubject && (
-            <span class="text-xs text-zee-primary mt-2 inline-block">{piece.data.underlyingSubject}</span>
-          )}
-        </a>
-      ))}
+  {totalPieces === 0 ? (
+    <div class="py-12 border-t border-zee-border/60">
+      <p class="text-zee-muted italic">The library is empty. The first piece is coming soon.</p>
     </div>
+  ) : (
+    <>
+      {totalPieces > 2 && (
+        <div class="mb-8 border-y border-zee-border/60 py-3">
+          <label class="sr-only" for="library-filter">Filter pieces</label>
+          <input
+            id="library-filter"
+            type="search"
+            placeholder="Filter by title or subject…"
+            class="w-full bg-transparent border-0 text-sm placeholder:text-zee-muted focus:outline-none focus:ring-0"
+            data-library-filter
+          />
+        </div>
+      )}
+
+      <div class="space-y-12 pb-12" data-library-list>
+        {months.map((month) => (
+          <section data-month-group>
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
+              {month.label}
+            </h2>
+            <ul class="divide-y divide-zee-border/60">
+              {month.pieces.map((piece) => (
+                <li data-library-item>
+                  <a
+                    href={`/daily/${piece.data.date}/`}
+                    class="block py-5 group relative pl-4 -ml-4 border-l-2 border-transparent hover:border-zee-primary transition-all"
+                  >
+                    <div class="flex items-baseline gap-3 mb-1">
+                      <span class="text-xs text-zee-muted tabular-nums">
+                        {piece.data.date.slice(-2)} {monthNames[parseInt(piece.data.date.split('-')[1], 10) - 1].slice(0, 3)}
+                      </span>
+                      <span class="text-zee-muted/40" aria-hidden="true">·</span>
+                      <span class="text-xs text-zee-muted">{formatTime(piece.data.estimatedTime)}</span>
+                    </div>
+                    <h3 class="text-lg md:text-xl font-semibold leading-snug group-hover:text-zee-primary transition-colors" data-title>
+                      {piece.data.title}
+                    </h3>
+                    <p class="text-sm text-zee-muted mt-2 leading-relaxed">{piece.data.description}</p>
+                    {piece.data.underlyingSubject && (
+                      <span
+                        class="inline-block mt-3 text-[11px] font-medium uppercase tracking-wider text-zee-gold"
+                        data-subject
+                      >
+                        {piece.data.underlyingSubject}
+                      </span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      <p class="text-sm text-zee-muted hidden pb-12" data-empty-match>
+        No pieces match that filter.
+      </p>
+    </>
   )}
 </BaseLayout>
+
+<script>
+  const filter = document.querySelector<HTMLInputElement>('[data-library-filter]');
+  const items = Array.from(document.querySelectorAll<HTMLElement>('[data-library-item]'));
+  const groups = Array.from(document.querySelectorAll<HTMLElement>('[data-month-group]'));
+  const emptyNote = document.querySelector<HTMLElement>('[data-empty-match]');
+
+  if (filter) {
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      let anyVisible = false;
+
+      for (const item of items) {
+        const title = item.querySelector<HTMLElement>('[data-title]')?.textContent ?? '';
+        const subject = item.querySelector<HTMLElement>('[data-subject]')?.textContent ?? '';
+        const match = !q || title.toLowerCase().includes(q) || subject.toLowerCase().includes(q);
+        item.style.display = match ? '' : 'none';
+        if (match) anyVisible = true;
+      }
+
+      // Hide empty month groups
+      for (const group of groups) {
+        const visible = Array.from(group.querySelectorAll<HTMLElement>('[data-library-item]'))
+          .some((el) => el.style.display !== 'none');
+        group.style.display = visible ? '' : 'none';
+      }
+
+      if (emptyNote) emptyNote.style.display = anyVisible ? 'none' : 'block';
+    });
+  }
+</script>

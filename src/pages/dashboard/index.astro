@@ -9,13 +9,20 @@ const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
 const user = userId ? await getUser(db, userId) : null;
 const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
-const isAdmin = user?.email === ADMIN_EMAIL;
+// Guard: if ADMIN_EMAIL env isn't set, no one should ever match.
+const isAdmin = !!user?.email && !!ADMIN_EMAIL && user.email === ADMIN_EMAIL;
 const today = new Date().toISOString().slice(0, 10);
 
 // Fetch data directly from D1 (server-rendered)
 let todaysPiece: any = null;
 let recentPieces: any[] = [];
-let stats = { totalPieces: 0, avgVoiceScore: 0, subjects: [] as string[], runningSince: '' };
+let stats = {
+  totalPieces: 0,
+  avgVoiceScore: 0,
+  voiceSampleSize: 0,
+  subjects: [] as string[],
+  runningSince: '',
+};
 let todayScores = { voice: null as any, facts: null as any, structure: null as any };
 
 try {
@@ -29,13 +36,14 @@ try {
   recentPieces = recent.results;
 
   const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces WHERE quality_flag IS NULL').first<{ total: number }>();
-  const avgVoice = await db.prepare("SELECT AVG(score) as avg FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number }>();
+  const voiceAgg = await db.prepare("SELECT AVG(score) as avg, COUNT(*) as n FROM audit_results WHERE auditor = 'voice' AND passed = 1").first<{ avg: number; n: number }>();
   const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL AND quality_flag IS NULL').all<{ underlying_subject: string }>();
   const firstPiece = await db.prepare('SELECT date FROM daily_pieces WHERE quality_flag IS NULL ORDER BY date ASC LIMIT 1').first<{ date: string }>();
 
   stats = {
     totalPieces: countResult?.total ?? 0,
-    avgVoiceScore: avgVoice?.avg ? Math.round(avgVoice.avg) : 0,
+    avgVoiceScore: voiceAgg?.avg ? Math.round(voiceAgg.avg) : 0,
+    voiceSampleSize: voiceAgg?.n ?? 0,
     subjects: subjectsResult.results.map((s) => s.underlying_subject),
     runningSince: firstPiece?.date ?? '',
   };
@@ -47,8 +55,8 @@ try {
     const s = audits.results.find((a: any) => a.auditor === 'structure');
     todayScores = {
       voice: v ? { score: (v as any).score, passed: !!(v as any).passed } : null,
-      facts: f ? { passed: !!(f as any).passed } : null,
-      structure: s ? { passed: !!(s as any).passed } : null,
+      facts: f ? { score: (f as any).score, passed: !!(f as any).passed } : null,
+      structure: s ? { score: (s as any).score, passed: !!(s as any).passed } : null,
     };
   }
 } catch { /* D1 may not have data yet */ }
@@ -105,31 +113,45 @@ const agents = [
     </div>
   </section>
 
-  <!-- Section 2: Quality scores -->
-  {todaysPiece && (
-    <section class="mb-10">
-      <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Quality Scores</h2>
-      <div class="grid grid-cols-3 gap-4">
-        <div class="p-4 rounded-xl border border-zee-border text-center">
-          <div class="text-2xl font-bold text-zee-primary">{todayScores.voice?.score ?? '—'}</div>
-          <div class="text-sm text-zee-muted">Voice</div>
-          {todayScores.voice && (
-            <div class="mt-2 h-1.5 bg-zee-border rounded-full overflow-hidden">
-              <div class="h-full bg-zee-primary rounded-full" style={`width: ${todayScores.voice.score}%`}></div>
+  <!-- Section 2: Quality scores — three gates, same visual treatment -->
+  {todaysPiece && (() => {
+    type Gate = { label: string; score: number | null | undefined; passed: boolean | null };
+    const gates: Gate[] = [
+      { label: 'Voice', score: todayScores.voice?.score, passed: todayScores.voice?.passed ?? null },
+      { label: 'Facts', score: todayScores.facts?.score, passed: todayScores.facts?.passed ?? null },
+      { label: 'Structure', score: todayScores.structure?.score, passed: todayScores.structure?.passed ?? null },
+    ];
+    const verdict = (g: Gate) =>
+      g.passed === null ? 'Not yet run' : g.passed ? 'Passing' : 'Failed';
+    const verdictClass = (g: Gate) =>
+      g.passed === null ? 'text-zee-muted' : g.passed ? 'text-zee-primary' : 'text-red-600';
+    return (
+      <section class="mb-10">
+        <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Quality Scores</h2>
+        <div class="grid grid-cols-3 gap-4">
+          {gates.map((g) => (
+            <div class="p-4 rounded-xl border border-zee-border flex flex-col">
+              <div class="text-xs font-semibold uppercase tracking-widest text-zee-muted">{g.label}</div>
+              <div class="mt-3 text-3xl font-bold tabular-nums leading-none">
+                {typeof g.score === 'number' ? g.score : '—'}
+              </div>
+              <div class={`mt-3 text-xs font-medium ${verdictClass(g)}`}>
+                {verdict(g)}
+              </div>
+              {typeof g.score === 'number' && (
+                <div class="mt-3 h-1 bg-zee-border rounded-full overflow-hidden">
+                  <div
+                    class={`h-full rounded-full ${g.passed ? 'bg-zee-primary' : 'bg-red-500'}`}
+                    style={`width: ${Math.max(0, Math.min(100, g.score))}%`}
+                  ></div>
+                </div>
+              )}
             </div>
-          )}
+          ))}
         </div>
-        <div class="p-4 rounded-xl border border-zee-border text-center">
-          <div class="text-2xl font-bold">{todayScores.facts?.passed ? '✓' : '—'}</div>
-          <div class="text-sm text-zee-muted">Facts</div>
-        </div>
-        <div class="p-4 rounded-xl border border-zee-border text-center">
-          <div class="text-2xl font-bold">{todayScores.structure?.passed ? '✓' : '—'}</div>
-          <div class="text-sm text-zee-muted">Structure</div>
-        </div>
-      </div>
-    </section>
-  )}
+      </section>
+    );
+  })()}
 
   <!-- Section 3: The agent team -->
   <section class="mb-10">
@@ -164,6 +186,11 @@ const agents = [
       <div class="p-4 rounded-xl border border-zee-border text-center">
         <div class="text-2xl font-bold text-zee-primary">{stats.avgVoiceScore || '—'}</div>
         <div class="text-sm text-zee-muted">Avg voice score</div>
+        {stats.voiceSampleSize > 0 && (
+          <div class="text-xs text-zee-muted/70 mt-1">
+            from {stats.voiceSampleSize} {stats.voiceSampleSize === 1 ? 'piece' : 'pieces'}
+          </div>
+        )}
       </div>
       <div class="p-4 rounded-xl border border-zee-border text-center">
         <div class="text-sm font-medium text-zee-primary">{stats.runningSince ? `Since ${formatDate(stats.runningSince)}` : '—'}</div>

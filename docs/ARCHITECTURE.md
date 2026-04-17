@@ -21,9 +21,11 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] `<lesson-shell>` + `<lesson-beat>` Web Components for beat navigation (one beat at a time)
 - [x] Beat CSS in standalone `src/styles/beats.css` (not Tailwind-processed, survives purging)
 - [x] AudioPlayer component (shell — real audio via R2 when generated)
-- [x] BaseLayout + LessonLayout with breadcrumbs
+- [x] BaseLayout + LessonLayout with breadcrumbs, date eyebrow, beat/subject meta line
 - [x] Progressive enhancement (without JS, beats show as long scroll)
 - [x] `formatDate()` and `formatTime()` helpers in `src/lib/format.ts`
+- [x] `src/lib/rehype-beats.ts` — render-time MDX transform that wraps `##`-demarcated sections in `<lesson-shell>`/`<lesson-beat>`. Drafter keeps emitting plain markdown; the plugin connects the pipes so the dormant Web Component activates. Humanises kebab-case headings (`## what-is-hormuz` → "What Is Hormuz"). No-op when MDX has no h2s.
+- [x] Keyboard navigation (← / →) for beats, ignoring inputs/textareas and the Zita chat
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)

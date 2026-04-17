@@ -8,29 +8,72 @@ interface Props {
   title: string;
   estimatedTime: string;
   audioSrc?: string;
+  beatCount?: number;
+  subject?: string;
+  date?: string;
 }
 
-const { title, estimatedTime, audioSrc } = Astro.props;
+const { title, estimatedTime, audioSrc, beatCount, subject, date } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
+
+let dateDisplay = '';
+if (date) {
+  const d = new Date(date);
+  if (!Number.isNaN(d.getTime())) {
+    dateDisplay = d.toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  }
+}
 ---
 
 <BaseLayout title={`${title} — Zeemish`}>
   <nav class="text-sm text-zee-muted mb-6" aria-label="Breadcrumb">
     <a href="/daily/" class="hover:text-zee-primary transition-colors">Daily</a>
-    <span class="mx-2">/</span>
-    <span class="text-zee-text">{title}</span>
+    <span class="mx-2 opacity-50">/</span>
+    <span class="text-zee-text">Today</span>
   </nav>
 
-  <h1 class="text-2xl md:text-3xl font-bold mb-2 leading-tight">{title}</h1>
-  <p class="text-sm text-zee-muted mb-6">{timeDisplay}</p>
+  {dateDisplay && (
+    <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-3">{dateDisplay}</p>
+  )}
 
-  <div class="mb-8">
-    <AudioPlayer audioSrc={audioSrc} />
-  </div>
+  <h1 class="text-3xl md:text-4xl font-bold mb-4 leading-[1.15] tracking-tight">{title}</h1>
+
+  <p class="text-sm text-zee-muted mb-8 flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span>{timeDisplay}</span>
+    {beatCount && (
+      <>
+        <span class="opacity-40" aria-hidden="true">·</span>
+        <span>{beatCount} {beatCount === 1 ? 'beat' : 'beats'}</span>
+      </>
+    )}
+    {subject && (
+      <>
+        <span class="opacity-40" aria-hidden="true">·</span>
+        <span>{subject}</span>
+      </>
+    )}
+  </p>
+
+  {audioSrc && (
+    <div class="mb-8">
+      <AudioPlayer audioSrc={audioSrc} />
+    </div>
+  )}
 
   <article class="prose">
     <slot />
   </article>
+
+  {!audioSrc && (
+    <p class="mt-12 text-xs text-zee-muted/70 italic">
+      Audio version coming soon.
+    </p>
+  )}
 
   <zita-chat
     course="daily"

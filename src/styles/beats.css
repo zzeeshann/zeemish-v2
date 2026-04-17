@@ -1,30 +1,68 @@
 /*
  * Beat navigation CSS — standalone, not processed by Tailwind.
  * This ensures custom element selectors are never purged.
+ *
+ * Shape:
+ *   <lesson-shell>
+ *     <lesson-beat name="...">
+ *       <h2>...</h2>
+ *       <p>...</p>
+ *     </lesson-beat>
+ *     ...
+ *     <nav class="beat-nav"> (injected by lesson-shell.ts)
+ *   </lesson-shell>
  */
 
-/* Default: all beats visible (no-JS fallback) */
-lesson-beat {
+/* Default (no-JS fallback): all beats render as continuous prose */
+lesson-shell {
   display: block;
-  padding: 1rem 0;
 }
 
-/* When lesson-shell JS activates: hide ALL beats */
+lesson-beat {
+  display: block;
+  padding: 0.5rem 0;
+}
+
+/* When JS activates: hide every beat except the current one */
 lesson-shell[data-active] lesson-beat {
   display: none !important;
   opacity: 0;
   transition: opacity 0.3s ease;
+  min-height: 50vh;
 }
 
-/* Show ONLY the current beat */
 lesson-shell[data-active] lesson-beat[data-visible] {
   display: block !important;
   opacity: 1;
 }
 
-/* Beat navigation bar */
+/* First h2 inside a beat is the beat title — pull it tighter so it
+   doesn't inherit the mid-article top margin from prose h2 rules. */
+lesson-shell[data-active] lesson-beat > h2:first-child {
+  margin-top: 0.25rem;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+  color: #1A1A1A;
+}
+
+@media (min-width: 768px) {
+  lesson-shell[data-active] lesson-beat > h2:first-child {
+    font-size: 1.875rem;
+  }
+}
+
+/* First paragraph of a beat: a touch heavier to anchor the eye */
+lesson-shell[data-active] lesson-beat > p:first-of-type,
+lesson-shell[data-active] lesson-beat > h2:first-child + p {
+  font-size: 1.0625rem;
+  line-height: 1.7;
+}
+
+/* --- Navigation bar (prev / progress / next) ---------------------- */
+
 .beat-nav {
-  margin-top: 2rem;
+  margin-top: 3rem;
   padding-top: 1.5rem;
   border-top: 1px solid #E8E4DE;
 }
@@ -33,55 +71,64 @@ lesson-shell[data-active] lesson-beat[data-visible] {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .beat-nav-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.75rem 1.25rem;
-  font-size: 0.875rem;
+  font-family: inherit;
+  font-size: 0.9375rem;
   font-weight: 500;
   border-radius: 0.5rem;
-  transition: all 0.15s ease;
-  background: rgba(232, 228, 222, 0.5);
+  border: 1px solid transparent;
+  background: transparent;
   color: #1A1A1A;
   min-height: 44px;
-  min-width: 44px;
-  border: none;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
 
-.beat-nav-btn:hover {
-  background: #E8E4DE;
+.beat-nav-prev {
+  color: #6B6B6B;
+  border-color: #E8E4DE;
+}
+
+.beat-nav-prev:hover:not(:disabled) {
+  color: #1A1A1A;
+  background: rgba(232, 228, 222, 0.5);
+}
+
+.beat-nav-next {
+  background: #1A6B62;
+  color: #FFFFFF;
+  border-color: #1A6B62;
+}
+
+.beat-nav-next:hover:not(:disabled) {
+  background: #155951;
+  border-color: #155951;
 }
 
 .beat-nav-btn:disabled {
-  opacity: 0.3;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
-.beat-nav-btn:disabled:hover {
-  background: rgba(232, 228, 222, 0.5);
-}
-
-.beat-nav-next:not(:disabled) {
-  background: #1A6B62;
-  color: white;
-}
-
-.beat-nav-next:not(:disabled):hover {
-  opacity: 0.9;
-}
-
 .beat-nav-progress {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: #6B6B6B;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
 }
+
+/* --- Progress bar ------------------------------------------------- */
 
 .beat-nav-bar {
-  margin-top: 1rem;
-  height: 0.25rem;
+  margin-top: 1.25rem;
+  height: 0.1875rem;
   background: #E8E4DE;
   border-radius: 9999px;
   overflow: hidden;
@@ -91,5 +138,30 @@ lesson-shell[data-active] lesson-beat[data-visible] {
   height: 100%;
   background: #1A6B62;
   border-radius: 9999px;
-  transition: width 0.3s ease;
+  transition: width 0.35s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* --- Mobile tuning ------------------------------------------------ */
+
+@media (max-width: 480px) {
+  .beat-nav-btn {
+    padding: 0.625rem 0.875rem;
+    font-size: 0.875rem;
+  }
+
+  .beat-nav-prev svg,
+  .beat-nav-next svg {
+    display: none;
+  }
+
+  .beat-nav-progress {
+    font-size: 0.75rem;
+  }
+}
+
+/* --- Keyboard focus ---------------------------------------------- */
+
+.beat-nav-btn:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 2px;
 }

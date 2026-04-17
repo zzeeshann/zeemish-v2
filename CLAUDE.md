@@ -120,6 +120,12 @@ docs/handoff/           Original architecture + specs
 - Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
 - Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
 
+## Design pass (2026-04-17)
+- Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.
+- Homepage: hero + "made by 13 agents" pipeline strip + recent list. Mission line moved to footer (`BaseLayout`).
+- Library: month-grouped, filterable by title/subject, topic pills in gold.
+- Dashboard: three unified quality-score cards (score + verdict + bar); avg voice score shows sample size; admin button guard hardened against undefined email match.
+
 ## Dev-mode testing
 One-command reset: `ADMIN_SECRET=... ./scripts/reset-today.sh` (git rm
 MDX + D1 clear across 5 tables + trigger fresh pipeline). See

@@ -10,12 +10,22 @@
 
   /* Prose defaults for MDX content */
   .prose {
-    @apply text-zee-text leading-relaxed;
+    @apply text-zee-text;
+    line-height: 1.7;
   }
 
   .prose p {
-    @apply text-base md:text-lg leading-relaxed;
-    margin-bottom: 1.25rem;
+    font-size: 1.0625rem;
+    line-height: 1.75;
+    margin-bottom: 1.35rem;
+  }
+
+  @media (min-width: 768px) {
+    .prose p {
+      font-size: 1.125rem;
+      line-height: 1.8;
+      margin-bottom: 1.5rem;
+    }
   }
 
   .prose h1 {

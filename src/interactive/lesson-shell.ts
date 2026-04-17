@@ -16,6 +16,7 @@ class LessonShell extends HTMLElement {
   private beats: HTMLElement[] = [];
   private currentIndex = 0;
   private nav: HTMLElement | null = null;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   private get storageKey(): string {
     return `zeemish-beat:${window.location.pathname}`;
@@ -55,12 +56,38 @@ class LessonShell extends HTMLElement {
     this.nav.setAttribute('aria-label', 'Lesson navigation');
     this.appendChild(this.nav);
 
+    // Keyboard navigation: ← / → to move between beats. Ignore if the
+    // reader is typing in an input or the Zita chat is focused.
+    this.keyHandler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (target && target.closest && target.closest('zita-chat')) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        this.go(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (this.currentIndex === this.beats.length - 1) {
+          window.location.href = '/daily/';
+        } else {
+          this.go(1);
+        }
+      }
+    };
+    window.addEventListener('keydown', this.keyHandler);
+
     this.render();
   }
 
   disconnectedCallback() {
     this.nav?.remove();
     this.removeAttribute('data-active');
+    if (this.keyHandler) {
+      window.removeEventListener('keydown', this.keyHandler);
+      this.keyHandler = null;
+    }
     // Show all beats again when component disconnects
     for (const beat of this.beats) {
       beat.removeAttribute('data-visible');

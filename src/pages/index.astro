@@ -11,68 +11,122 @@ const todaysPiece = sorted[0];
 // even if it's low (the day shouldn't be blank), and /daily/[date]/
 // surfaces a banner on that page.
 const recentPieces = sorted.slice(1, 6).filter((p) => p.data.qualityFlag !== 'low');
+
+// Long-form date for the eyebrow on today's hero
+let heroDate = '';
+if (todaysPiece) {
+  const d = new Date(todaysPiece.data.date);
+  if (!Number.isNaN(d.getTime())) {
+    heroDate = d.toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+  }
+}
 ---
 
 <BaseLayout title="Zeemish" description="Educate yourself for humble decisions.">
 
-  <!-- Today's piece -->
   {todaysPiece ? (
-    <section class="py-10 md:py-16">
-      <span class="text-xs font-medium text-zee-gold uppercase tracking-wide">Today</span>
-      <a href={`/daily/${todaysPiece.data.date}/`} class="block mt-3 group">
-        <h1 class="text-3xl md:text-4xl font-bold leading-tight group-hover:text-zee-primary transition-colors">
-          {todaysPiece.data.title}
-        </h1>
-        <p class="text-lg text-zee-muted mt-3 max-w-xl leading-relaxed">{todaysPiece.data.description}</p>
-        <div class="flex items-center gap-3 mt-4 text-sm text-zee-muted">
-          <span>{formatTime(todaysPiece.data.estimatedTime)}</span>
-          {todaysPiece.data.underlyingSubject && (
-            <>
-              <span>&middot;</span>
-              <span>{todaysPiece.data.underlyingSubject}</span>
-            </>
-          )}
-        </div>
-      </a>
-      <div class="mt-8 h-px w-16 bg-zee-gold"></div>
-    </section>
+    <>
+      <!-- Today's piece — hero -->
+      <section class="pt-6 pb-12 md:pt-10 md:pb-16">
+        <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">
+          Today <span class="text-zee-muted/60 font-normal normal-case tracking-normal ml-2">· {heroDate}</span>
+        </p>
+
+        <a href={`/daily/${todaysPiece.data.date}/`} class="block group mt-4">
+          <h1 class="text-3xl md:text-5xl font-bold leading-[1.08] tracking-tight group-hover:text-zee-primary transition-colors">
+            {todaysPiece.data.title}
+          </h1>
+          <p class="text-lg md:text-xl text-zee-muted mt-5 max-w-2xl leading-relaxed">
+            {todaysPiece.data.description}
+          </p>
+          <div class="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zee-muted">
+            <span>{formatTime(todaysPiece.data.estimatedTime)}</span>
+            {todaysPiece.data.beatCount && (
+              <>
+                <span class="opacity-40" aria-hidden="true">·</span>
+                <span>{todaysPiece.data.beatCount} {todaysPiece.data.beatCount === 1 ? 'beat' : 'beats'}</span>
+              </>
+            )}
+            {todaysPiece.data.underlyingSubject && (
+              <>
+                <span class="opacity-40" aria-hidden="true">·</span>
+                <span>{todaysPiece.data.underlyingSubject}</span>
+              </>
+            )}
+          </div>
+          <div class="mt-7 inline-flex items-center gap-2 text-sm font-medium text-zee-primary group-hover:gap-3 transition-all">
+            Read today's piece
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </a>
+      </section>
+
+      <!-- How this was made — transparency strip -->
+      <section class="py-6 border-y border-zee-border/60">
+        <p class="text-xs text-zee-muted leading-relaxed">
+          <span class="font-medium text-zee-text">Made by 13 agents.</span>
+          Today's piece moved through
+          <span class="text-zee-text">Scanner → Curator → Drafter → Voice · Facts · Structure → Publisher</span>
+          before going live.
+          <a href="/dashboard/" class="text-zee-primary hover:underline ml-1 whitespace-nowrap">See the pipeline →</a>
+        </p>
+      </section>
+    </>
   ) : (
-    <section class="py-16 md:py-24">
-      <h1 class="text-3xl md:text-4xl font-bold leading-tight mb-4">
+    <section class="py-20 md:py-28">
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-4">No piece today</p>
+      <h1 class="text-3xl md:text-5xl font-bold leading-[1.08] tracking-tight mb-6">
         Educate yourself for humble decisions.
       </h1>
-      <p class="text-lg text-zee-muted max-w-md leading-relaxed">
-        Every morning, one piece. Today's news, explained. The machinery behind the headlines.
+      <p class="text-lg md:text-xl text-zee-muted max-w-2xl leading-relaxed mb-8">
+        Every morning at 2am UTC, one piece. Today's news, explained.
+        The machinery behind the headlines.
       </p>
-      <div class="mt-12 h-px w-16 bg-zee-gold"></div>
+      <a href="/library/" class="inline-flex items-center gap-2 text-sm font-medium text-zee-primary hover:gap-3 transition-all">
+        Browse the library
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M6 4L10 8L6 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </a>
     </section>
   )}
 
-  <!-- From the library -->
+  <!-- Recent pieces -->
   {recentPieces.length > 0 && (
-    <section class="mb-12">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide">From the library</h2>
-        <a href="/library/" class="text-sm text-zee-primary hover:underline">All pieces</a>
+    <section class="py-12 md:py-16">
+      <div class="flex items-baseline justify-between mb-6">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Recent</h2>
+        <a href="/library/" class="text-sm text-zee-primary hover:underline">All pieces →</a>
       </div>
-      <div class="space-y-2">
+      <ul class="divide-y divide-zee-border/60">
         {recentPieces.map((piece) => (
-          <a
-            href={`/daily/${piece.data.date}/`}
-            class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
-          >
-            <span class="font-medium group-hover:text-zee-primary transition-colors text-sm flex-1">
-              {piece.data.title}
-            </span>
-            <span class="text-xs text-zee-muted ml-4 shrink-0">{formatDate(piece.data.date)}</span>
-          </a>
+          <li>
+            <a
+              href={`/daily/${piece.data.date}/`}
+              class="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-6 py-4 group"
+            >
+              <div class="flex-1 min-w-0">
+                <p class="font-medium text-base leading-snug group-hover:text-zee-primary transition-colors">
+                  {piece.data.title}
+                </p>
+                {piece.data.underlyingSubject && (
+                  <p class="text-xs text-zee-muted mt-1">{piece.data.underlyingSubject}</p>
+                )}
+              </div>
+              <span class="text-xs text-zee-muted whitespace-nowrap font-variant-tabular">
+                {formatDate(piece.data.date)}
+              </span>
+            </a>
+          </li>
         ))}
-      </div>
+      </ul>
     </section>
   )}
-
-  <!-- Protocol -->
-  <section class="py-8 text-center">
-    <p class="text-sm text-zee-muted italic">Educate yourself for humble decisions.</p>
-  </section>
 </BaseLayout>
