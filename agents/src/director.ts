@@ -37,13 +37,18 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     error: null,
   };
 
-  /** Set up daily scheduled run — cancel any old schedules first */
+  /**
+   * Set up the daily 2am UTC run. Cron schedules in the Agents SDK are
+   * idempotent on (callback, cron, payload), so calling this on every DO
+   * start is safe — duplicates are deduped, not appended.
+   *
+   * Do NOT cancel existing schedules first. The SDK's alarm() handler runs
+   * super.alarm() (which triggers onStart) BEFORE scanning the schedule
+   * table for due rows. Cancelling here on the 2am wake-up would delete the
+   * very row that just fired, and the re-created row's `time` would jump to
+   * tomorrow's 2am — silently swallowing today's run forever.
+   */
   async onStart() {
-    const existing = await this.getSchedules();
-    for (const schedule of existing) {
-      await this.cancelSchedule(schedule.id);
-    }
-    // One schedule: daily piece at 2:00 AM UTC
     await this.schedule('0 2 * * *', 'dailyRun', { type: 'daily-piece' });
   }
 

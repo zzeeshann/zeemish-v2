@@ -495,3 +495,31 @@ Data that doesn't exist is explicitly not displayed: no reader visits (engagemen
 **Reused**: `auditTier()` + `auditTierLabel()` from `src/lib/audit-tier.ts`, `pipelineStepLabel()` from `src/lib/pipeline-steps.ts`, `getUser()` from `src/lib/db.ts`. Same divider-list + stat-card patterns used everywhere else.
 
 **Verified**: `npm run build` clean. Live verification post-deploy with admin login.
+
+## 2026-04-18: Director.onStart no longer cancels its own cron
+
+**Context:** The 2am UTC run on 2026-04-18 never fired. `pipeline_log` for the day was empty; today's piece never produced. Yesterday's piece (2026-04-17) shipped only because it was a manual `/daily-trigger`. The cron has effectively never fired in production.
+
+**Root cause:** The Agents SDK's `alarm()` handler calls `super.alarm()` *before* scanning `cf_agents_schedules` for due rows. `super.alarm()` triggers `#ensureInitialized()`, which runs `onStart()`. Director's `onStart()` was:
+
+```ts
+const existing = await this.getSchedules();
+for (const s of existing) await this.cancelSchedule(s.id);
+await this.schedule('0 2 * * *', 'dailyRun', { type: 'daily-piece' });
+```
+
+When the alarm woke the DO at 2am, `onStart()` deleted the cron row and re-inserted it. The new row's `time` is `getNextCronTime('0 2 * * *')` evaluated *after* 2am — i.e. tomorrow's 2am. The alarm body then queried `WHERE time <= now`, found nothing, and exited silently. Self-perpetuating: every 2am wake-up hits the same trap.
+
+**Decision:** Drop the cancel loop. Cron schedules in the Agents SDK are idempotent on `(callback, cron, payload)` — repeated `schedule()` calls return the existing row instead of inserting. The cancel-then-recreate pattern was unnecessary defensive code that turned into the actual bug.
+
+```ts
+async onStart() {
+  await this.schedule('0 2 * * *', 'dailyRun', { type: 'daily-piece' });
+}
+```
+
+**Recovery:** Today's piece run manually from admin. Fix takes effect from tomorrow's 2am onward (after deploy).
+
+**Why this slipped:** The cron path had never fired before. Yesterday was the first production day, and yesterday's piece was a manual trigger from the reset-today flow. Today's was meant to be the first true autonomous fire.
+
+**Verified:** SDK source confirms idempotency at `agents/node_modules/agents/dist/index.js:1474` — cron path checks `WHERE type='cron' AND callback AND cron AND payload LIMIT 1`, returns existing row if found.
