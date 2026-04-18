@@ -18,26 +18,27 @@ import { pipelineStepLabel } from '../lib/pipeline-steps';
 import type { MadeEnvelope, MadeFactClaim } from '../lib/made-by';
 
 /**
- * Voice-contract rules and a list of keyword fragments. A rule "lights
- * up" when any of its keywords appears (case-insensitive) in any
- * violation string across any audit round. This is a best-effort honest
- * link between what the auditor flagged and which rule it falls under —
- * we don't invent a per-rule pass/fail, we just surface the match.
+ * Voice-contract rules shown as a plain reference card. The drawer does
+ * NOT try to light up individual rules per piece — we don't store
+ * per-rule pass/fail, and inferring it from freeform violation strings
+ * was noisy and misleading. Readers see the rules here and the
+ * auditor violations in "What the auditors said" — they can connect the
+ * two themselves.
  */
-const VOICE_RULES: { label: string; keywords: string[] }[] = [
-  { label: 'Plain English', keywords: ['jargon', 'plain english'] },
-  { label: 'No tribe words', keywords: ['tribe word', 'mindfulness', 'journey', 'empower', 'transform', 'wellness', 'unlock', 'dive in', 'embrace', 'lean into', 'unpack', 'holistic', 'optimize', 'curate', 'intentional'] },
-  { label: 'Short sentences', keywords: ['long sentence', 'padded', 'run-on'] },
-  { label: 'Specific beats general', keywords: ['general', 'vague', 'specific'] },
-  { label: 'No flattery', keywords: ['flattery', 'praise', 'congratulat'] },
-  { label: 'Trust the reader', keywords: ['hedging', 'over-explain', 'might', 'perhaps'] },
+const VOICE_RULES = [
+  'Plain English',
+  'No tribe words',
+  'Short sentences',
+  'Specific beats general',
+  'No flattery',
+  'Trust the reader',
 ];
 
-const STRUCTURE_RULES: { label: string; keywords: string[] }[] = [
-  { label: 'Hook: one screen, curiosity only', keywords: ['hook'] },
-  { label: 'Teaching: one idea per beat', keywords: ['beat', 'teaching'] },
-  { label: 'Practice: only when concrete', keywords: ['practice', 'exercise'] },
-  { label: 'Close: one sentence, no CTA', keywords: ['close', 'cta', 'call to action', 'summary'] },
+const STRUCTURE_RULES = [
+  'Hook: one screen, curiosity only',
+  'Teaching: one idea per beat',
+  'Practice: only when concrete',
+  'Close: one sentence, no CTA',
 ];
 
 class MadeDrawer extends HTMLElement {
@@ -247,19 +248,18 @@ class MadeDrawer extends HTMLElement {
     }
 
     // --- Rules (voice contract) ---------------------------------------
-    const allViolations = collectViolations(env);
     html.push(`
       <section class="made-section">
         <h3 class="made-section-header">Rules applied</h3>
-        <p class="made-section-note">Every piece is held to these. The dots that light up are the ones today's audit flagged something adjacent to.</p>
+        <p class="made-section-note">Every piece is held to these. Specific violations for this piece are in "What the auditors said" above.</p>
         <div class="made-rules">
           <p class="made-rules-title">Voice contract — non-negotiables</p>
           <ul class="made-rules-list">
-            ${VOICE_RULES.map((r) => renderRule(r, allViolations)).join('')}
+            ${VOICE_RULES.map((r) => `<li class="made-rule">${escapeHtml(r)}</li>`).join('')}
           </ul>
           <p class="made-rules-title" style="margin-top:0.875rem">Lesson structure</p>
           <ul class="made-rules-list">
-            ${STRUCTURE_RULES.map((r) => renderRule(r, allViolations)).join('')}
+            ${STRUCTURE_RULES.map((r) => `<li class="made-rule">${escapeHtml(r)}</li>`).join('')}
           </ul>
           <p class="made-rules-footer">
             Full contract: <a href="https://github.com/zzeeshann/zeemish-v2/blob/main/content/voice-contract.md" target="_blank" rel="noopener">voice-contract.md</a>
@@ -471,26 +471,6 @@ function renderCandidate(c: MadeEnvelope['candidates']['alsoConsidered'][number]
       ${meta.length > 0 ? `<span class="made-candidate-meta">${meta.join(' · ')}</span>` : ''}
     </div>
   `;
-}
-
-function renderRule(
-  rule: { label: string; keywords: string[] },
-  allViolations: string[],
-): string {
-  const hit = allViolations.some((v) => {
-    const low = v.toLowerCase();
-    return rule.keywords.some((k) => low.includes(k.toLowerCase()));
-  });
-  return `<li class="made-rule"${hit ? ' data-hit' : ''}>${escapeHtml(rule.label)}</li>`;
-}
-
-function collectViolations(env: MadeEnvelope): string[] {
-  const out: string[] = [];
-  for (const r of env.rounds) {
-    out.push(...r.voice.violations);
-    out.push(...r.structure.issues);
-  }
-  return out;
 }
 
 function relativeTime(diffMs: number): string {

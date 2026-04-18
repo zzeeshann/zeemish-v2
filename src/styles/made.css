@@ -486,7 +486,7 @@ made-drawer[data-open] .made-panel {
 .made-rule {
   font-size: 0.8125rem;
   line-height: 1.5;
-  color: #6B6B6B;
+  color: #1A1A1A;
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -495,16 +495,6 @@ made-drawer[data-open] .made-panel {
 .made-rule::before {
   content: '·';
   color: #6B6B6B;
-}
-
-.made-rule[data-hit] {
-  color: #1A1A1A;
-  font-weight: 500;
-}
-
-.made-rule[data-hit]::before {
-  color: #1A6B62;
-  content: '•';
 }
 
 .made-rules-footer {
