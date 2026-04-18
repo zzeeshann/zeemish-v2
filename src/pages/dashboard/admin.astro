@@ -4,92 +4,247 @@ export const prerender = false;
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
+import { auditTier, auditTierLabel } from '../../lib/audit-tier';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
 const user = userId ? await getUser(db, userId) : null;
 const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
 
-// Admin gate
+// Admin gate.
 if (!user?.email || user.email !== ADMIN_EMAIL) {
   return Astro.redirect('/login/?redirect=/dashboard/admin/');
 }
 
-// Fetch admin data
-let observerEvents: any[] = [];
-let engagementData: any[] = [];
-let recentTasks: any[] = [];
+const today = new Date().toISOString().slice(0, 10);
+const nowMs = Date.now();
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+type Piece = {
+  date: string;
+  headline: string;
+  underlying_subject: string | null;
+  voice_score: number | null;
+  quality_flag: 'low' | null;
+  word_count: number | null;
+  beat_count: number | null;
+  published_at: number | null;
+};
+
+type ObserverEvent = {
+  id: string;
+  severity: 'info' | 'warn' | 'escalation';
+  title: string;
+  body: string;
+  context: string | null;
+  acknowledged_at: number | null;
+  created_at: number;
+};
+
+let observerEvents: ObserverEvent[] = [];
+let allPieces: (Piece & { rounds: number; candidates: number })[] = [];
+let lifetimeRuns = 0;
+let openEscalations = 0;
+let errorsThisWeek = 0;
+let avgRevisionsLifetime: number | null = null;
+let pipelineHistory: { runId: string; finalStep: string; finalStatus: string; data: any; tMs: number }[] = [];
 
 try {
-  const events = await db.prepare('SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 20').all();
+  // Observer events — last 30 (raise the cap from 20 so admin can audit further back).
+  const events = await db
+    .prepare('SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 30')
+    .all<ObserverEvent>();
   observerEvents = events.results;
-} catch { /* */ }
 
-try {
-  const engagement = await db.prepare('SELECT * FROM engagement ORDER BY date DESC LIMIT 14').all();
-  engagementData = engagement.results;
-} catch { /* */ }
+  openEscalations = observerEvents.filter((e) => e.severity === 'escalation' && !e.acknowledged_at).length;
 
-try {
-  const tasks = await db.prepare('SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT 10').all();
-  recentTasks = tasks.results;
-} catch { /* */ }
+  const weekMsAgo = nowMs - WEEK_MS;
+  const errs = await db
+    .prepare("SELECT COUNT(*) as n FROM observer_events WHERE severity = 'warn' AND created_at > ?")
+    .bind(weekMsAgo)
+    .first<{ n: number }>();
+  errorsThisWeek = errs?.n ?? 0;
 
-const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).length;
+  // All pieces newest first. Used for the All Pieces list.
+  const piecesRes = await db
+    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, word_count, beat_count, published_at FROM daily_pieces ORDER BY date DESC')
+    .all<Piece>();
+  const pieces = piecesRes.results;
+
+  // Round + candidate counts per piece (one query each, indexed by date).
+  const roundsByDate = new Map<string, number>();
+  const candsByDate = new Map<string, number>();
+  if (pieces.length > 0) {
+    const taskIds = pieces.map((p) => `daily/${p.date}`);
+    const placeholders = taskIds.map(() => '?').join(',');
+    const roundsRes = await db
+      .prepare(`SELECT task_id, draft_id FROM audit_results WHERE task_id IN (${placeholders})`)
+      .bind(...taskIds)
+      .all<{ task_id: string; draft_id: string }>();
+    for (const r of roundsRes.results) {
+      const m = r.draft_id.match(/-r(\d+)$/);
+      const round = m ? parseInt(m[1], 10) : 1;
+      const prev = roundsByDate.get(r.task_id) ?? 0;
+      if (round > prev) roundsByDate.set(r.task_id, round);
+    }
+
+    const dates = pieces.map((p) => p.date);
+    const datePlaceholders = dates.map(() => '?').join(',');
+    const candsRes = await db
+      .prepare(`SELECT date, COUNT(*) as n FROM daily_candidates WHERE date IN (${datePlaceholders}) GROUP BY date`)
+      .bind(...dates)
+      .all<{ date: string; n: number }>();
+    for (const r of candsRes.results) candsByDate.set(r.date, r.n);
+  }
+
+  allPieces = pieces.map((p) => ({
+    ...p,
+    rounds: roundsByDate.get(`daily/${p.date}`) ?? 0,
+    candidates: candsByDate.get(p.date) ?? 0,
+  }));
+
+  // Lifetime runs = distinct run_id in pipeline_log (a 'run' is one day's
+  // pipeline attempt — even if it failed before publishing).
+  const runsRes = await db
+    .prepare('SELECT COUNT(DISTINCT run_id) as n FROM pipeline_log')
+    .first<{ n: number }>();
+  lifetimeRuns = runsRes?.n ?? 0;
+
+  // Avg revisions across all pieces with audit history.
+  if (allPieces.length > 0) {
+    const totalRounds = allPieces.reduce((sum, p) => sum + (p.rounds || 0), 0);
+    const piecesWithRounds = allPieces.filter((p) => p.rounds > 0).length;
+    avgRevisionsLifetime = piecesWithRounds > 0 ? Math.round((totalRounds / piecesWithRounds) * 10) / 10 : null;
+  }
+
+  // Pipeline history — terminal step per run for the last 14 distinct runs.
+  // Every run logs at least one terminal row (step='done'|'error'|'skipped'),
+  // so we can grab the last row per run_id and read its data.
+  const histRes = await db
+    .prepare(
+      `SELECT run_id, step, status, data, created_at
+       FROM pipeline_log
+       WHERE id IN (
+         SELECT id FROM pipeline_log p1
+         WHERE created_at = (SELECT MAX(created_at) FROM pipeline_log p2 WHERE p2.run_id = p1.run_id)
+       )
+       ORDER BY run_id DESC LIMIT 14`,
+    )
+    .all<{ run_id: string; step: string; status: string; data: string | null; created_at: number }>();
+  pipelineHistory = histRes.results.map((r) => ({
+    runId: r.run_id,
+    finalStep: r.step,
+    finalStatus: r.status,
+    data: r.data ? safeJson(r.data) : {},
+    tMs: r.created_at,
+  }));
+} catch { /* D1 may be empty in dev */ }
+
+function safeJson(input: string): any {
+  try { return JSON.parse(input); } catch { return {}; }
+}
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 ---
 
-<BaseLayout title="Admin — Zeemish Dashboard">
-  <div class="flex items-center justify-between mb-8">
+<BaseLayout title="Admin — Zeemish">
+
+  <div class="pt-6 pb-10 flex items-start justify-between gap-4">
     <div>
-      <h1 class="text-2xl md:text-3xl font-bold">Admin</h1>
-      <p class="text-zee-muted text-sm">The control room. Is Zeemish working?</p>
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">
+        The control room
+      </p>
+      <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">Admin</h1>
+      <p class="text-lg text-zee-muted">Trigger runs, watch the pipeline, review escalations.</p>
     </div>
-    <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary">&larr; Public dashboard</a>
+    <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary whitespace-nowrap mt-2">
+      ← Public dashboard
+    </a>
   </div>
 
-  <!-- Section 1: Pipeline Monitor -->
+  <!-- Today's run -->
   <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Pipeline Monitor</h2>
-
-    <div class="flex flex-wrap gap-3 mb-6">
-      <button id="daily-trigger-btn"
-        class="px-5 py-3 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity">
-        Trigger Daily Piece
+    <div class="flex items-center justify-between gap-4 mb-4">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Today's run</h2>
+      <button
+        id="daily-trigger-btn"
+        class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+      >
+        Trigger daily piece
       </button>
-      <span id="trigger-status" class="text-sm text-zee-muted self-center"></span>
     </div>
-
-    <div id="pipeline-monitor" class="p-5 rounded-xl border border-zee-border bg-white/50">
-      <div id="pipeline-steps" class="space-y-3">
+    <span id="trigger-status" class="block text-xs text-zee-muted mb-3 min-h-[1rem]"></span>
+    <div class="p-5 rounded-xl border border-zee-border">
+      <div id="pipeline-steps" class="space-y-2">
         <p class="text-sm text-zee-muted italic">No pipeline run today. Click trigger to start.</p>
       </div>
     </div>
   </section>
 
-  <!-- Section 2: Observer events -->
+  <!-- System state -->
   <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">
-      Observer Events {unacknowledged > 0 && <span class="text-zee-primary">({unacknowledged} new)</span>}
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">System state</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{lifetimeRuns}</div>
+        <div class="text-sm text-zee-muted">Pipeline runs</div>
+        <div class="text-xs text-zee-muted/70 mt-1">lifetime</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class={`text-2xl font-bold ${openEscalations > 0 ? 'text-zee-gold' : 'text-zee-primary'}`}>{openEscalations}</div>
+        <div class="text-sm text-zee-muted">Escalations</div>
+        <div class="text-xs text-zee-muted/70 mt-1">unacknowledged</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{errorsThisWeek}</div>
+        <div class="text-sm text-zee-muted">Errors</div>
+        <div class="text-xs text-zee-muted/70 mt-1">last 7 days</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{avgRevisionsLifetime ?? '—'}</div>
+        <div class="text-sm text-zee-muted">Avg revisions</div>
+        <div class="text-xs text-zee-muted/70 mt-1">per piece</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Observer events -->
+  <section class="mb-10">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
+      Observer events
+      {observerEvents.filter((e) => !e.acknowledged_at).length > 0 && (
+        <span class="text-zee-primary normal-case tracking-normal ml-1">
+          ({observerEvents.filter((e) => !e.acknowledged_at).length} new)
+        </span>
+      )}
     </h2>
     {observerEvents.length === 0 ? (
       <p class="text-zee-muted italic text-sm">No events yet.</p>
     ) : (
       <div class="space-y-3">
-        {observerEvents.map((event: any) => (
-          <div class={`p-4 rounded-xl border ${
-            !event.acknowledged_at ? 'border-zee-primary/30 bg-zee-primary/5' :
-            event.severity === 'info' ? 'border-zee-border' :
-            event.severity === 'escalation' ? 'border-yellow-500/20 bg-yellow-50' :
-            'border-red-500/20 bg-red-50'
-          }`}>
-            <div class="flex items-center justify-between mb-1">
+        {observerEvents.map((event) => (
+          <div
+            data-event-id={event.id}
+            class={`event-card p-4 rounded-xl border ${
+              !event.acknowledged_at
+                ? event.severity === 'escalation' ? 'border-zee-gold/40 bg-zee-gold/5' :
+                  event.severity === 'warn' ? 'border-zee-muted/30 bg-zee-border/20' :
+                  'border-zee-primary/20 bg-zee-primary/5'
+                : 'border-zee-border'
+            }`}
+          >
+            <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-2">
-                <span class={`text-xs font-medium uppercase px-2 py-0.5 rounded ${
-                  event.severity === 'info' ? 'bg-zee-primary/10 text-zee-primary' :
-                  event.severity === 'escalation' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-red-100 text-red-700'
+                <span class={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${
+                  event.severity === 'escalation' ? 'bg-zee-gold/15 text-zee-gold' :
+                  event.severity === 'warn' ? 'bg-zee-muted/20 text-zee-text' :
+                  'bg-zee-primary/10 text-zee-primary'
                 }`}>{event.severity}</span>
-                <span class="text-xs text-zee-muted">{new Date(event.created_at).toLocaleString()}</span>
+                <span class="text-xs text-zee-muted tabular-nums">{new Date(event.created_at).toLocaleString()}</span>
               </div>
               {!event.acknowledged_at && (
                 <button class="ack-btn text-xs text-zee-primary hover:underline" data-id={event.id}>
@@ -98,115 +253,158 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
               )}
             </div>
             <h3 class="font-medium text-sm">{event.title}</h3>
-            <p class="text-sm text-zee-muted mt-1">{String(event.body).slice(0, 300)}</p>
+            <p class="text-sm text-zee-muted mt-1 leading-relaxed">{String(event.body).slice(0, 320)}</p>
           </div>
         ))}
       </div>
     )}
   </section>
 
-  <!-- Section 3: Engagement -->
+  <!-- All pieces -->
   <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Engagement (14 days)</h2>
-    {engagementData.length === 0 ? (
-      <p class="text-zee-muted italic text-sm">No engagement data yet.</p>
-    ) : (
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-zee-border text-left text-zee-muted">
-              <th class="pb-2 pr-4">Date</th>
-              <th class="pb-2 pr-4">Piece</th>
-              <th class="pb-2 pr-4">Views</th>
-              <th class="pb-2 pr-4">Completions</th>
-              <th class="pb-2">Drop-off</th>
-            </tr>
-          </thead>
-          <tbody>
-            {engagementData.map((row: any) => (
-              <tr class="border-b border-zee-border/50">
-                <td class="py-2 pr-4 text-zee-muted">{row.date}</td>
-                <td class="py-2 pr-4">{row.lesson_id}</td>
-                <td class="py-2 pr-4">{row.views}</td>
-                <td class="py-2 pr-4">{row.completions}</td>
-                <td class="py-2 text-zee-muted">{row.drop_off_beat ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div class="flex items-baseline justify-between gap-4 mb-4">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">All pieces</h2>
+      <span class="text-xs text-zee-muted">{allPieces.length} {allPieces.length === 1 ? 'piece' : 'pieces'}</span>
+    </div>
+    {allPieces.length > 5 && (
+      <div class="mb-4 border-y border-zee-border/60 py-3">
+        <label class="sr-only" for="admin-piece-filter">Filter pieces</label>
+        <input
+          id="admin-piece-filter"
+          type="search"
+          placeholder="Filter by date or headline…"
+          class="w-full bg-transparent border-0 text-sm placeholder:text-zee-muted focus:outline-none focus:ring-2 focus:ring-zee-primary/30 rounded px-1 -mx-1"
+          data-piece-filter
+        />
       </div>
     )}
+    {allPieces.length === 0 ? (
+      <p class="text-sm text-zee-muted italic py-4">No pieces published yet.</p>
+    ) : (
+      <ul class="divide-y divide-zee-border/60" data-piece-list>
+        {allPieces.map((p) => {
+          const tier = auditTier(p.voice_score, p.quality_flag);
+          const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
+          return (
+            <li data-piece-row data-piece-search={`${p.date} ${p.headline}`.toLowerCase()}>
+              <a href={`/dashboard/admin/piece/${p.date}/`} class="flex items-start gap-4 py-3 group">
+                <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
+                    <span class="text-zee-text font-medium">{shortDate(p.date)}</span>
+                    <span class="opacity-40" aria-hidden="true">·</span>
+                    <span>{auditTierLabel(tier)}</span>
+                    {p.voice_score != null && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{p.voice_score}/100</span>
+                      </>
+                    )}
+                    {p.rounds > 0 && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{p.rounds}r</span>
+                      </>
+                    )}
+                    {p.candidates > 0 && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{p.candidates}c</span>
+                      </>
+                    )}
+                    {p.quality_flag === 'low' && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span class="text-zee-gold">flagged low</span>
+                      </>
+                    )}
+                  </div>
+                  <p class="mt-1 text-sm font-medium leading-snug group-hover:text-zee-primary transition-colors">
+                    {p.headline}
+                  </p>
+                </div>
+                <span class="text-zee-muted/60 group-hover:text-zee-primary transition-colors shrink-0" aria-hidden="true">→</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+    <p class="text-sm text-zee-muted hidden pt-4" data-empty-match>No pieces match that filter.</p>
   </section>
 
-  <!-- Section 4: Recent agent tasks -->
-  <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Recent Agent Tasks</h2>
-    {recentTasks.length === 0 ? (
-      <p class="text-zee-muted italic text-sm">No tasks recorded yet.</p>
-    ) : (
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-zee-border text-left text-zee-muted">
-              <th class="pb-2 pr-4">Agent</th>
-              <th class="pb-2 pr-4">Type</th>
-              <th class="pb-2 pr-4">Status</th>
-              <th class="pb-2">Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentTasks.map((task: any) => (
-              <tr class="border-b border-zee-border/50">
-                <td class="py-2 pr-4 font-medium">{task.agent_name}</td>
-                <td class="py-2 pr-4">{task.task_type}</td>
-                <td class="py-2 pr-4">
-                  <span class={`text-xs font-medium px-2 py-0.5 rounded ${
-                    task.status === 'succeeded' ? 'bg-green-100 text-green-700' :
-                    task.status === 'failed' ? 'bg-red-100 text-red-700' :
-                    'bg-yellow-100 text-yellow-700'
-                  }`}>{task.status}</span>
-                </td>
-                <td class="py-2 text-zee-muted text-xs">{new Date(task.created_at).toLocaleString()}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
+  <!-- Pipeline history -->
+  {pipelineHistory.length > 0 && (
+    <section class="mb-10">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Pipeline history (last 14 runs)</h2>
+      <ul class="divide-y divide-zee-border/60 text-sm">
+        {pipelineHistory.map((r) => {
+          const ok = r.finalStep === 'done';
+          const skipped = r.finalStep === 'skipped';
+          const dotCls = ok ? 'bg-zee-primary' : skipped ? 'bg-zee-muted' : 'bg-zee-gold';
+          const verdict = ok ? 'Done' : skipped ? 'Skipped' : (r.finalStep === 'error' ? 'Errored' : `Stalled at ${r.finalStep}`);
+          const score = r.data?.voiceScore != null ? `voice ${r.data.voiceScore}/100` : null;
+          const revs = r.data?.revisions != null ? `${r.data.revisions} revision${r.data.revisions === 1 ? '' : 's'}` : null;
+          const flag = r.data?.qualityFlag === 'low' ? 'flagged low' : null;
+          return (
+            <li class="py-3 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
+              <div class="flex items-center gap-3">
+                <span class={`w-2 h-2 rounded-full ${dotCls} shrink-0`} aria-hidden="true"></span>
+                <span class="text-zee-text font-medium tabular-nums">{r.runId}</span>
+                <span class="text-zee-muted">— {verdict}</span>
+              </div>
+              <div class="text-xs text-zee-muted tabular-nums flex flex-wrap gap-x-2 sm:justify-end">
+                {[score, revs, flag].filter(Boolean).map((bit, i, arr) => (
+                  <>
+                    <span>{bit}</span>
+                    {i < arr.length - 1 && <span class="opacity-40">·</span>}
+                  </>
+                ))}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  )}
+
+  <!-- Engagement (honest placeholder) -->
+  <section class="mb-12">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Engagement</h2>
+    <p class="text-sm text-zee-muted leading-relaxed">
+      Per-piece reader engagement (views, completions, drop-off) is not yet tracked for daily pieces. The legacy
+      <code class="text-xs bg-zee-border/40 px-1 rounded">engagement</code> table holds reader data from the deleted lessons era and is no longer surfaced here. Path to enable: see <code class="text-xs">CLAUDE.md → Remaining minor items</code>.
+    </p>
   </section>
 </BaseLayout>
 
 <script>
-  const triggerBtn = document.getElementById('daily-trigger-btn') as HTMLButtonElement;
+  import { pipelineStepLabel } from '../../lib/pipeline-steps';
+
+  const triggerBtn = document.getElementById('daily-trigger-btn') as HTMLButtonElement | null;
   const statusEl = document.getElementById('trigger-status');
   const stepsEl = document.getElementById('pipeline-steps');
   let pollInterval: number | null = null;
 
-  // Step name → human-readable label
-  const STEP_LABELS: Record<string, string> = {
-    scanning: 'Scanner',
-    curating: 'Curator picks story',
-    drafting: 'Drafter writes MDX',
-    auditing_r1: 'Audit round 1',
-    auditing_r2: 'Audit round 2',
-    auditing_r3: 'Audit round 3',
-    revising_r1: 'Integrator (revision 1)',
-    revising_r2: 'Integrator (revision 2)',
-    publishing: 'Publisher',
-    done: 'Complete',
-    error: 'Failed',
-    skipped: 'Skipped',
-  };
-
   function renderStep(step: any): string {
-    const label = STEP_LABELS[step.step] ?? step.step;
-    const icon = step.status === 'done' ? '✅' : step.status === 'failed' ? '❌' : '⏳';
-    let detail = '';
+    const label = pipelineStepLabel(step.step);
+    // Tristate icon: terminal-with-success, terminal-with-failure, in-flight.
+    const icon = step.status === 'done'
+      ? '✓'
+      : step.status === 'failed' || step.status === 'error'
+        ? '✗'
+        : '·';
+    const iconCls = step.status === 'done'
+      ? 'text-zee-primary'
+      : step.status === 'failed' || step.status === 'error'
+        ? 'text-zee-gold'
+        : 'text-zee-muted animate-pulse';
 
+    let detail = '';
     const d = step.data || {};
     if (d.candidateCount != null) detail = `${d.candidateCount} candidates`;
-    if (d.headline) detail = `"${d.headline}"`;
-    if (d.subject) detail += ` · ${d.subject}`;
+    if (d.headline) detail = `"${escapeHtml(String(d.headline))}"`;
+    if (d.subject) detail += ` · ${escapeHtml(String(d.subject))}`;
     if (d.wordCount) detail = `${d.wordCount} words · ${d.beatCount} beats`;
     if (d.voiceScore != null) {
       detail = `Voice: ${d.voiceScore}/100`;
@@ -214,58 +412,80 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
       if (d.structurePassed != null) detail += ` · Structure: ${d.structurePassed ? '✓' : '✗'}`;
     }
     if (d.failedGates) detail = `Failed: ${d.failedGates.join(', ')}`;
-    if (d.commitUrl) detail = `<a href="${d.commitUrl}" class="text-zee-primary hover:underline" target="_blank">View commit</a>`;
-    if (d.reason) detail = d.reason;
-    if (d.error) detail = d.error;
+    if (d.commitUrl) detail = `<a href="${d.commitUrl}" class="text-zee-primary hover:underline" target="_blank" rel="noopener">View commit</a>`;
+    if (d.reason) detail = escapeHtml(String(d.reason));
+    if (d.error) detail = escapeHtml(String(d.error));
     if (step.step === 'done' && d.voiceScore) {
       detail = `Voice: ${d.voiceScore}/100 · ${d.revisions} revision${d.revisions !== 1 ? 's' : ''}`;
       if (d.qualityFlag === 'low') {
-        detail += ` · <span class="text-yellow-700 font-medium">LOW QUALITY</span>`;
+        detail += ` · <span class="text-zee-gold font-medium">FLAGGED LOW</span>`;
         if (d.failedGates) detail += ` (failed: ${d.failedGates.join(', ')})`;
       }
     }
     if (step.step === 'publishing' && step.status === 'done' && d.qualityFlag === 'low') {
-      detail += ` <span class="text-yellow-700 font-medium">[low quality]</span>`;
+      detail += ` <span class="text-zee-gold font-medium">[low quality]</span>`;
     }
 
-    return `<div class="flex items-start gap-3 py-2">
-      <span class="text-lg leading-none mt-0.5">${icon}</span>
-      <div>
-        <span class="font-medium text-sm">${label}</span>
+    return `<div class="flex items-start gap-3 py-1.5">
+      <span class="${iconCls} font-bold text-base leading-tight w-3 mt-0.5">${icon}</span>
+      <div class="flex-1 min-w-0">
+        <span class="font-medium text-sm">${escapeHtml(label)}</span>
         ${detail ? `<span class="text-sm text-zee-muted ml-2">${detail}</span>` : ''}
       </div>
     </div>`;
   }
 
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+    } as Record<string, string>)[c] ?? "&#39;");
+  }
+
+  /** Real "is the pipeline still running?" check. The /api/dashboard/pipeline
+   *  isRunning flag only checks step name, not status — a row with
+   *  step='auditing_r1' status='done' falsely reports running. We re-check
+   *  here using both: the LATEST row must have status='running' AND its
+   *  step must not be one of the terminal step names. */
+  function pipelineIsRunning(steps: any[]): boolean {
+    if (steps.length === 0) return false;
+    const last = steps[steps.length - 1];
+    const terminalSteps = ['done', 'error', 'skipped'];
+    if (terminalSteps.includes(last.step)) return false;
+    return last.status === 'running';
+  }
+
   async function pollPipeline() {
+    if (!stepsEl) return;
     try {
       const res = await fetch('/api/dashboard/pipeline');
+      if (!res.ok) return;
       const data = await res.json();
 
       if (data.steps.length === 0) {
-        stepsEl!.innerHTML = '<p class="text-sm text-zee-muted italic">No pipeline run today. Click trigger to start.</p>';
+        stepsEl.innerHTML = '<p class="text-sm text-zee-muted italic">No pipeline run today. Click trigger to start.</p>';
         return;
       }
 
-      stepsEl!.innerHTML = data.steps.map(renderStep).join('');
+      stepsEl.innerHTML = data.steps.map(renderStep).join('');
 
-      if (!data.isRunning && pollInterval) {
+      const running = pipelineIsRunning(data.steps);
+      if (!running && pollInterval) {
         clearInterval(pollInterval);
         pollInterval = null;
-        triggerBtn.disabled = false;
-        statusEl!.textContent = '';
+        if (triggerBtn) triggerBtn.disabled = false;
+        if (statusEl) statusEl.textContent = '';
       }
-    } catch { /* silent */ }
+    } catch { /* silent — next tick will retry */ }
   }
 
-  // Trigger — awaits the 202 ack, then polls for progress.
-  // The trigger endpoint now returns immediately via ctx.waitUntil on the
-  // agents worker, so this fetch is fast. Any failure (401/500/network) is
-  // surfaced to the admin instead of leaving the UI stuck on "Starting...".
   triggerBtn?.addEventListener('click', async () => {
+    if (!stepsEl || !statusEl || !triggerBtn) return;
     triggerBtn.disabled = true;
-    statusEl!.textContent = 'Starting pipeline...';
-    stepsEl!.innerHTML = '<p class="text-sm text-zee-muted">⏳ Starting...</p>';
+    statusEl.textContent = 'Starting pipeline…';
+    stepsEl.innerHTML = '<p class="text-sm text-zee-muted">⏳ Starting…</p>';
 
     try {
       const res = await fetch('/api/agents/trigger', { method: 'POST' });
@@ -274,41 +494,63 @@ const unacknowledged = observerEvents.filter((e: any) => !e.acknowledged_at).len
         try {
           const body = await res.json() as { error?: string };
           if (body.error) detail = body.error;
-        } catch { /* body wasn't JSON */ }
-        statusEl!.textContent = `Failed: ${res.status} ${detail}`;
-        stepsEl!.innerHTML = `<p class="text-sm text-red-600">Trigger failed — ${res.status} ${detail}</p>`;
+        } catch { /* not JSON */ }
+        statusEl.textContent = `Failed: ${res.status} ${detail}`;
+        stepsEl.innerHTML = `<p class="text-sm text-zee-gold">Trigger failed — ${res.status} ${detail}</p>`;
         triggerBtn.disabled = false;
         return;
       }
 
-      const body = await res.json() as { runId?: string; status?: string };
-      statusEl!.textContent = body.runId ? `Started (run ${body.runId})` : 'Started';
-      // Begin polling now that we know the run is underway.
-      pollInterval = setInterval(pollPipeline, 5000) as unknown as number;
+      const body = await res.json() as { runId?: string };
+      statusEl.textContent = body.runId ? `Started (run ${body.runId}). Polling…` : 'Started. Polling…';
+      pollInterval = window.setInterval(pollPipeline, 5000);
       setTimeout(pollPipeline, 2000);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Network error';
-      statusEl!.textContent = `Failed: ${message}`;
-      stepsEl!.innerHTML = `<p class="text-sm text-red-600">Trigger failed — ${message}</p>`;
+      statusEl.textContent = `Failed: ${message}`;
+      stepsEl.innerHTML = `<p class="text-sm text-zee-gold">Trigger failed — ${message}</p>`;
       triggerBtn.disabled = false;
     }
   });
 
-  // Poll on page load to show current/last run
   pollPipeline();
 
-  // Acknowledge observer events
+  // Acknowledge observer events. After ack, fade the card to muted state
+  // and remove the button — no page reload required.
   document.querySelectorAll('.ack-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const eventId = (btn as HTMLElement).dataset.id;
-      await fetch('/api/dashboard/observer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId }),
-      });
-      (btn as HTMLElement).textContent = 'Done';
-      (btn as HTMLElement).classList.remove('text-zee-primary');
-      (btn as HTMLElement).classList.add('text-zee-muted');
+      if (!eventId) return;
+      try {
+        const res = await fetch('/api/dashboard/observer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId }),
+        });
+        if (!res.ok) throw new Error(`Ack failed: ${res.status}`);
+        // Soften the card and remove the button.
+        const card = (btn as HTMLElement).closest('[data-event-id]') as HTMLElement | null;
+        if (card) card.className = 'event-card p-4 rounded-xl border border-zee-border';
+        (btn as HTMLElement).remove();
+      } catch (err) {
+        (btn as HTMLElement).textContent = 'Failed';
+      }
     });
+  });
+
+  // Filter the All Pieces list (vanilla JS, same pattern as library).
+  const filterInput = document.querySelector<HTMLInputElement>('[data-piece-filter]');
+  const pieceRows = Array.from(document.querySelectorAll<HTMLElement>('[data-piece-row]'));
+  const emptyNote = document.querySelector<HTMLElement>('[data-empty-match]');
+  filterInput?.addEventListener('input', () => {
+    const q = filterInput.value.trim().toLowerCase();
+    let anyVisible = false;
+    for (const row of pieceRows) {
+      const haystack = row.dataset.pieceSearch ?? '';
+      const match = !q || haystack.includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    }
+    if (emptyNote) emptyNote.style.display = anyVisible ? 'none' : 'block';
   });
 </script>

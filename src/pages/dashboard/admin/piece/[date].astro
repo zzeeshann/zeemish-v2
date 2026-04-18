@@ -1,0 +1,516 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../../../layouts/BaseLayout.astro';
+import { getUser } from '../../../../lib/db';
+import { auditTier, auditTierLabel } from '../../../../lib/audit-tier';
+import { pipelineStepLabel } from '../../../../lib/pipeline-steps';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+
+if (!user?.email || user.email !== ADMIN_EMAIL) {
+  return Astro.redirect(`/login/?redirect=/dashboard/admin/`);
+}
+
+const date = String(Astro.params.date ?? '').trim();
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  return new Response('Invalid date', { status: 400 });
+}
+
+// --- Fetch every per-day data source the operator might want -----------
+
+type Piece = {
+  date: string;
+  headline: string;
+  underlying_subject: string | null;
+  source_story: string | null;
+  voice_score: number | null;
+  fact_check_passed: number | null;
+  quality_flag: 'low' | null;
+  word_count: number | null;
+  beat_count: number | null;
+  reading_minutes: number | null;
+  has_interactive: number | null;
+  published_at: number | null;
+  created_at: number;
+};
+
+type AuditRow = {
+  auditor: string;
+  passed: number;
+  score: number | null;
+  notes: string | null;
+  draft_id: string;
+  created_at: number;
+};
+
+type PipelineRow = {
+  step: string;
+  status: string;
+  data: string | null;
+  created_at: number;
+};
+
+type CandidateRow = {
+  id: string;
+  headline: string;
+  source: string;
+  category: string | null;
+  summary: string | null;
+  url: string | null;
+  teachability_score: number | null;
+  selected: number | null;
+  created_at: number;
+};
+
+type ObserverRow = {
+  id: string;
+  severity: 'info' | 'warn' | 'escalation';
+  title: string;
+  body: string;
+  context: string | null;
+  acknowledged_at: number | null;
+  created_at: number;
+};
+
+let piece: Piece | null = null;
+let audits: AuditRow[] = [];
+let pipeline: PipelineRow[] = [];
+let candidates: CandidateRow[] = [];
+let observerEvents: ObserverRow[] = [];
+
+try {
+  piece = await db
+    .prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1')
+    .bind(date)
+    .first<Piece>();
+
+  const auditsRes = await db
+    .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC')
+    .bind(`daily/${date}`)
+    .all<AuditRow>();
+  audits = auditsRes.results;
+
+  const pipelineRes = await db
+    .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC')
+    .bind(date)
+    .all<PipelineRow>();
+  pipeline = pipelineRes.results;
+
+  const candsRes = await db
+    .prepare('SELECT id, headline, source, category, summary, url, teachability_score, selected, created_at FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC')
+    .bind(date)
+    .all<CandidateRow>();
+  candidates = candsRes.results;
+
+  // observer_events for this calendar day (UTC). Director writes one
+  // summary per run; we widen to a 36h window around the date so we catch
+  // late-completion or warn events that landed slightly after midnight UTC.
+  const startOfDay = Date.UTC(
+    parseInt(date.slice(0, 4), 10),
+    parseInt(date.slice(5, 7), 10) - 1,
+    parseInt(date.slice(8, 10), 10),
+  );
+  const endWindow = startOfDay + 36 * 60 * 60 * 1000;
+  const obsRes = await db
+    .prepare('SELECT * FROM observer_events WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC')
+    .bind(startOfDay, endWindow)
+    .all<ObserverRow>();
+  observerEvents = obsRes.results;
+} catch { /* leave empty */ }
+
+// --- Derive groupings + display values ---------------------------------
+
+function safeJson(input: string | null | undefined): any {
+  if (!input) return {};
+  try { return JSON.parse(input); } catch { return {}; }
+}
+
+function parseStringArray(notes: string | null): string[] {
+  if (!notes) return [];
+  try {
+    const parsed = JSON.parse(notes);
+    if (Array.isArray(parsed)) return parsed.filter((x) => typeof x === 'string');
+    return [];
+  } catch { return []; }
+}
+
+type Claim = { claim: string; status?: string; note?: string };
+function parseClaims(notes: string | null): Claim[] {
+  if (!notes) return [];
+  try {
+    const parsed = JSON.parse(notes);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((c) => c && typeof c === 'object' && typeof c.claim === 'string')
+      .map((c: any) => ({
+        claim: c.claim,
+        status: typeof c.status === 'string' ? c.status : undefined,
+        note: typeof c.note === 'string' ? c.note : undefined,
+      }));
+  } catch { return []; }
+}
+
+function roundFromDraftId(draftId: string): number {
+  const m = draftId.match(/-r(\d+)$/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+// Group audits by draft_id (one round = one draft_id).
+const roundsMap = new Map<string, AuditRow[]>();
+for (const a of audits) {
+  if (!roundsMap.has(a.draft_id)) roundsMap.set(a.draft_id, []);
+  roundsMap.get(a.draft_id)!.push(a);
+}
+const rounds = Array.from(roundsMap.entries())
+  .map(([draftId, group]) => ({
+    round: roundFromDraftId(draftId),
+    voice: group.find((g) => g.auditor === 'voice'),
+    structure: group.find((g) => g.auditor === 'structure'),
+    fact: group.find((g) => g.auditor === 'fact'),
+  }))
+  .sort((a, b) => a.round - b.round);
+
+// Pipeline timeline: one row per step (collapse running/done pairs).
+type TimelineRow = { step: string; status: string; data: any; tMs: number };
+const stepMap = new Map<string, TimelineRow>();
+const stepOrder: string[] = [];
+for (const p of pipeline) {
+  const row: TimelineRow = { step: p.step, status: p.status, data: safeJson(p.data), tMs: p.created_at };
+  if (!stepMap.has(p.step)) {
+    stepOrder.push(p.step);
+    stepMap.set(p.step, row);
+    continue;
+  }
+  const prev = stepMap.get(p.step)!;
+  const prevTerminal = prev.status !== 'running';
+  const thisTerminal = row.status !== 'running';
+  if (thisTerminal || (!prevTerminal && row.tMs > prev.tMs)) stepMap.set(p.step, row);
+}
+const timeline = stepOrder.map((s) => stepMap.get(s)!);
+
+// Pipeline metadata derived from publishing.done.
+const publishStep = pipeline.find((p) => p.step === 'publishing' && p.status === 'done');
+const publishData = publishStep ? safeJson(publishStep.data) : {};
+const commitUrl: string | null = publishData.commitUrl ?? null;
+const filePath: string | null = publishData.filePath ?? null;
+
+const tier = piece ? auditTier(piece.voice_score, piece.quality_flag) : null;
+
+const pickedCandidate = candidates.find((c) => c.selected === 1);
+const otherCandidates = candidates.filter((c) => c.selected !== 1);
+
+function relativeFromStart(tMs: number, startMs: number): string {
+  const diff = tMs - startMs;
+  if (diff <= 0) return 'start';
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `+${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `+${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `+${hrs}h ${mins % 60}m`;
+}
+
+const timelineStart = timeline[0]?.tMs ?? 0;
+
+function publishedDisplay(): string {
+  if (!piece?.published_at) return '';
+  const d = new Date(piece.published_at);
+  return d.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+}
+---
+
+<BaseLayout title={`${piece?.headline ?? date} — Admin · Zeemish`}>
+
+  <nav class="text-sm text-zee-muted mb-6 pt-6" aria-label="Breadcrumb">
+    <a href="/dashboard/admin/" class="hover:text-zee-primary transition-colors">Admin</a>
+    <span class="mx-2 opacity-50">/</span>
+    <span class="text-zee-text">{date}</span>
+  </nav>
+
+  {!piece ? (
+    <div class="py-12">
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">No piece</p>
+      <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">{date}</h1>
+      <p class="text-lg text-zee-muted">No piece was published on this date.</p>
+      {pipeline.length > 0 && (
+        <p class="text-sm text-zee-muted mt-3">A pipeline run exists ({pipeline.length} steps) but no row in <code class="text-xs">daily_pieces</code> — likely scanner skipped or pipeline errored before publishing.</p>
+      )}
+    </div>
+  ) : (
+    <>
+      <div class="pb-8">
+        <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">
+          {tier ? auditTierLabel(tier).toUpperCase() : 'PIECE'}
+        </p>
+        <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">{piece.headline}</h1>
+        {piece.underlying_subject && (
+          <p class="text-lg text-zee-muted mb-4">{piece.underlying_subject}</p>
+        )}
+        <p class="text-sm text-zee-muted flex flex-wrap items-center gap-x-2 gap-y-1">
+          {piece.voice_score != null && <><span>Voice {piece.voice_score}/100</span><span class="opacity-40">·</span></>}
+          {piece.word_count != null && <><span>{piece.word_count} words</span><span class="opacity-40">·</span></>}
+          {piece.beat_count != null && <><span>{piece.beat_count} beats</span><span class="opacity-40">·</span></>}
+          {piece.fact_check_passed != null && <><span>Facts {piece.fact_check_passed ? 'passed' : 'failed'}</span><span class="opacity-40">·</span></>}
+          <span>Published {publishedDisplay()}</span>
+          {piece.quality_flag === 'low' && <><span class="opacity-40">·</span><span class="text-zee-gold font-medium">FLAGGED LOW</span></>}
+        </p>
+        <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <a href={`/daily/${date}/`} class="text-zee-primary hover:underline">View on site →</a>
+          {commitUrl && (
+            <a href={commitUrl} target="_blank" rel="noopener" class="text-zee-primary hover:underline">View commit on GitHub →</a>
+          )}
+          {piece.source_story && (
+            <a href={piece.source_story} target="_blank" rel="noopener" class="text-zee-muted hover:text-zee-primary truncate max-w-xs">Source →</a>
+          )}
+        </div>
+      </div>
+
+      <!-- Pipeline timeline -->
+      {timeline.length > 0 && (
+        <section class="mb-10">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Pipeline timeline</h2>
+          <ol class="space-y-1.5">
+            {timeline.map((s) => {
+              const ok = s.status === 'done';
+              const failed = s.status === 'failed' || s.status === 'error';
+              const dotCls = ok ? 'bg-zee-primary' : failed ? 'bg-zee-gold' : 'border border-zee-border bg-transparent';
+              const detailBits: string[] = [];
+              const d = s.data ?? {};
+              if (d.candidateCount != null) detailBits.push(`${d.candidateCount} candidates`);
+              if (d.headline) detailBits.push(`"${d.headline}"`);
+              if (d.subject) detailBits.push(d.subject);
+              if (d.wordCount != null) detailBits.push(`${d.wordCount} words · ${d.beatCount ?? '?'} beats`);
+              if (d.voiceScore != null) {
+                const bits = [`Voice ${d.voiceScore}/100`];
+                if (d.factsPassed != null) bits.push(`Facts ${d.factsPassed ? '✓' : '✗'}`);
+                if (d.structurePassed != null) bits.push(`Structure ${d.structurePassed ? '✓' : '✗'}`);
+                detailBits.push(bits.join(' · '));
+              }
+              if (d.failedGates) detailBits.push(`failed: ${d.failedGates.join(', ')}`);
+              if (d.qualityFlag === 'low') detailBits.push('flagged low');
+              if (d.error) detailBits.push(`error: ${d.error}`);
+              return (
+                <li>
+                  <details class="group">
+                    <summary class="flex items-start gap-3 py-1.5 cursor-pointer list-none">
+                      <span class={`w-2 h-2 rounded-full ${dotCls} mt-2 shrink-0`} aria-hidden="true"></span>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-baseline gap-x-2 text-sm">
+                          <span class="font-medium">{pipelineStepLabel(s.step)}</span>
+                          <span class="text-xs text-zee-muted tabular-nums">{relativeFromStart(s.tMs, timelineStart)}</span>
+                        </div>
+                        {detailBits.length > 0 && (
+                          <p class="text-xs text-zee-muted mt-0.5 leading-relaxed">{detailBits.join(' · ')}</p>
+                        )}
+                      </div>
+                      <span class="text-xs text-zee-muted/60 group-open:rotate-90 transition-transform shrink-0 mt-1.5" aria-hidden="true">▸</span>
+                    </summary>
+                    <pre class="mt-2 ml-5 p-3 bg-zee-border/30 rounded text-[11px] text-zee-text overflow-x-auto leading-snug">{JSON.stringify(s.data, null, 2)}</pre>
+                  </details>
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
+
+      <!-- Audit rounds -->
+      {rounds.length > 0 && (
+        <section class="mb-10">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
+            Audit rounds <span class="text-zee-muted normal-case tracking-normal ml-1">({rounds.length})</span>
+          </h2>
+          <div class="space-y-4">
+            {rounds.map((r, i) => {
+              const isFinal = i === rounds.length - 1;
+              const voiceVio = parseStringArray(r.voice?.notes ?? null);
+              const structIssues = parseStringArray(r.structure?.notes ?? null);
+              const claims = parseClaims(r.fact?.notes ?? null);
+              return (
+                <div class="border border-zee-border rounded-xl p-4 md:p-5">
+                  <div class="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-zee-border/60">
+                    <span class="font-medium text-sm">{isFinal ? `Round ${r.round} (final)` : `Round ${r.round}`}</span>
+                    <span class="text-xs text-zee-muted tabular-nums">{voiceVio.length + structIssues.length + claims.length} notes</span>
+                  </div>
+
+                  <div class="space-y-4">
+                    <!-- Voice -->
+                    <div>
+                      <div class="flex items-baseline justify-between mb-1.5">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-zee-muted">Voice</span>
+                        <span class="text-sm font-medium">
+                          {r.voice?.score != null ? `${r.voice.score}/100` : '—'}
+                          <span class={`ml-2 text-xs ${r.voice?.passed ? 'text-zee-primary' : 'text-zee-muted'}`}>
+                            {r.voice?.passed ? 'passed' : 'below bar'}
+                          </span>
+                        </span>
+                      </div>
+                      {voiceVio.length === 0 ? (
+                        <p class="text-xs text-zee-muted italic">No violations flagged.</p>
+                      ) : (
+                        <ul class="text-xs text-zee-text space-y-1 ml-1">
+                          {voiceVio.map((v) => <li class="leading-relaxed">— {v}</li>)}
+                        </ul>
+                      )}
+                    </div>
+
+                    <!-- Facts -->
+                    <div class="pt-3 border-t border-zee-border/60">
+                      <div class="flex items-baseline justify-between mb-1.5">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-zee-muted">Facts</span>
+                        <span class={`text-sm font-medium ${r.fact?.passed ? 'text-zee-primary' : 'text-zee-muted'}`}>
+                          {r.fact?.passed ? 'passed' : 'mixed'}
+                        </span>
+                      </div>
+                      {claims.length === 0 ? (
+                        <p class="text-xs text-zee-muted italic">No claims reviewed.</p>
+                      ) : (
+                        <ul class="text-xs text-zee-text space-y-2 ml-1">
+                          {claims.map((c) => (
+                            <li class="leading-relaxed">
+                              <span class="block">{c.claim}</span>
+                              {(c.status || c.note) && (
+                                <span class="block text-zee-muted mt-0.5">
+                                  {c.status && <span class="uppercase tracking-wide text-[10px] mr-2">{c.status}</span>}
+                                  {c.note}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <!-- Structure -->
+                    <div class="pt-3 border-t border-zee-border/60">
+                      <div class="flex items-baseline justify-between mb-1.5">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-zee-muted">Structure</span>
+                        <span class={`text-sm font-medium ${r.structure?.passed ? 'text-zee-primary' : 'text-zee-muted'}`}>
+                          {r.structure?.passed ? 'passed' : 'mixed'}
+                        </span>
+                      </div>
+                      {structIssues.length === 0 ? (
+                        <p class="text-xs text-zee-muted italic">No structural issues.</p>
+                      ) : (
+                        <ul class="text-xs text-zee-text space-y-1 ml-1">
+                          {structIssues.map((s) => <li class="leading-relaxed">— {s}</li>)}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <!-- Scanner candidates -->
+      {candidates.length > 0 && (
+        <section class="mb-10">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
+            Scanner candidates <span class="text-zee-muted normal-case tracking-normal ml-1">({candidates.length})</span>
+          </h2>
+          <p class="text-sm text-zee-muted mb-4">Sorted by teachability score. Picked candidate marked with a teal dot.</p>
+          <ul class="divide-y divide-zee-border/60">
+            {[pickedCandidate, ...otherCandidates].filter((c): c is CandidateRow => !!c).map((c) => {
+              const isPicked = c.selected === 1;
+              return (
+                <li class="py-3 flex items-start gap-3">
+                  <span class={`w-2 h-2 rounded-full mt-2 shrink-0 ${isPicked ? 'bg-zee-primary' : 'border border-zee-border bg-transparent'}`} aria-hidden="true"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-baseline gap-x-2 text-xs text-zee-muted tabular-nums">
+                      {c.teachability_score != null && <span class="text-zee-text font-medium">{c.teachability_score}</span>}
+                      {c.source && (<><span class="opacity-40">·</span><span>{c.source}</span></>)}
+                      {c.category && (<><span class="opacity-40">·</span><span>{c.category}</span></>)}
+                      {isPicked && (<><span class="opacity-40">·</span><span class="text-zee-primary font-medium">picked</span></>)}
+                    </div>
+                    <p class="mt-1 text-sm leading-snug">
+                      {c.url ? (
+                        <a href={c.url} target="_blank" rel="noopener" class="hover:text-zee-primary transition-colors">{c.headline}</a>
+                      ) : c.headline}
+                    </p>
+                    {c.summary && <p class="text-xs text-zee-muted mt-1 leading-relaxed">{c.summary}</p>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      <!-- Observer events -->
+      {observerEvents.length > 0 && (
+        <section class="mb-10">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Observer events this day</h2>
+          <div class="space-y-3">
+            {observerEvents.map((e) => (
+              <div class={`p-4 rounded-xl border ${
+                !e.acknowledged_at
+                  ? e.severity === 'escalation' ? 'border-zee-gold/40 bg-zee-gold/5'
+                    : e.severity === 'warn' ? 'border-zee-muted/30 bg-zee-border/20'
+                    : 'border-zee-primary/20 bg-zee-primary/5'
+                  : 'border-zee-border'
+              }`}>
+                <div class="flex items-center justify-between mb-2">
+                  <div class="flex items-center gap-2">
+                    <span class={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded ${
+                      e.severity === 'escalation' ? 'bg-zee-gold/15 text-zee-gold' :
+                      e.severity === 'warn' ? 'bg-zee-muted/20 text-zee-text' :
+                      'bg-zee-primary/10 text-zee-primary'
+                    }`}>{e.severity}</span>
+                    <span class="text-xs text-zee-muted tabular-nums">{new Date(e.created_at).toLocaleString()}</span>
+                  </div>
+                  {e.acknowledged_at && (
+                    <span class="text-xs text-zee-muted">acked</span>
+                  )}
+                </div>
+                <h3 class="font-medium text-sm">{e.title}</h3>
+                <p class="text-sm text-zee-muted mt-1 leading-relaxed">{e.body}</p>
+                {e.context && (
+                  <details class="mt-2">
+                    <summary class="text-xs text-zee-primary hover:underline cursor-pointer">context</summary>
+                    <pre class="mt-2 p-3 bg-zee-border/30 rounded text-[11px] overflow-x-auto leading-snug">{e.context}</pre>
+                  </details>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <!-- Raw data dumps -->
+      <section class="mb-10">
+        <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Raw data</h2>
+        <p class="text-sm text-zee-muted mb-3">Honest debugging when summaries hide something.</p>
+        <details class="border border-zee-border rounded-xl mb-2">
+          <summary class="text-sm font-medium px-4 py-3 cursor-pointer hover:bg-zee-border/30 transition-colors">
+            daily_pieces row
+          </summary>
+          <pre class="px-4 pb-4 text-[11px] overflow-x-auto leading-snug">{JSON.stringify(piece, null, 2)}</pre>
+        </details>
+        <details class="border border-zee-border rounded-xl mb-2">
+          <summary class="text-sm font-medium px-4 py-3 cursor-pointer hover:bg-zee-border/30 transition-colors">
+            audit_results rows ({audits.length})
+          </summary>
+          <pre class="px-4 pb-4 text-[11px] overflow-x-auto leading-snug">{JSON.stringify(audits, null, 2)}</pre>
+        </details>
+        <details class="border border-zee-border rounded-xl mb-2">
+          <summary class="text-sm font-medium px-4 py-3 cursor-pointer hover:bg-zee-border/30 transition-colors">
+            pipeline_log rows ({pipeline.length})
+          </summary>
+          <pre class="px-4 pb-4 text-[11px] overflow-x-auto leading-snug">{JSON.stringify(pipeline.map((p) => ({ ...p, data: safeJson(p.data) })), null, 2)}</pre>
+        </details>
+        {filePath && (
+          <p class="text-xs text-zee-muted mt-3">
+            MDX path: <code class="bg-zee-border/40 px-1 rounded">{filePath}</code>
+          </p>
+        )}
+      </section>
+    </>
+  )}
+</BaseLayout>

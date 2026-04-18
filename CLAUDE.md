@@ -117,13 +117,12 @@ docs/handoff/           Original architecture + specs
 - Audio-Auditor does file checks only (no STT round-trip)
 - Rate limiter is KV-backed (Workers KV, eventually consistent)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
-- Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
-- Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
+- Dashboard pipeline API's `isRunning` heuristic is buggy on the API itself — admin's consumer fixes it inline; if other consumers want the right answer, fix the endpoint properly
 - `public/_headers` has full CSP/HSTS but the live response shows none of them — Cloudflare Workers Static Assets uses a different mechanism, needs investigation
-- Login page (`src/pages/login.astro`) is still pre-design-pass styling — would benefit from same eyebrow/title/tagline treatment as account/dashboard
 - Zita chat panel uses white background — feels off-brand vs the cream `zee-bg` used elsewhere; rebrand needed
 - OG image is one static SVG for every page; per-piece dynamic OG (headline + tier rendered to PNG at the edge) is a future Worker route project
 - No skip-to-content link for keyboard users; full WCAG audit deferred
+- Daily-piece engagement (views, completions, drop-off) is not wired. The `engagement` table accepts `course_id`/`lesson_id` keys; daily pieces have neither. Two paths: (a) repurpose by passing `course_id='daily'` + `lesson_id={date}` from `lesson-shell.ts`, or (b) add a `daily_engagement` table. Until then, `/dashboard/admin/` shows a placeholder, not misleading legacy data.
 
 ## Design pass (2026-04-17)
 - Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.
@@ -134,6 +133,7 @@ docs/handoff/           Original architecture + specs
 - Transparency drawer (2026-04-18): every daily piece now has a "How this was made" drawer at the bottom. Shows full pipeline timeline, per-round auditor output (Voice / Facts / Structure), voice-contract rules applied, and candidates Scanner surfaced. Fed by new public endpoint `/api/daily/[date]/made` that aggregates `pipeline_log` + `audit_results` + `daily_candidates` + `daily_pieces`. Deep-linkable via `#made`. No schema, no agent changes.
 - Dashboard refocused (2026-04-18): now the cross-piece, cross-day view (the drawer owns per-piece). Sections: live header subtitle (next run countdown), one-line today status, week's output stat grid (pieces / avg voice / tier mix / avg rounds), recent-runs feed, "How it's holding up" honest signals (unresolved escalations / fact-check web / candidates-per-day), agent team with active marker, footer with Voice contract + admin link. All queries against existing tables. Removed: redundant Today fat card, redundant Quality Scores grid, redundant Recent Pieces list, redundant Library stat grid, top-level Admin Panel CTA.
 - Site polish bundle (2026-04-18): custom on-brand 404, OG/Twitter meta + branded SVG OG image, Google Fonts preconnect, library filter focus ring restored, drawer no longer fetches on every page mount (lazy-loads on first open), dashboard "How it's holding up" rows stack on mobile.
+- Admin control room + per-piece deep-dive + login refresh (2026-04-18): `/dashboard/admin/` rewritten to match the design system — today's run, system-state stat grid, observer events (with in-place ack), all-pieces list with filter, pipeline history. New route `/dashboard/admin/piece/[date]/` shows everything about one day: full timeline, all rounds with full violations/claims/issues (no truncation), all 50 candidates (no cap), observer events for that day, raw JSON dumps. Login page updated to use the eyebrow/title/subtitle header. Engagement section dropped from admin (legacy lessons-era data), placeholder pointing to CLAUDE.md. `isRunning` heuristic fixed inline on admin's poller (step name + status, not just step name).
 
 ## Quality surfacing (2026-04-17)
 Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.

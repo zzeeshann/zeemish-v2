@@ -465,3 +465,33 @@ Data that doesn't exist is explicitly not displayed: no reader visits (engagemen
 - Skip-link / full WCAG audit
 
 **Verified:** `npm run build` clean. Static preview confirmed: `/totally-fake/` renders custom 404; daily page no longer fires the made-API call on mount; drawer opens and fetches on click. Live verification post-deploy.
+
+## 2026-04-18: Admin redesigned as a control room + per-piece deep-dive
+
+**Context:** The admin page was a mix of broken (Recent Agent Tasks queried `agent_tasks`, dropped in migration 0008) and misleading (the 14-day Engagement table showed legacy lessons-era reader data, never daily-piece data). It also had no per-piece detail — operator could see today's pipeline and recent observer events, but couldn't click into any historical piece to see audit notes, candidates, or the day's events.
+
+**Decision:** Rewrite admin as a control room. Add a per-piece deep-dive route. Refresh login to match the design system. All from existing data — no schema, no agent, no API changes.
+
+**Admin (`src/pages/dashboard/admin.astro`)**:
+- Page header: gold eyebrow ("THE CONTROL ROOM") + title + subtitle, matching account/dashboard.
+- Today's run: trigger button + step-by-step pipeline log (existing functionality; refactored to share `pipelineStepLabel()` with the public dashboard and the per-piece drawer).
+- System state: 4 stat cards — pipeline runs (lifetime), open escalations, errors this week, avg revisions.
+- Observer events: same severity-coloured cards, but acknowledged-state now updates in-place (no page reload). Card softens, Acknowledge button removed.
+- All pieces: every published piece, newest first, with tier dot + date + voice score + rounds + candidates count + low-flag indicator. Filter input shows when >5 pieces. Each row links to `/dashboard/admin/piece/{date}/`.
+- Pipeline history: terminal step per run for the last 14 distinct runs, derived from `pipeline_log` with a single SQL window query.
+- Engagement section replaced with an honest placeholder pointing to CLAUDE.md.
+- Recent Agent Tasks table dropped (the table doesn't exist).
+
+**Per-piece deep-dive (`src/pages/dashboard/admin/piece/[date].astro`, NEW)**:
+- Same admin gate as `admin.astro`.
+- Server-rendered, queries D1 directly — no new API endpoint.
+- Sections: piece header (tier eyebrow, headline, all metadata, view-on-site + commit + source links), pipeline timeline (collapsed by step, each expandable to show full data JSON), audit rounds (full violations / claims / structure issues, no truncation, no "see more"), all candidates (no 6-cap), observer events for the day (36h window), raw data dumps for `daily_pieces` / `audit_results` / `pipeline_log` rows in collapsible `<details>` blocks.
+- The reader-facing drawer caps `alsoConsidered` at 6 and parses violation strings; admin sees all 50 candidates and the raw notes JSON.
+
+**Inline bug fix**: The `isRunning` heuristic on the public `/api/dashboard/pipeline` endpoint only checks step name, not status. Fixed on the consumer side in admin's polling: a run is only "running" if the latest row's `status === 'running'` AND its step is not in `['done', 'error', 'skipped']`. The API endpoint stays untouched (no other consumers verified safe).
+
+**Login (`src/pages/login.astro`)**: Refreshed page header to match account/dashboard pattern (eyebrow + title + subtitle), wider container (`max-w-md` from `max-w-sm`), styled error/success notices in zee-* tokens instead of red/green Tailwind defaults, label uppercase-tracked. Magic-link form flow unchanged.
+
+**Reused**: `auditTier()` + `auditTierLabel()` from `src/lib/audit-tier.ts`, `pipelineStepLabel()` from `src/lib/pipeline-steps.ts`, `getUser()` from `src/lib/db.ts`. Same divider-list + stat-card patterns used everywhere else.
+
+**Verified**: `npm run build` clean. Live verification post-deploy with admin login.
