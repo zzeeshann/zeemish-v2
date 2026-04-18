@@ -192,6 +192,24 @@ for (const p of pipeline) {
 }
 const timeline = stepOrder.map((s) => stepMap.get(s)!);
 
+// Strip HTML tags + collapse whitespace + decode common entities.
+// Scanner stores raw RSS item descriptions which often contain inline
+// markup (anchor tags, <ol>/<li>, source attributions). We don't want
+// that markup leaking into the admin display as visible text.
+function stripHtml(input: string | null): string {
+  if (!input) return '';
+  return input
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Pipeline metadata derived from publishing.done.
 const publishStep = pipeline.find((p) => p.step === 'publishing' && p.status === 'done');
 const publishData = publishStep ? safeJson(publishStep.data) : {};
@@ -434,7 +452,12 @@ function publishedDisplay(): string {
                         <a href={c.url} target="_blank" rel="noopener" class="hover:text-zee-primary transition-colors">{c.headline}</a>
                       ) : c.headline}
                     </p>
-                    {c.summary && <p class="text-xs text-zee-muted mt-1 leading-relaxed">{c.summary}</p>}
+                    {(() => {
+                      const clean = stripHtml(c.summary);
+                      return clean ? (
+                        <p class="text-xs text-zee-muted mt-1 leading-relaxed line-clamp-3">{clean}</p>
+                      ) : null;
+                    })()}
                   </div>
                 </li>
               );
