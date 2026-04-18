@@ -192,31 +192,46 @@ for (const p of pipeline) {
 }
 const timeline = stepOrder.map((s) => stepMap.get(s)!);
 
-// Strip HTML tags + collapse whitespace + decode common entities.
-// Scanner stores raw RSS item descriptions which contain inline markup
-// (anchor tags, <ol>/<li>, source attributions). The markup may arrive
-// HTML-escaped (&lt;a href=…&gt;) OR raw (<a href=…>) depending on the
-// feed, so we decode entities FIRST, then strip tags. We then also drop
-// any naked URLs left in the visible text (article links from the feed
-// boilerplate).
-function stripHtml(input: string | null): string {
+// Clean a Scanner candidate summary for admin display.
+// Scanner stores raw RSS item descriptions: a headline, source name,
+// and a chain of anchor tags pointing to news.google.com URLs. The
+// summary is also truncated at the source, often mid-attribute, so we
+// must handle dangling fragments like `<a href="…` with no closing >.
+function cleanSummary(input: string | null, headline: string | null): string {
   if (!input) return '';
-  return input
-    // 1. decode entities so escaped tags become real tags we can strip
+  let s = input
+    // 1. decode entities so escaped tags become real tags
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    // 2. strip tags
-    .replace(/<[^>]*>/g, ' ')
-    // 3. drop bare URLs (RSS items frequently leave naked article URLs in summary text)
-    .replace(/https?:\/\/\S+/g, '')
-    // 4. collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&#x27;/g, "'");
+
+  // 2. strip complete tags
+  s = s.replace(/<[^>]*>/g, ' ');
+
+  // 3. strip dangling unterminated tag fragments at the END of the
+  //    string (truncated `<a href="…` with no closing >)
+  s = s.replace(/<[^>]*$/g, '');
+
+  // 4. drop any naked URLs left as visible text
+  s = s.replace(/https?:\/\/\S+/g, '');
+
+  // 5. collapse whitespace
+  s = s.replace(/\s+/g, ' ').trim();
+
+  // 6. RSS summaries usually start by re-stating the headline. Drop the
+  //    duplicate so admin sees only NEW info beyond the headline.
+  if (headline) {
+    const h = headline.trim();
+    if (s.toLowerCase().startsWith(h.toLowerCase())) {
+      s = s.slice(h.length).replace(/^[\s·,–—-]+/, '').trim();
+    }
+  }
+
+  return s;
 }
 
 // Pipeline metadata derived from publishing.done.
@@ -462,7 +477,7 @@ function publishedDisplay(): string {
                       ) : c.headline}
                     </p>
                     {(() => {
-                      const clean = stripHtml(c.summary);
+                      const clean = cleanSummary(c.summary, c.headline);
                       return clean ? (
                         <p class="text-xs text-zee-muted mt-1 leading-relaxed line-clamp-3">{clean}</p>
                       ) : null;
