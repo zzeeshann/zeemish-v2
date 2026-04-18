@@ -53,20 +53,12 @@ if (date) {
 
   <p class="text-sm text-zee-muted mb-8 flex flex-wrap items-center gap-x-2 gap-y-1">
     <span>{timeDisplay}</span>
-    {beatCount && (
-      <>
-        <span class="opacity-40" aria-hidden="true">·</span>
-        <span>{beatCount} {beatCount === 1 ? 'beat' : 'beats'}</span>
-      </>
-    )}
     {subject && (
       <>
         <span class="opacity-40" aria-hidden="true">·</span>
         <span>{subject}</span>
       </>
     )}
-    <span class="opacity-40" aria-hidden="true">·</span>
-    <span>{tierLabel}</span>
   </p>
 
   {audioSrc && (
