@@ -23,6 +23,12 @@ import { createUser, getUser } from './lib/db';
 // ignored by Cloudflare Workers Static Assets, so we set them here.
 // connect-src: 'self' covers the agents worker too — it's reached via
 // service binding in the worker, not from the browser.
+//
+// HTML responses also get `Cache-Control: private, no-store` so the
+// Cloudflare CDN edge cache doesn't intercept them before the worker
+// runs (which would skip security headers on cached responses). Static
+// assets (audio/css/js/fonts) keep their handler's Cache-Control —
+// those bake the security headers into the cached response naturally.
 function applySecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set(
@@ -34,6 +40,12 @@ function applySecurityHeaders(response: Response): Response {
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+
+  const contentType = headers.get('content-type') ?? '';
+  if (contentType.startsWith('text/html')) {
+    headers.set('Cache-Control', 'private, no-store, must-revalidate');
+  }
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
