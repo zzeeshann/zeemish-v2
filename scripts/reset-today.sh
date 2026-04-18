@@ -86,6 +86,6 @@ if [[ "$http_status" != "202" && "$http_status" != "200" ]]; then
 fi
 
 echo "✓ Done. Watch progress at:"
-echo "    https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/"
+echo "    https://zeemish.io/dashboard/admin/"
 echo "  Or curl:"
-echo "    curl -s https://zeemish-v2.zzeeshann.workers.dev/api/dashboard/pipeline"
+echo "    curl -s https://zeemish.io/api/dashboard/pipeline"

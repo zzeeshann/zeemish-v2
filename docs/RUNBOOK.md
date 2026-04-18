@@ -2,7 +2,7 @@
 
 How to run, deploy, operate, and troubleshoot. Written for a developer who just cloned the repo.
 
-> **URLs in this document.** The site is in the process of moving from `zeemish-v2.zzeeshann.workers.dev` to `zeemish.io` (the agents worker remains on `zeemish-agents.zzeeshann.workers.dev` — it's an internal API, not user-facing). Until the cutover commit lands, use the workers.dev URLs as written below. After cutover, replace `https://zeemish-v2.zzeeshann.workers.dev` with `https://zeemish.io` everywhere in this file.
+> **URLs:** The site lives at `https://zeemish.io` (custom domain bound to the `zeemish-v2` worker). The workers.dev URL `https://zeemish.io` is still active as a fallback but no longer the canonical entrypoint. The agents worker remains on `https://zeemish-agents.zzeeshann.workers.dev` — internal API, not user-facing.
 
 ## Prerequisites
 - Node.js 20+
@@ -39,7 +39,7 @@ pnpm build
 ```bash
 pnpm build
 wrangler deploy
-# Deploys to https://zeemish-v2.zzeeshann.workers.dev
+# Deploys to https://zeemish.io (workers.dev URL still active as fallback)
 ```
 Also auto-deploys on every push to `main` via GitHub Actions.
 
@@ -110,7 +110,7 @@ curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
 ```
 
 ### Via dashboard
-Visit https://zeemish-v2.zzeeshann.workers.dev/dashboard/admin/ and use
+Visit https://zeemish.io/dashboard/admin/ and use
 the trigger button (requires ADMIN_EMAIL login).
 
 ### Automatic
@@ -128,8 +128,8 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/status" \
 ```
 
 ### View daily pieces
-- Archive: https://zeemish-v2.zzeeshann.workers.dev/daily/
-- Single piece: https://zeemish-v2.zzeeshann.workers.dev/daily/YYYY-MM-DD/
+- Archive: https://zeemish.io/daily/
+- Single piece: https://zeemish.io/daily/YYYY-MM-DD/
 
 ## Reset today (clean slate for a dev-mode re-test)
 

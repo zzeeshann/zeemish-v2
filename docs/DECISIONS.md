@@ -2,6 +2,23 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-18: Override Astro Cloudflare adapter's _routes.json (post-launch hotfix)
+**Context:** zeemish.io went live via custom domain swap. Smoke test on the live domain showed `cf-cache-status: HIT` and zero security headers on `/`, `/daily/*`, `/library` — but headers ARE present on `/dashboard/`, `/api/*`, `/audio/*`. Three Cloudflare cache purges didn't fix it. Diagnosis: the Astro Cloudflare adapter auto-generates `dist/_routes.json` with prerendered paths in the `exclude` list, which tells Cloudflare to serve those files directly from Static Assets WITHOUT invoking the worker. `run_worker_first = true` in wrangler.toml is overridden by this exclude list — Cloudflare honours `_routes.json` first.
+
+**Decision:** Add `scripts/post-build.sh` that overwrites `dist/_routes.json` after `astro build` runs. New file routes ALL paths through the worker via `include: ["/*"]`, with only true static assets (`/_astro/*` bundled JS/CSS, `/og-image.svg`, `/robots.txt`) in `exclude`. This makes the middleware-applied security headers reach prerendered HTML.
+
+**Alternatives considered:**
+- **Adapter `routes.extend.include` config option.** Documented per the adapter type defs. Rejected because the docs explicitly say "exclude always takes priority over include" — and the adapter's auto-generated excludes already list every prerendered path. Adding to include doesn't unlist them.
+- **Cloudflare Transform Rules in dashboard.** Would work and apply to ALL responses regardless of cache state. Rejected because (a) splits header config between code and Cloudflare UI, (b) requires manual setup, (c) would re-apply on every domain swap. Code-side fix is portable.
+- **Make `/`, `/daily/[date]`, `/library` server-rendered (`prerender = false`).** Loses the prerender perf benefit (every request would re-render MDX through the worker). Rejected — overkill for a header problem.
+- **Set `_headers` in `public/`.** Workers Static Assets does not honour `_headers` (that's a Pages-only feature). Already learned this in the morning's pass.
+
+**Reason — why post-build script over adapter config:** The adapter has no exposed knob for the auto-exclude behaviour. A post-build script is a small, obvious, contained workaround that survives adapter upgrades. If the adapter ever adds a `routes.strategy` option, we can rip the script out without other changes.
+
+**Cost:** All static-HTML requests now invoke the worker (~1-5 ms added per request). At our scale, negligible. The `Cache-Control: private, no-store` middleware sets on HTML means CDN won't cache HTML, so the worker runs on every request — but Workers are fast and the rendered HTML is tiny. Bundled JS/CSS (`/_astro/*`) still get edge-cached and served direct from assets, so performance for repeat visitors is preserved.
+
+**References:** [scripts/post-build.sh](../scripts/post-build.sh), [src/middleware.ts](../src/middleware.ts) (the `applySecurityHeaders` content-type check), [package.json](../package.json) (build script), [wrangler.toml](../wrangler.toml) (`run_worker_first = true`). See CLAUDE.md "Critical lesson — Cloudflare Workers Static Assets" for the three-layer mental model that's needed to reason about this in future.
+
 ## 2026-04-18: Launch-readiness pass before zeemish.io domain swap
 **Context:** About to retire the old `zeemish.io` (separate breathing-tools product) and bind `zeemish-v2` to the apex. Audited what was actually broken vs. what CLAUDE.md *claimed* was broken. CLAUDE.md "Remaining minor items" had drifted: site worker R2 binding and `/audio/*` route were already shipped, daily-piece engagement writes were already firing from `<lesson-shell>`, only the surface was missing. Real launch blockers turned out to be smaller and different.
 

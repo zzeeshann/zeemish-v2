@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && echo '_worker.js' > dist/.assetsignore",
+    "build": "astro build && bash scripts/post-build.sh",
     "preview": "astro preview",
     "astro": "astro"
   },

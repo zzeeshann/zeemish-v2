@@ -32,7 +32,7 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 ## Architecture
 
 ### Two Workers
-- **zeemish-v2** — Astro site: pages + API routes. `https://zeemish-v2.zzeeshann.workers.dev`
+- **zeemish-v2** — Astro site: pages + API routes. `https://zeemish.io` (custom domain; workers.dev URL still active as fallback)
 - **zeemish-agents** — 13 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
@@ -139,7 +139,13 @@ docs/handoff/           Original architecture + specs
 Pre-launch pass before pointing zeemish.io at the new worker. Audit revealed several "Remaining minor items" were already done (audio R2 wiring, /audio/* route, engagement writes via lesson-shell); the docs were drifting. Real fixes:
 - **`audio_plays` engagement now wired**: `<audio-player>` dispatches `audio-player:firstplay` on first play in a session, `<lesson-shell>` listens and POSTs `event_type='audio_play'` once per session per piece. Previously the column was always 0 — silent gap. Files: [src/interactive/audio-player.ts](src/interactive/audio-player.ts), [src/interactive/lesson-shell.ts](src/interactive/lesson-shell.ts).
 - **Admin engagement widget rendered**: `/dashboard/admin/` now shows per-piece views/completions/audio_plays/drop-off, aggregated across activity dates via `GROUP BY lesson_id` from the existing `engagement` table. Each row deep-links to the per-piece admin route. Replaces the honest placeholder. Reader-side data was already flowing from lesson-shell since the daily-pieces era — only the surface was missing.
-- **Security headers moved into middleware**: `public/_headers` was silently ignored by Cloudflare Workers Static Assets (live response had zero security headers). Now `src/middleware.ts` applies CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response. Required `run_worker_first = true` in `[assets]` so prerendered pages (home, daily, library) also pick them up — without this, Static Assets serves prerendered files without invoking the worker. CSP `connect-src 'self'` (Agents worker is reached via service binding, not browser fetch). `public/_headers` deleted to avoid future confusion.
+- **Security headers moved into middleware**: `public/_headers` was silently ignored by Cloudflare Workers Static Assets (live response had zero security headers). Now `src/middleware.ts` applies CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response. Required two coordinated fixes: (1) `run_worker_first = true` in `[assets]`, (2) `scripts/post-build.sh` overrides the Astro Cloudflare adapter's auto-generated `_routes.json` to put prerendered HTML (`/`, `/daily/*`, `/library`) BACK into the worker's reach — by default the adapter excludes them as a perf optimisation, which made middleware a no-op for those paths. Middleware also sets `Cache-Control: private, no-store` on `text/html` responses so the CDN edge cache can't intercept them before the worker runs. Static assets (`/_astro/*`, og image, robots.txt) still skip the worker — they don't need security headers and would just add overhead. CSP `connect-src 'self'` (Agents worker is reached via service binding, not browser fetch). `public/_headers` deleted to avoid future confusion.
+
+**Critical lesson — Cloudflare Workers Static Assets (read this before touching cache or headers):** Three caching/routing layers interact and you have to defeat all of them to get headers on prerendered HTML.
+1. **Adapter `_routes.json`** auto-excludes prerendered paths from the worker — overridden by `scripts/post-build.sh`.
+2. **`run_worker_first`** in wrangler.toml asset binding — needed so the worker actually runs for the now-included paths.
+3. **Cloudflare CDN edge cache** sits before the worker; cached HTML is served without ever invoking the worker — defeated by `Cache-Control: private, no-store` on `text/html` from middleware.
+If you're debugging a "header missing on / but present on /api/..." problem in future, this is the trio to check.
 
 ## Quality surfacing (2026-04-17)
 Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.
