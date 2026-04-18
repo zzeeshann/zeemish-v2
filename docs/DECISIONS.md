@@ -410,3 +410,36 @@ Data that doesn't exist is explicitly not displayed: no reader visits (engagemen
 - `src/lib/pipeline-steps.ts` extracted from `admin.astro` so admin + drawer share one step→label map and can't drift.
 
 **Verified:** `npm run build` clean. Static preview: drawer opens, closes via button / Escape / backdrop, hash deep-link works. Full content requires D1 — confirmed live after deploy.
+
+## 2026-04-18: Dashboard refocused on system-over-time, not per-piece
+
+**Context:** The "How this was made" drawer (shipped earlier today) covers everything per-piece — timeline, audit rounds, rules, candidates. After it shipped, the public dashboard's most prominent sections (Today's Pipeline, Quality Scores, Recent Pieces) became duplicates of either the homepage hero or the drawer. The dashboard had no unique job.
+
+**Decision:** Refocus the public dashboard on cross-piece, cross-day signals only. The drawer owns "how this piece was made"; the dashboard owns "how the factory is running over time".
+
+**New structure:**
+1. Page header (eyebrow / title / live subtitle: pieces published, days running, next-run countdown).
+2. Today — one-line status strip (Published / Running / Pending), no fat card.
+3. This week's output — 4 stat cards: pieces (week + lifetime), avg voice (week, lifetime fallback), tier mix (Polished·Solid·Rough), avg revision rounds.
+4. Recent runs — vertical list of the last 7 days with tier dot, voice score, rounds, candidate count, headline; click → goes to that piece (which has the drawer).
+5. How it's holding up — three honest signal rows: unresolved escalations (with context), fact-check web availability, avg candidates per day. Rows hide entirely if their data doesn't exist (no placeholder dashes).
+6. Agent team — same 13 names, but the most recently active agent (last `pipeline_log` row within 24h) gets an ambient `● active Nm ago` marker.
+7. How this works — short paragraph + Voice contract link. Admin Panel link appears here gated on isAdmin (moved from a prominent CTA at the top).
+
+**Removed entirely:**
+- Today's Pipeline fat card (drawer + homepage cover this).
+- Quality Scores three-card grid (drawer covers per-round; the run log covers cross-piece).
+- Recent Pieces simple list (replaced by the richer Recent Runs feed).
+- Library 4-stat grid (merged into This week's output).
+- Top-level Admin Panel button (moved to discreet footer link).
+
+**Why these queries (all existing tables — no new schema):**
+- Tier mix derives from `daily_pieces.voice_score` via `auditTier()` (already canonical).
+- Avg rounds counts distinct `audit_results.draft_id` per task_id (suffix `-rN`).
+- Unresolved escalations from `observer_events WHERE severity='escalation' AND acknowledged_at IS NULL`.
+- Fact-check status counts last-7-days `observer_events WHERE severity='warn' AND title LIKE '%fact-check%'`.
+- "Active agent" maps `pipeline_log` step name → agent via inline `STEP_TO_AGENT` table; only shown if the latest step is within 24h.
+
+**Rationale:** Trust through specificity. The dashboard tells the truth at one piece (sample size shown) and at thirty pieces (week-vs-lifetime split). Empty sections vanish rather than show dashes. Every number is a thing the system actually knows.
+
+**Verified:** `npm run build` clean. Static pages still 200. Dashboard requires D1 — verified post-deploy on the live worker.

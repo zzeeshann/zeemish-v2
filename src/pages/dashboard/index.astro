@@ -5,255 +5,488 @@ import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
+import { pipelineStepLabel } from '../../lib/pipeline-steps';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
 const user = userId ? await getUser(db, userId) : null;
 const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
-// Guard: if ADMIN_EMAIL env isn't set, no one should ever match.
 const isAdmin = !!user?.email && !!ADMIN_EMAIL && user.email === ADMIN_EMAIL;
-const today = new Date().toISOString().slice(0, 10);
 
-// Fetch data directly from D1 (server-rendered)
-let todaysPiece: any = null;
-let recentPieces: any[] = [];
-let stats = {
-  totalPieces: 0,
-  avgVoiceScore: 0,
-  voiceSampleSize: 0,
-  subjects: [] as string[],
-  runningSince: '',
+const today = new Date().toISOString().slice(0, 10);
+const nowMs = Date.now();
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const weekAgoIso = new Date(nowMs - WEEK_MS).toISOString().slice(0, 10);
+
+// --- State: everything starts empty and fills in as queries succeed. ---
+type Piece = {
+  date: string;
+  headline: string;
+  underlying_subject: string | null;
+  voice_score: number | null;
+  quality_flag: 'low' | null;
+  published_at: number | null;
 };
-let daysRunning = 0;
-let todayScores = { voice: null as any, facts: null as any, structure: null as any };
+type RunLogRow = Piece & { rounds: number; candidates: number };
+
+let todaysPiece: Piece | null = null;
+let runLog: RunLogRow[] = [];
+let lifetimeCount = 0;
+let weekCount = 0;
+let weekAvgVoice: number | null = null;
+let weekSampleSize = 0;
+let lifetimeAvgVoice: number | null = null;
+let lifetimeSampleSize = 0;
+let tierMixWeek = { polished: 0, solid: 0, rough: 0 };
+let avgRoundsWeek: number | null = null;
+let unresolvedEscalations = 0;
+let escalationContext = '';
+let factCheckOfflineCount = 0;
+let avgCandidatesPerDay: number | null = null;
+let runningSince: string | null = null;
+let lastPipelineStep: { step: string; status: string; tMs: number; runId: string } | null = null;
+let isRunningNow = false;
 
 try {
-  // Every published piece counts toward these stats and lists (as of
-  // 2026-04-17 soften-quality pass — we no longer filter quality_flag).
-  // Tier is surfaced per-piece on its own page. Counters reflect the
-  // raw truth of what's been published.
-  todaysPiece = await db.prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1').bind(today).first();
+  todaysPiece = await db
+    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date = ? LIMIT 1')
+    .bind(today)
+    .first<Piece>();
 
-  const recent = await db.prepare('SELECT date, headline, underlying_subject FROM daily_pieces ORDER BY date DESC LIMIT 7').all();
-  recentPieces = recent.results;
+  const lifetime = await db
+    .prepare('SELECT COUNT(*) as n FROM daily_pieces')
+    .first<{ n: number }>();
+  lifetimeCount = lifetime?.n ?? 0;
 
-  const countResult = await db.prepare('SELECT COUNT(*) as total FROM daily_pieces').first<{ total: number }>();
-  // Avg voice reads final-round score per piece directly from daily_pieces
-  // (Director writes lastVoiceScore here on every publish — director.ts:263).
-  // One row per piece, matches what the reader sees via auditTier(), and
-  // honours the soften-quality rule that every published piece counts.
-  // The old query over audit_results WHERE passed=1 excluded Solid/Rough
-  // pieces and double-counted revision rounds — see DECISIONS.md 2026-04-17.
-  const voiceAgg = await db.prepare('SELECT AVG(voice_score) as avg, COUNT(*) as n FROM daily_pieces WHERE voice_score IS NOT NULL').first<{ avg: number; n: number }>();
-  const subjectsResult = await db.prepare('SELECT DISTINCT underlying_subject FROM daily_pieces WHERE underlying_subject IS NOT NULL').all<{ underlying_subject: string }>();
-  const firstPiece = await db.prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1').first<{ date: string }>();
+  const weekly = await db
+    .prepare('SELECT COUNT(*) as n FROM daily_pieces WHERE date >= ?')
+    .bind(weekAgoIso)
+    .first<{ n: number }>();
+  weekCount = weekly?.n ?? 0;
 
-  stats = {
-    totalPieces: countResult?.total ?? 0,
-    avgVoiceScore: voiceAgg?.avg ? Math.round(voiceAgg.avg) : 0,
-    voiceSampleSize: voiceAgg?.n ?? 0,
-    subjects: subjectsResult.results.map((s) => s.underlying_subject),
-    runningSince: firstPiece?.date ?? '',
-  };
+  const weekVoice = await db
+    .prepare('SELECT AVG(voice_score) as avg, COUNT(*) as n FROM daily_pieces WHERE voice_score IS NOT NULL AND date >= ?')
+    .bind(weekAgoIso)
+    .first<{ avg: number | null; n: number }>();
+  weekAvgVoice = weekVoice?.avg ? Math.round(weekVoice.avg) : null;
+  weekSampleSize = weekVoice?.n ?? 0;
 
-  // Inclusive day count: first publish date to today. Inline — only
-  // used by card 4 below.
-  if (stats.runningSince) {
-    const [fy, fm, fd] = stats.runningSince.split('-').map(Number);
-    const [ty, tm, td] = today.split('-').map(Number);
-    const diffDays = Math.floor((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000);
-    daysRunning = Math.max(1, diffDays + 1);
+  const lifeVoice = await db
+    .prepare('SELECT AVG(voice_score) as avg, COUNT(*) as n FROM daily_pieces WHERE voice_score IS NOT NULL')
+    .first<{ avg: number | null; n: number }>();
+  lifetimeAvgVoice = lifeVoice?.avg ? Math.round(lifeVoice.avg) : null;
+  lifetimeSampleSize = lifeVoice?.n ?? 0;
+
+  // Pieces from the last 7 days (including today) — used for tier mix + run log.
+  const weekPiecesRes = await db
+    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date >= ? ORDER BY date DESC')
+    .bind(weekAgoIso)
+    .all<Piece>();
+  const weekPieces = weekPiecesRes.results;
+  for (const p of weekPieces) {
+    const tier = auditTier(p.voice_score, p.quality_flag);
+    tierMixWeek[tier] += 1;
   }
 
-  if (todaysPiece) {
-    // Order by created_at DESC so the first match per auditor is the
-    // LAST revision round — matches what `daily_pieces.voice_score` and
-    // the piece page's tier word reflect. Previously used `.find()` on
-    // the unordered result, which picked round 1 and made the dashboard
-    // disagree with the piece page.
-    const audits = await db.prepare("SELECT auditor, passed, score FROM audit_results WHERE task_id LIKE ? ORDER BY created_at DESC").bind(`daily/${today}%`).all();
-    const v = audits.results.find((a: any) => a.auditor === 'voice');
-    const f = audits.results.find((a: any) => a.auditor === 'fact');
-    const s = audits.results.find((a: any) => a.auditor === 'structure');
-    todayScores = {
-      voice: v ? { score: (v as any).score, passed: !!(v as any).passed } : null,
-      facts: f ? { score: (f as any).score, passed: !!(f as any).passed } : null,
-      structure: s ? { score: (s as any).score, passed: !!(s as any).passed } : null,
-    };
-  }
-} catch { /* D1 may not have data yet */ }
+  // Per-date round count (max draft_id suffix) and candidate count for the last 7 days.
+  const roundsByDate = new Map<string, number>();
+  const candsByDate = new Map<string, number>();
+  if (weekPieces.length > 0) {
+    const taskIds = weekPieces.map((p) => `daily/${p.date}`);
+    const placeholders = taskIds.map(() => '?').join(',');
+    const roundsRes = await db
+      .prepare(`SELECT task_id, draft_id FROM audit_results WHERE task_id IN (${placeholders})`)
+      .bind(...taskIds)
+      .all<{ task_id: string; draft_id: string }>();
+    for (const r of roundsRes.results) {
+      const m = r.draft_id.match(/-r(\d+)$/);
+      const round = m ? parseInt(m[1], 10) : 1;
+      const prev = roundsByDate.get(r.task_id) ?? 0;
+      if (round > prev) roundsByDate.set(r.task_id, round);
+    }
 
-// Agent team — 13 agents total. Each does one job.
-// Audio agents are paused by design (cost control) until text pipeline is trusted.
+    const dates = weekPieces.map((p) => p.date);
+    const datePlaceholders = dates.map(() => '?').join(',');
+    const candsRes = await db
+      .prepare(`SELECT date, COUNT(*) as n FROM daily_candidates WHERE date IN (${datePlaceholders}) GROUP BY date`)
+      .bind(...dates)
+      .all<{ date: string; n: number }>();
+    for (const r of candsRes.results) candsByDate.set(r.date, r.n);
+  }
+
+  runLog = weekPieces.map((p) => ({
+    ...p,
+    rounds: roundsByDate.get(`daily/${p.date}`) ?? 0,
+    candidates: candsByDate.get(p.date) ?? 0,
+  }));
+
+  // Avg rounds across this week's pieces (if any).
+  if (runLog.length > 0) {
+    const totalRounds = runLog.reduce((sum, r) => sum + (r.rounds || 0), 0);
+    const piecesWithRounds = runLog.filter((r) => r.rounds > 0).length;
+    avgRoundsWeek = piecesWithRounds > 0 ? Math.round((totalRounds / piecesWithRounds) * 10) / 10 : null;
+  }
+
+  // Observer: unresolved escalations.
+  const esc = await db
+    .prepare("SELECT COUNT(*) as n, MAX(title) as title FROM observer_events WHERE severity = 'escalation' AND acknowledged_at IS NULL")
+    .first<{ n: number; title: string | null }>();
+  unresolvedEscalations = esc?.n ?? 0;
+  if (unresolvedEscalations > 0 && esc?.title) {
+    // Trim the canonical "Escalation: {headline}" prefix for display.
+    escalationContext = esc.title.replace(/^Escalation:\s*/, '');
+  }
+
+  // Fact-check web offline events in the last 7 days.
+  const weekMsAgo = nowMs - WEEK_MS;
+  const factWarns = await db
+    .prepare("SELECT COUNT(*) as n FROM observer_events WHERE severity = 'warn' AND title LIKE '%fact-check%' AND created_at > ?")
+    .bind(weekMsAgo)
+    .first<{ n: number }>();
+  factCheckOfflineCount = factWarns?.n ?? 0;
+
+  // Candidates per day average (lifetime).
+  const cands = await db
+    .prepare('SELECT ROUND(AVG(n)) as avg FROM (SELECT date, COUNT(*) as n FROM daily_candidates GROUP BY date)')
+    .first<{ avg: number | null }>();
+  avgCandidatesPerDay = cands?.avg ?? null;
+
+  // Running since — earliest published piece date.
+  const first = await db
+    .prepare('SELECT date FROM daily_pieces ORDER BY date ASC LIMIT 1')
+    .first<{ date: string }>();
+  runningSince = first?.date ?? null;
+
+  // Most recent pipeline step (for agent team 'active' marker).
+  const lastStep = await db
+    .prepare('SELECT step, status, run_id, created_at FROM pipeline_log ORDER BY created_at DESC LIMIT 1')
+    .first<{ step: string; status: string; run_id: string; created_at: number }>();
+  if (lastStep) {
+    lastPipelineStep = { step: lastStep.step, status: lastStep.status, tMs: lastStep.created_at, runId: lastStep.run_id };
+    // Pipeline counts as "running" only if the latest step is today and non-terminal.
+    const terminal = ['done', 'error', 'skipped'].includes(lastStep.step);
+    isRunningNow = lastStep.run_id === today && !terminal;
+  }
+} catch { /* D1 may be empty in dev — everything above stays at defaults */ }
+
+// --- Derived display strings ---
+
+// Days running (inclusive) from runningSince.
+let daysRunning = 0;
+if (runningSince) {
+  const [fy, fm, fd] = runningSince.split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  const diffDays = Math.floor((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / DAY_MS);
+  daysRunning = Math.max(1, diffDays + 1);
+}
+
+// Next run at 02:00 UTC — compute time-until string.
+function nextRunRelative(): string {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 2, 0, 0, 0));
+  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
+  const diff = next.getTime() - now.getTime();
+  const hrs = Math.floor(diff / (60 * 60 * 1000));
+  const mins = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
+  if (hrs === 0) return `${mins}m`;
+  return `${hrs}h ${mins}m`;
+}
+
+// Header subtitle — adapts to state.
+let subtitle: string;
+if (isRunningNow && lastPipelineStep) {
+  subtitle = `Pipeline running — currently in ${pipelineStepLabel(lastPipelineStep.step).toLowerCase()}.`;
+} else if (todaysPiece) {
+  subtitle = lifetimeCount === 1
+    ? `Today's piece is live. The first one.`
+    : `Today's piece is live. ${lifetimeCount} pieces published in ${daysRunning} ${daysRunning === 1 ? 'day' : 'days'}.`;
+} else if (lifetimeCount === 0) {
+  subtitle = `Waiting on the first piece. Next run in ${nextRunRelative()}.`;
+} else {
+  subtitle = `${lifetimeCount} ${lifetimeCount === 1 ? 'piece' : 'pieces'} in ${daysRunning} ${daysRunning === 1 ? 'day' : 'days'}. Next run in ${nextRunRelative()}.`;
+}
+
+// Today status strip — one of three states.
+type TodayStatus = 'published' | 'running' | 'pending';
+let todayStatus: TodayStatus = 'pending';
+if (todaysPiece) todayStatus = 'published';
+else if (isRunningNow) todayStatus = 'running';
+
+const todayTier = todaysPiece ? auditTier(todaysPiece.voice_score, todaysPiece.quality_flag) : null;
+
+// Agent team with recently-active marker.
+const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const STEP_TO_AGENT: Record<string, string> = {
+  scanning: 'Scanner',
+  curating: 'Curator',
+  drafting: 'Drafter',
+  auditing_r1: 'Voice Auditor',
+  auditing_r2: 'Voice Auditor',
+  auditing_r3: 'Voice Auditor',
+  revising_r1: 'Integrator',
+  revising_r2: 'Integrator',
+  publishing: 'Publisher',
+};
+let activeAgent: string | null = null;
+let activeAgentMinutesAgo: number | null = null;
+if (lastPipelineStep && nowMs - lastPipelineStep.tMs < ACTIVE_WINDOW_MS) {
+  activeAgent = STEP_TO_AGENT[lastPipelineStep.step] ?? null;
+  activeAgentMinutesAgo = Math.max(1, Math.floor((nowMs - lastPipelineStep.tMs) / (60 * 1000)));
+}
+
 const agents = [
   { name: 'Scanner', job: 'Reads the news every morning', paused: false },
-  { name: 'Director', job: 'Coordinates the pipeline — routes work between agents', paused: false },
-  { name: 'Curator', job: 'Picks the most teachable story and plans the beats', paused: false },
-  { name: 'Drafter', job: 'Writes the MDX piece from the brief', paused: false },
+  { name: 'Director', job: 'Orchestrates the pipeline', paused: false },
+  { name: 'Curator', job: "Picks today's story", paused: false },
+  { name: 'Drafter', job: 'Writes the MDX', paused: false },
   { name: 'Voice Auditor', job: 'Checks it sounds like Zeemish', paused: false },
   { name: 'Fact Checker', job: 'Verifies every claim', paused: false },
-  { name: 'Structure Editor', job: 'Reviews the flow and pacing', paused: false },
-  { name: 'Integrator', job: 'Handles revisions before approval', paused: false },
-  { name: 'Audio Producer', job: 'Generates the audio version', paused: true },
+  { name: 'Structure Editor', job: 'Reviews flow and pacing', paused: false },
+  { name: 'Integrator', job: 'Handles revisions', paused: false },
+  { name: 'Audio Producer', job: 'Generates audio', paused: true },
   { name: 'Audio Auditor', job: 'Checks pronunciation', paused: true },
-  { name: 'Publisher', job: 'Puts it live on the site', paused: false },
-  { name: 'Learner', job: 'Learns from reader behaviour to make future pieces better', paused: false },
-  { name: 'Observer', job: 'Logs every pipeline event for the admin dashboard', paused: false },
+  { name: 'Publisher', job: 'Commits to GitHub', paused: false },
+  { name: 'Learner', job: 'Writes learnings for future pieces', paused: false },
+  { name: 'Observer', job: 'Logs every pipeline event', paused: false },
 ];
+
+// Day-of-week label for run-log rows.
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 ---
 
-<BaseLayout title="Dashboard — Zeemish" description="How Zeemish works. The factory floor.">
+<BaseLayout title="Dashboard — Zeemish" description="How the Zeemish factory is running.">
 
-  <h1 class="text-2xl md:text-3xl font-bold mb-2">Dashboard</h1>
-  <p class="text-zee-muted text-sm mb-8">How Zeemish works. What it did today.</p>
+  <div class="pt-6 pb-10">
+    <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">
+      The factory floor
+    </p>
+    <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">Dashboard</h1>
+    <p class="text-lg text-zee-muted">{subtitle}</p>
+  </div>
 
-  {isAdmin && (
-    <a href="/dashboard/admin/" class="inline-block mb-8 px-4 py-2 text-sm font-medium bg-zee-primary text-white rounded-lg hover:opacity-90 transition-opacity">
-      Admin panel &rarr;
-    </a>
-  )}
-
-  <!-- Section 1: Today's pipeline -->
-  <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Today's Pipeline</h2>
-    <div class="p-5 rounded-xl border border-zee-border">
-      <div class="flex items-center gap-3 mb-3">
-        <span class={`w-2.5 h-2.5 rounded-full ${todaysPiece ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-        <span class="font-medium">{todaysPiece ? 'Published' : 'No piece today yet'}</span>
+  <!-- Today — one-line status -->
+  <section class="mb-10 py-4 border-y border-zee-border/60 flex items-center justify-between gap-4 flex-wrap">
+    {todayStatus === 'published' && todaysPiece && (
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="w-2.5 h-2.5 rounded-full bg-zee-primary shrink-0" aria-hidden="true"></span>
+        <span class="text-sm text-zee-muted">Published —</span>
+        <span class="text-sm font-medium">{todaysPiece.headline}</span>
+        {todayTier && (
+          <>
+            <span class="text-sm text-zee-muted/40" aria-hidden="true">·</span>
+            <span class={`text-sm font-medium ${todayTier === 'polished' ? 'text-zee-primary' : 'text-zee-text'}`}>{auditTierLabel(todayTier)}</span>
+          </>
+        )}
       </div>
-      {todaysPiece && (
-        <div>
-          <a href={`/daily/${today}/`} class="text-lg font-bold text-zee-primary hover:underline">
-            {(todaysPiece as any).headline}
-          </a>
-          <p class="text-sm text-zee-muted mt-1">{(todaysPiece as any).underlying_subject}</p>
-          <p class="text-sm text-zee-muted mt-1">
-            {(todaysPiece as any).word_count} words · {(todaysPiece as any).beat_count} beats
-          </p>
-        </div>
-      )}
-    </div>
+    )}
+    {todayStatus === 'running' && (
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="w-2.5 h-2.5 rounded-full bg-zee-gold shrink-0 animate-pulse" aria-hidden="true"></span>
+        <span class="text-sm text-zee-muted">Pipeline running —</span>
+        {lastPipelineStep && (
+          <span class="text-sm font-medium">currently in {pipelineStepLabel(lastPipelineStep.step).toLowerCase()}</span>
+        )}
+      </div>
+    )}
+    {todayStatus === 'pending' && (
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="w-2.5 h-2.5 rounded-full border border-zee-border shrink-0" aria-hidden="true"></span>
+        <span class="text-sm text-zee-muted">Pipeline hasn't run yet — next run at 02:00 UTC</span>
+      </div>
+    )}
+    {todayStatus === 'published' && todaysPiece && (
+      <a href={`/daily/${todaysPiece.date}/`} class="text-sm text-zee-primary hover:underline whitespace-nowrap">
+        View piece →
+      </a>
+    )}
   </section>
 
-  <!-- Section 2: Quality scores — three gates, neutral language.
-       Voice uses the 3-tier label (Polished/Solid/Rough); Facts and
-       Structure are boolean gates so they read Passing/Mixed. No red
-       anywhere — a rough piece is information, not an alarm. -->
-  {todaysPiece && (() => {
-    type Gate = { label: string; score: number | null | undefined; passed: boolean | null; isVoice?: boolean };
-    const gates: Gate[] = [
-      { label: 'Voice', score: todayScores.voice?.score, passed: todayScores.voice?.passed ?? null, isVoice: true },
-      { label: 'Facts', score: todayScores.facts?.score, passed: todayScores.facts?.passed ?? null },
-      { label: 'Structure', score: todayScores.structure?.score, passed: todayScores.structure?.passed ?? null },
-    ];
-    const verdict = (g: Gate) => {
-      if (g.passed === null) return 'Not yet run';
-      if (g.isVoice) return auditTierLabel(auditTier(g.score ?? null));
-      return g.passed ? 'Passing' : 'Mixed';
-    };
-    const isPolished = (g: Gate) =>
-      g.isVoice ? auditTier(g.score ?? null) === 'polished' : !!g.passed;
-    const verdictClass = (g: Gate) =>
-      g.passed === null ? 'text-zee-muted' : isPolished(g) ? 'text-zee-primary' : 'text-zee-muted';
-    return (
-      <section class="mb-10">
-        <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Quality Scores</h2>
-        <div class="grid grid-cols-3 gap-4">
-          {gates.map((g) => (
-            <div class="p-4 rounded-xl border border-zee-border flex flex-col">
-              <div class="text-xs font-semibold uppercase tracking-widest text-zee-muted">{g.label}</div>
-              <div class="mt-3 text-3xl font-bold tabular-nums leading-none">
-                {typeof g.score === 'number' ? g.score : '—'}
-              </div>
-              <div class={`mt-3 text-xs font-medium ${verdictClass(g)}`}>
-                {verdict(g)}
-              </div>
-              {typeof g.score === 'number' && (
-                <div class="mt-3 h-1 bg-zee-border rounded-full overflow-hidden">
-                  <div
-                    class={`h-full rounded-full ${isPolished(g) ? 'bg-zee-primary' : 'bg-zee-muted'}`}
-                    style={`width: ${Math.max(0, Math.min(100, g.score))}%`}
-                  ></div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  })()}
-
-  <!-- Section 3: The agent team -->
+  <!-- This week's output -->
   <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">The Agent Team</h2>
-    <div class="space-y-2">
-      {agents.map((agent) => (
-        <div class="flex items-baseline gap-4 py-2">
-          <span class="font-medium text-sm w-36 shrink-0 flex items-center gap-2">
-            {agent.name}
-            {agent.paused && (
-              <span class="text-[10px] uppercase tracking-wide text-zee-muted border border-zee-border rounded px-1.5 py-0.5">paused</span>
-            )}
-          </span>
-          <span class={`text-sm ${agent.paused ? 'text-zee-muted/60' : 'text-zee-muted'}`}>{agent.job}</span>
-        </div>
-      ))}
-    </div>
-  </section>
-
-  <!-- Section 4: Library stats -->
-  <section class="mb-10">
-    <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Library</h2>
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">This week's output</h2>
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="p-4 rounded-xl border border-zee-border text-center">
-        <div class="text-2xl font-bold text-zee-primary">{stats.totalPieces}</div>
-        <div class="text-sm text-zee-muted">Pieces published</div>
+        <div class="text-2xl font-bold text-zee-primary">{weekCount}</div>
+        <div class="text-sm text-zee-muted">{weekCount === 1 ? 'Piece' : 'Pieces'}</div>
+        <div class="text-xs text-zee-muted/70 mt-1">Lifetime: {lifetimeCount}</div>
       </div>
+
       <div class="p-4 rounded-xl border border-zee-border text-center">
-        <div class="text-2xl font-bold text-zee-primary">{stats.subjects.length}</div>
-        <div class="text-sm text-zee-muted">Subjects covered</div>
+        <div class="text-2xl font-bold text-zee-primary">{weekAvgVoice ?? lifetimeAvgVoice ?? '—'}</div>
+        <div class="text-sm text-zee-muted">Avg voice</div>
+        <div class="text-xs text-zee-muted/70 mt-1">
+          {weekSampleSize > 0
+            ? `from ${weekSampleSize} ${weekSampleSize === 1 ? 'piece' : 'pieces'}`
+            : lifetimeSampleSize > 0
+              ? `lifetime: ${lifetimeAvgVoice} from ${lifetimeSampleSize}`
+              : 'no data yet'}
+        </div>
       </div>
+
       <div class="p-4 rounded-xl border border-zee-border text-center">
-        <div class="text-2xl font-bold text-zee-primary">{stats.avgVoiceScore || '—'}</div>
-        <div class="text-sm text-zee-muted">Avg voice score</div>
-        {stats.voiceSampleSize > 0 && (
-          <div class="text-xs text-zee-muted/70 mt-1">
-            from {stats.voiceSampleSize} {stats.voiceSampleSize === 1 ? 'piece' : 'pieces'}
-          </div>
-        )}
+        <div class="text-2xl font-bold text-zee-primary">
+          {tierMixWeek.polished + tierMixWeek.solid + tierMixWeek.rough > 0
+            ? `${tierMixWeek.polished}·${tierMixWeek.solid}·${tierMixWeek.rough}`
+            : '—'}
+        </div>
+        <div class="text-sm text-zee-muted">Tier mix</div>
+        <div class="text-xs text-zee-muted/70 mt-1">Polished · Solid · Rough</div>
       </div>
+
       <div class="p-4 rounded-xl border border-zee-border text-center">
-        <div class="text-2xl font-bold text-zee-primary">{daysRunning || '—'}</div>
-        <div class="text-sm text-zee-muted">{daysRunning === 1 ? 'Day' : 'Days'} running</div>
-        {stats.runningSince && (
-          <div class="text-xs text-zee-muted/70 mt-1">Since {formatDate(stats.runningSince)}</div>
-        )}
+        <div class="text-2xl font-bold text-zee-primary">{avgRoundsWeek ?? '—'}</div>
+        <div class="text-sm text-zee-muted">Avg rounds</div>
+        <div class="text-xs text-zee-muted/70 mt-1">to clear the gates</div>
       </div>
     </div>
   </section>
 
-  <!-- Section 5: Recent pieces -->
-  {recentPieces.length > 0 && (
+  <!-- Recent runs -->
+  <section class="mb-10">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Recent runs</h2>
+    {runLog.length === 0 ? (
+      <p class="text-sm text-zee-muted italic py-4">
+        No runs in the last 7 days. Next run at 02:00 UTC.
+      </p>
+    ) : (
+      <ul class="divide-y divide-zee-border/60">
+        {runLog.map((row) => {
+          const tier = auditTier(row.voice_score, row.quality_flag);
+          const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
+          return (
+            <li>
+              <a href={`/daily/${row.date}/`} class="flex items-start gap-4 py-4 group">
+                <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
+                    <span class="text-zee-text font-medium">{shortDate(row.date)}</span>
+                    <span class="opacity-40" aria-hidden="true">·</span>
+                    <span>{auditTierLabel(tier)}</span>
+                    {row.voice_score != null && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{row.voice_score}/100</span>
+                      </>
+                    )}
+                    {row.rounds > 0 && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{row.rounds} {row.rounds === 1 ? 'round' : 'rounds'}</span>
+                      </>
+                    )}
+                    {row.candidates > 0 && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>{row.candidates} candidates</span>
+                      </>
+                    )}
+                  </div>
+                  <p class="mt-1 text-sm font-medium leading-snug group-hover:text-zee-primary transition-colors">
+                    {row.headline}
+                  </p>
+                </div>
+                <span class="text-zee-muted/60 group-hover:text-zee-primary transition-colors shrink-0" aria-hidden="true">→</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </section>
+
+  <!-- How it's holding up -->
+  {(unresolvedEscalations > 0 || factCheckOfflineCount > 0 || avgCandidatesPerDay != null) && (
     <section class="mb-10">
-      <h2 class="text-sm font-medium text-zee-muted uppercase tracking-wide mb-4">Recent Pieces</h2>
-      <div class="space-y-2">
-        {recentPieces.map((piece: any) => (
-          <a
-            href={`/daily/${piece.date}/`}
-            class="flex items-baseline justify-between px-4 py-3 -mx-4 rounded-lg hover:bg-zee-border/50 transition-colors group"
-          >
-            <span class="font-medium text-sm group-hover:text-zee-primary transition-colors flex-1">{piece.headline}</span>
-            <span class="text-xs text-zee-muted ml-4 shrink-0">{formatDate(piece.date)}</span>
-          </a>
-        ))}
-      </div>
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">How it's holding up</h2>
+      <dl class="divide-y divide-zee-border/60 text-sm">
+        {unresolvedEscalations > 0 && (
+          <div class="flex items-baseline justify-between gap-4 py-3">
+            <dt class="text-zee-text">Escalations unresolved</dt>
+            <dd class="text-right">
+              <span class="font-semibold tabular-nums">{unresolvedEscalations}</span>
+              {escalationContext && (
+                <span class="text-xs text-zee-muted ml-2">— {escalationContext}</span>
+              )}
+            </dd>
+          </div>
+        )}
+        <div class="flex items-baseline justify-between gap-4 py-3">
+          <dt class="text-zee-text">Fact-check web</dt>
+          <dd class="text-right">
+            {factCheckOfflineCount > 0 ? (
+              <>
+                <span class="font-semibold text-zee-muted">Offline</span>
+                <span class="text-xs text-zee-muted ml-2">— {factCheckOfflineCount} {factCheckOfflineCount === 1 ? 'check' : 'checks'} this week used Claude-only</span>
+              </>
+            ) : (
+              <span class="font-semibold text-zee-primary">Available</span>
+            )}
+          </dd>
+        </div>
+        {avgCandidatesPerDay != null && (
+          <div class="flex items-baseline justify-between gap-4 py-3">
+            <dt class="text-zee-text">Candidates per day</dt>
+            <dd class="text-right">
+              <span class="font-semibold tabular-nums">{avgCandidatesPerDay}</span>
+              <span class="text-xs text-zee-muted ml-2">avg — Scanner reads Google News across 6 feeds</span>
+            </dd>
+          </div>
+        )}
+      </dl>
     </section>
   )}
 
-  <!-- Footer -->
-  <section class="py-8 border-t border-zee-border">
-    <p class="text-sm text-zee-muted italic">
-      Zeemish is produced by a team of AI agents, guided by one human. Every piece is audited for voice, accuracy, and structure. We label each piece so you can see how it scored.
+  <!-- Agent team -->
+  <section class="mb-12">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">The agent team</h2>
+    <ul class="divide-y divide-zee-border/60 text-sm">
+      {agents.map((agent) => {
+        const isActive = !agent.paused && activeAgent === agent.name;
+        return (
+          <li class="flex items-baseline gap-4 py-2.5">
+            <span class="font-medium w-40 md:w-48 shrink-0 flex items-center gap-2">
+              <span class={agent.paused ? 'text-zee-muted/70' : ''}>{agent.name}</span>
+              {agent.paused && (
+                <span class="text-[10px] uppercase tracking-wide text-zee-muted border border-zee-border rounded px-1.5 py-0.5">paused</span>
+              )}
+            </span>
+            <span class={`flex-1 ${agent.paused ? 'text-zee-muted/60' : 'text-zee-muted'}`}>{agent.job}</span>
+            {isActive && activeAgentMinutesAgo != null && (
+              <span class="text-xs text-zee-primary shrink-0 flex items-center gap-1">
+                <span class="w-1.5 h-1.5 rounded-full bg-zee-primary animate-pulse" aria-hidden="true"></span>
+                active {activeAgentMinutesAgo}m ago
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  </section>
+
+  <!-- How this works -->
+  <section class="mb-8 pt-8 border-t border-zee-border/60">
+    <p class="text-sm text-zee-muted leading-relaxed mb-3">
+      Zeemish is produced by these 13 agents, every day at 02:00 UTC. Each piece is audited for voice, accuracy, and structure. Any piece page has a <em>How this was made</em> drawer showing its full creation story — timeline, auditor notes, rules, candidates.
     </p>
+    <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
+      <a
+        href="https://github.com/zzeeshann/zeemish-v2/blob/main/content/voice-contract.md"
+        target="_blank"
+        rel="noopener"
+        class="text-zee-primary hover:underline"
+      >
+        Voice contract →
+      </a>
+      {isAdmin && (
+        <a href="/dashboard/admin/" class="text-zee-primary hover:underline">
+          Admin panel →
+        </a>
+      )}
+    </div>
   </section>
 </BaseLayout>
