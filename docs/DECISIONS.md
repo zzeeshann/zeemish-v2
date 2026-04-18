@@ -2,6 +2,30 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-18: Ship as-is despite security-header gap on prerendered HTML (LAUNCH)
+**Context:** zeemish.io custom-domain swap completed. All security-critical surfaces (`/dashboard/`, `/account`, `/login`, `/api/*`, `/auth/*`, `/audio/*`) are returning all 6 security headers — confirmed via curl. But the public read-only pages (`/`, `/daily/*`, `/library`) still return without security headers and with Cloudflare's default `cache-control: public, max-age=0, must-revalidate`. Three workarounds attempted in sequence (run_worker_first=true → middleware Cache-Control no-store on HTML → post-build.sh overriding _routes.json to include /*) all failed: Cloudflare Workers Static Assets serves `.html` files directly from the asset binding, bypassing the worker entirely, regardless of all three settings. Verified: `_routes.json` IS deployed correctly (`curl https://zeemish.io/_routes.json` shows the override), and the worker IS running for non-HTML routes (the new cache-control lands on `/dashboard/`).
+
+**Decision:** Launch zeemish.io to the public with this gap. Document it explicitly. Move on. Don't keep iterating.
+
+**Reason — risk analysis:**
+- The pages missing headers are read-only HTML with no auth, no forms, no cross-origin fetches, no third-party scripts beyond a Google Fonts preconnect
+- Headers we'd want on them are CSP (mostly to constrain what the page can fetch — moot, it doesn't fetch anything cross-origin), X-Frame-Options (clickjacking — there's no sensitive UI to overlay), X-Content-Type-Options (MIME sniffing — only matters for content the browser would mis-execute, irrelevant for static HTML)
+- The realistic residual risk is clickjacking. For a public reading site with no actions, that's a low-impact vulnerability. An attacker iframing a Zeemish daily piece to overlay something else achieves nothing — there's nothing to phish, no buttons to mis-click into a transaction
+- The auth surfaces (where headers DO land) are the actual attack surface. Those are hardened
+- Fixing this would require either (a) a Cloudflare Transform Rule (UI work, splits config), or (b) making prerendered pages server-rendered (loses prerender perf benefit, every request re-renders MDX through worker). Neither change is worth blocking launch for
+- The user explicitly weighed this and chose to ship: "I dont think its too much of a big risk as they are read only pages not like admin pages that already rendered on the server side"
+
+**Reason — why this matters as a documented decision:** Future-me or future-them will discover the missing headers in a security scan or audit and want to know whether this was an oversight or a deliberate trade-off. It was deliberate. The path to close the gap is in `Remaining minor items` in CLAUDE.md.
+
+**Lessons captured for next time:**
+1. Cloudflare Workers Static Assets has surprising precedence over worker-side configuration. `run_worker_first` and `_routes.json` `include` patterns are not the safety net you'd expect for `.html` files. If you need headers on static HTML, plan for it from the start — either prerender to dist with build-time HTML transformation, or use Cloudflare Transform Rules from day one.
+2. Don't trust `cf-cache-status: HIT` to mean "old cache, will fix on next purge." It can also mean "Cloudflare is serving the asset directly without any cache logic running." Distinguish via cache-bypass tests on routes you KNOW are server-rendered.
+3. Custom-domain swaps need at least one Cloudflare cache purge after the bind. Future-proof: add a `gh workflow_dispatch` step that calls Cloudflare's purge API after each deploy. Or set Cache Rules in the dashboard to `bypass` for HTML.
+
+**Launch state captured at git tag `v1.0.0`.**
+
+**References:** [src/middleware.ts](../src/middleware.ts), [scripts/post-build.sh](../scripts/post-build.sh), [wrangler.toml](../wrangler.toml), CLAUDE.md "Critical lesson — Cloudflare Workers Static Assets" + "Launch (2026-04-18 — v1.0.0)".
+
 ## 2026-04-18: Override Astro Cloudflare adapter's _routes.json (post-launch hotfix)
 **Context:** zeemish.io went live via custom domain swap. Smoke test on the live domain showed `cf-cache-status: HIT` and zero security headers on `/`, `/daily/*`, `/library` — but headers ARE present on `/dashboard/`, `/api/*`, `/audio/*`. Three Cloudflare cache purges didn't fix it. Diagnosis: the Astro Cloudflare adapter auto-generates `dist/_routes.json` with prerendered paths in the `exclude` list, which tells Cloudflare to serve those files directly from Static Assets WITHOUT invoking the worker. `run_worker_first = true` in wrangler.toml is overridden by this exclude list — Cloudflare honours `_routes.json` first.
 

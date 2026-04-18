@@ -2,7 +2,7 @@
 
 How to run, deploy, operate, and troubleshoot. Written for a developer who just cloned the repo.
 
-> **URLs:** The site lives at `https://zeemish.io` (custom domain bound to the `zeemish-v2` worker). The workers.dev URL `https://zeemish.io` is still active as a fallback but no longer the canonical entrypoint. The agents worker remains on `https://zeemish-agents.zzeeshann.workers.dev` — internal API, not user-facing.
+> **URLs:** The site lives at `https://zeemish.io` (custom domain bound to the `zeemish-v2` worker, launched 2026-04-18). The workers.dev URL `https://zeemish-v2.zzeeshann.workers.dev` is still active as a fallback but no longer the canonical entrypoint. The agents worker remains on `https://zeemish-agents.zzeeshann.workers.dev` — internal API, not user-facing.
 
 ## Prerequisites
 - Node.js 20+

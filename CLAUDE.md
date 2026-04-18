@@ -14,7 +14,9 @@ An autonomous multi-agent publishing system. 13 AI agents scan the news, decide 
 
 ## Current state
 
-**Complete.** 13 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
+**LAUNCHED 2026-04-18 at https://zeemish.io.** Tag: `v1.0.0`. Old breathing-tools site at zeemish.io retired (custom-domain binding moved from `zeemish-site` worker to `zeemish-v2` worker via Cloudflare dashboard). New site live with daily piece, audio, engagement tracking, public + admin dashboard, security headers on auth-touching surfaces. Workers.dev URL still active as fallback. The exact git commit at launch is what `v1.0.0` points at — use it as the reference if anyone asks "what shipped on day one".
+
+13 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened on the routes that matter. Daily pieces are the only content type.
 
 Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships, Audio Producer narrates beat-by-beat via ElevenLabs, Audio Auditor verifies, Publisher second-commits the audio URLs into frontmatter. Audio runs in a ship-and-retry posture: text publishes the moment Integrator approves (a newspaper never skips a day); audio lands as a second commit when it's ready, or surfaces a retry button on the admin dashboard if it fails.
 
@@ -122,6 +124,9 @@ docs/handoff/           Original architecture + specs
 - Zita chat panel uses white background — feels off-brand vs the cream `zee-bg` used elsewhere; rebrand needed
 - OG image is one static SVG for every page; per-piece dynamic OG (headline + tier rendered to PNG at the edge) is a future Worker route project
 - No skip-to-content link for keyboard users; full WCAG audit deferred
+- **Security headers on prerendered HTML (`/`, `/daily/*`, `/library`) — known gap.** Despite `_routes.json` `include: ["/*"]` + `run_worker_first = true` + middleware `Cache-Control: no-store` on HTML, Cloudflare Workers Static Assets serves prerendered `.html` files directly without invoking the worker. Server-rendered routes (`/dashboard/`, `/api/*`, `/audio/*`, `/account`, `/login`) DO get all 6 headers (CSP/HSTS/X-Frame-Options/X-Content-Type-Options/Referrer-Policy/Permissions-Policy) — those are the auth-touching, security-critical surfaces. The static reading pages have no auth, no cross-origin fetches, no third-party scripts beyond Google Fonts (preconnect only). Practical residual risk = clickjacking (low — there's no sensitive UI to overlay). Two future paths if we want to close it: (a) Cloudflare Transform Rule injecting headers at the edge (5 min UI work, ironclad), (b) `prerender = false` on those pages (worker runs every time, ~15-50ms perf hit). See `docs/DECISIONS.md` 2026-04-18 "Ship as-is despite header gap" for the full reasoning.
+- DNS `R2 listens.zeemish.io` and `Worker api.zeemish.io → zeemish-api` are leftover from the OLD breathing-tools site. Different subdomains, not in the way of launch. Retire when convenient — they don't serve anything used by zeemish-v2.
+- Cache-purge needed on every Cloudflare deploy to evict CDN-cached prerendered HTML — until the header-gap above is closed (any solution there fixes this too)
 
 ## Design pass (2026-04-17)
 - Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.
@@ -145,7 +150,17 @@ Pre-launch pass before pointing zeemish.io at the new worker. Audit revealed sev
 1. **Adapter `_routes.json`** auto-excludes prerendered paths from the worker — overridden by `scripts/post-build.sh`.
 2. **`run_worker_first`** in wrangler.toml asset binding — needed so the worker actually runs for the now-included paths.
 3. **Cloudflare CDN edge cache** sits before the worker; cached HTML is served without ever invoking the worker — defeated by `Cache-Control: private, no-store` on `text/html` from middleware.
-If you're debugging a "header missing on / but present on /api/..." problem in future, this is the trio to check.
+
+**Update after launch (2026-04-18):** Even all three of the above did NOT get headers onto prerendered HTML in production. Cloudflare Workers Static Assets appears to serve `.html` files directly from the asset binding for filesystem-resolvable paths regardless of `_routes.json` and `run_worker_first`. Confirmed by: `_routes.json` deployed correctly (verified via `curl https://zeemish.io/_routes.json`), worker IS running on server-rendered routes (`/dashboard/` returns the new `Cache-Control: private, no-store` from middleware), but prerendered HTML continues to return Cloudflare's default `cache-control: public, max-age=0, must-revalidate` and zero security headers — including a brand-new random URL that resolves to the static `404.html`. We hit this as a hard wall and decided to ship — see DECISIONS 2026-04-18 "Ship as-is despite header gap". If a future Cloudflare release exposes a `routes.strategy = 'always-worker'` option, or if we add a Cloudflare Transform Rule, this gap closes.
+
+## Launch (2026-04-18 — `v1.0.0`)
+- Old `zeemish.io` worker (`zeemish-site`, breathing tools) custom-domain bindings removed
+- New `zeemish-v2` worker bound to `zeemish.io` + `www.zeemish.io` via Cloudflare dashboard
+- TLS cert auto-issued by Cloudflare
+- DNS records left in place: `api.zeemish.io → zeemish-api` (old API, different subdomain), `listens.zeemish.io → zeemish-listens` R2 (old audio, different subdomain), Resend records (verified: resend._domainkey, send MX, send SPF)
+- Three Cloudflare cache purges performed during cutover; future deploys may need a manual purge until the prerendered-HTML header gap is closed
+- Final smoke check on zeemish.io: site renders, daily piece loads, audio plays, engagement tracks, magic-link login works (Resend domain verified), www → apex redirect works, robots.txt served, security headers on `/dashboard/` + `/api/*` + `/audio/*` confirmed
+- Known launch-day gap: prerendered HTML lacks security headers (see Remaining minor items)
 
 ## Quality surfacing (2026-04-17)
 Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.
