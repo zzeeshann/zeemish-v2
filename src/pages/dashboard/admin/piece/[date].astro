@@ -192,48 +192,6 @@ for (const p of pipeline) {
 }
 const timeline = stepOrder.map((s) => stepMap.get(s)!);
 
-// Clean a Scanner candidate summary for admin display.
-// Scanner stores raw RSS item descriptions: a headline, source name,
-// and a chain of anchor tags pointing to news.google.com URLs. The
-// summary is also truncated at the source, often mid-attribute, so we
-// must handle dangling fragments like `<a href="…` with no closing >.
-function cleanSummary(input: string | null, headline: string | null): string {
-  if (!input) return '';
-  let s = input
-    // 1. decode entities so escaped tags become real tags
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'");
-
-  // 2. strip complete tags
-  s = s.replace(/<[^>]*>/g, ' ');
-
-  // 3. strip dangling unterminated tag fragments at the END of the
-  //    string (truncated `<a href="…` with no closing >)
-  s = s.replace(/<[^>]*$/g, '');
-
-  // 4. drop any naked URLs left as visible text
-  s = s.replace(/https?:\/\/\S+/g, '');
-
-  // 5. collapse whitespace
-  s = s.replace(/\s+/g, ' ').trim();
-
-  // 6. RSS summaries usually start by re-stating the headline. Drop the
-  //    duplicate so admin sees only NEW info beyond the headline.
-  if (headline) {
-    const h = headline.trim();
-    if (s.toLowerCase().startsWith(h.toLowerCase())) {
-      s = s.slice(h.length).replace(/^[\s·,–—-]+/, '').trim();
-    }
-  }
-
-  return s;
-}
-
 // Pipeline metadata derived from publishing.done.
 const publishStep = pipeline.find((p) => p.step === 'publishing' && p.status === 'done');
 const publishData = publishStep ? safeJson(publishStep.data) : {};
@@ -476,12 +434,10 @@ function publishedDisplay(): string {
                         <a href={c.url} target="_blank" rel="noopener" class="hover:text-zee-primary transition-colors">{c.headline}</a>
                       ) : c.headline}
                     </p>
-                    {(() => {
-                      const clean = cleanSummary(c.summary, c.headline);
-                      return clean ? (
-                        <p class="text-xs text-zee-muted mt-1 leading-relaxed line-clamp-3">{clean}</p>
-                      ) : null;
-                    })()}
+                    {/* Summary intentionally not shown. RSS items'
+                        descriptions are headline + source restated +
+                        google news anchor markup — they add no info
+                        beyond the row above. */}
                   </div>
                 </li>
               );
