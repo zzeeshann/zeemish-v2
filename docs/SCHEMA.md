@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**13 tables across 7 migrations.**
+**13 tables across 10 migrations.**
 
 ## Reader-side tables
 
@@ -182,10 +182,31 @@ Published daily teaching pieces.
 | has_interactive | INTEGER | 0 or 1 |
 | reading_minutes | INTEGER | |
 | quality_flag | TEXT | NULL = normal, 'low' = audit failed after max revisions |
+| has_audio | INTEGER | 0 or 1. Flipped to 1 by `Publisher.publishAudio` when the audio second-commit succeeds. Never set by Producer or Auditor. |
 | published_at | INTEGER | |
 | created_at | INTEGER | |
 
-Migrations: `0006_daily_pieces.sql`, `0009_quality_flag.sql`
+Migrations: `0006_daily_pieces.sql`, `0009_quality_flag.sql`, `0010_audio_pipeline.sql` (added `has_audio`)
+
+### daily_piece_audio
+Per-beat audio rows — one row per `<lesson-beat>` per piece. Producer writes; Auditor reads; Publisher reads for the second-commit frontmatter splice; transparency drawer + admin deep-dive page render from this.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| date | TEXT | YYYY-MM-DD. Part of composite PK. |
+| beat_name | TEXT | e.g. "hook", "teach-1", "close". Matches `<lesson-beat name="…">`. Part of composite PK. |
+| r2_key | TEXT | e.g. `audio/daily/2026-04-18/hook.mp3` |
+| public_url | TEXT | URL the reader fetches. Currently `/{r2_key}` — needs site-worker R2 binding to resolve in prod. |
+| character_count | INTEGER | Characters sent to ElevenLabs (post-`prepareForTTS`) — the billed count. |
+| duration_seconds | INTEGER | Nullable — not currently measured. |
+| request_id | TEXT | ElevenLabs `request-id` response header. Used for prosodic stitching on the next beat (`previous_request_ids`). |
+| model | TEXT | e.g. `eleven_multilingual_v2`. Stored per row so future model swaps are visible in audit history. |
+| voice_id | TEXT | e.g. `j9jfwdrw7BRfcR43Qohk` (Frederick Surrey). Same reason as model. |
+| generated_at | INTEGER | Unix timestamp ms. |
+
+PK: (date, beat_name). Index: `idx_piece_audio_date` on date.
+
+Migration: `0010_audio_pipeline.sql`
 
 ### pipeline_log
 Step-by-step record of each daily piece run. The admin dashboard polls this for the live pipeline monitor.
@@ -201,7 +222,7 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 
 Migration: `0007_pipeline_log.sql`
 
-## Migrations summary (8 migrations, 12 tables)
+## Migrations summary (10 migrations, 13 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -211,3 +232,4 @@ Migration: `0007_pipeline_log.sql`
 - `0007_pipeline_log.sql` — pipeline_log for admin monitor
 - `0008_drop_agent_tasks.sql` — dropped unused `agent_tasks` (course-era); recreated `audit_results` without its FK so Director can write the audit trail
 - `0009_quality_flag.sql` — added `daily_pieces.quality_flag` so Director can publish-anyway on max-revision audit failure and mark the piece for archive-view filtering
+- `0010_audio_pipeline.sql` — created `daily_piece_audio` (per-beat audio rows) + added `daily_pieces.has_audio` boolean. Un-paused the audio pipeline.

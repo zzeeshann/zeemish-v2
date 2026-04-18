@@ -11,9 +11,21 @@ import { createUser, getUser } from './lib/db';
  *
  * The lesson-shell Web Component calls the API from the client,
  * which goes through this middleware and gets a session cookie.
+ *
+ * Audio serving lives at `src/pages/audio/[...path].ts` (a real Astro
+ * route) because middleware-only handling was bypassed by Cloudflare
+ * Static Assets serving the prerendered 404.html for unrecognised
+ * paths. Putting it at a route makes Astro recognise /audio/* as a
+ * live path, which routes through the worker instead.
  */
 export const onRequest = defineMiddleware(async (context, next) => {
   const url = new URL(context.request.url);
+
+  // Audio route is public — skip auth for it. The actual serving is
+  // done by src/pages/audio/[...path].ts.
+  if (url.pathname.startsWith('/audio/')) {
+    return next();
+  }
 
   // Only run auth on server-rendered routes
   const serverRoutes = ['/api/', '/account', '/login', '/dashboard', '/auth/'];

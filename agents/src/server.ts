@@ -72,7 +72,7 @@ export default {
     }
 
     // Admin endpoints require auth
-    const adminPaths = ['/daily-trigger', '/status', '/digest', '/events', '/engagement'];
+    const adminPaths = ['/daily-trigger', '/audio-retry', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -176,6 +176,36 @@ export default {
         });
       } catch (err) {
         // Only synchronous failures (e.g. DO stub creation) reach here.
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: corsHeaders(request),
+        });
+      }
+    }
+
+    // Audio retry: POST /audio-retry?date=YYYY-MM-DD (requires auth)
+    // Re-runs just the audio pipeline for an already-published piece
+    // after an earlier audio failure. Text is already permanent —
+    // this call cannot un-publish or revise the piece's prose.
+    if (url.pathname === '/audio-retry' && request.method === 'POST') {
+      try {
+        const date = url.searchParams.get('date') ?? '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid date (YYYY-MM-DD)' }), {
+            status: 400, headers: corsHeaders(request),
+          });
+        }
+        const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        ctx.waitUntil(
+          director.retryAudio(date).catch((err) => {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.error(`[audio-retry] failed for ${date}:`, message);
+          }),
+        );
+        return new Response(JSON.stringify({ status: 'started', date }), {
+          status: 202, headers: corsHeaders(request),
+        });
+      } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         return new Response(JSON.stringify({ error: message }), {
           status: 500, headers: corsHeaders(request),

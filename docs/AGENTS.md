@@ -4,7 +4,7 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**13 agents total.** Audio Producer + Audio Auditor are paused by design (cost control) — Director's pipeline does not reference them, so no ElevenLabs spend is possible by accident.
+**13 agents total — all wired.** Audio Producer + Audio Auditor are live as of 2026-04-18, slotted in after Publisher as a ship-and-retry phase (text commits first; audio follows as a second commit). Hard 20k-char budget cap per piece protects against runaway ElevenLabs spend.
 
 ## Design principles (all agents)
 
@@ -24,10 +24,12 @@ The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare 
 
 ```
 Scanner → Curator → Drafter → [Voice, Structure, Fact] parallel → Integrator → Publisher
-                                                                       ↑
-                                                          (up to 3 revision rounds)
+                                                                       ↑             │
+                                                          (up to 3 revision rounds)  ↓
+                                                    Audio Producer → Audio Auditor → Publisher.publishAudio
+                                                    (ship-and-retry: text is live before this; audio is
+                                                     a second commit splicing audioBeats into frontmatter)
 
-Audio Producer + Auditor: not wired into pipeline (paused)
 Observer: receives events from every agent throughout
 Learner: runs off-pipeline on reader engagement data
 ```
@@ -98,25 +100,32 @@ Learner: runs off-pipeline on reader engagement data
 - **File:** `agents/src/integrator.ts`
 - **Prompt:** `agents/src/integrator-prompt.ts`
 
-### 9. AudioProducerAgent — **PAUSED**
-- **Role (when active):** Generates MP3 audio for each beat via ElevenLabs TTS, saves to R2.
-- **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk`
-- **Process:** Extract text from each `<lesson-beat>` → strip tags → call ElevenLabs → save MP3 to R2
-- **Paused because:** Audio costs money per generation. Waiting until text pipeline is fully trusted before spending.
-- **Structural fact:** Director's pipeline does not reference this agent. Cannot run by accident.
+### 9. AudioProducerAgent
+- **Role:** Generates per-beat MP3 audio via ElevenLabs, saves to R2, writes `daily_piece_audio` rows.
+- **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk` (added to "My Voices" for stability against shared-library removal).
+- **Model / format:** `eleven_multilingual_v2`, output `mp3_44100_96`, `use_speaker_boost: true`, `speed: 0.95`, `style: 0.3`, `stability: 0.6`, `similarity_boost: 0.75`.
+- **Process:** Extract beats from MDX → `prepareForTTS` (strip tags + "Zeemish → Zee-mish" alias) → sum chars → reject if > CHAR_CAP → per beat: R2 head-check → POST to ElevenLabs (with `previous_request_ids` rolling-3 window for prosodic stitching) → R2 put → upsert `daily_piece_audio` row.
+- **Budget:** 20,000-char hard cap per piece. Over-cap aborts BEFORE any API spend via `AudioBudgetExceededError` (Director catches, escalates to Observer).
+- **Retry:** 3 attempts with 1s/2s/4s exponential backoff on 5xx / network errors. 4xx fails fast (bad key, bad voice, quota).
+- **Separation:** Never touches git. Never sets `has_audio`. Never knows Publisher exists.
+- **Method:** `generateAudio({ date }, mdx)`
 - **File:** `agents/src/audio-producer.ts`
 
-### 10. AudioAuditorAgent — **PAUSED**
-- **Role (when active):** Checks generated audio quality — verifies files exist in R2, checks sizes, flags issues.
-- **Note:** Basic file checks only — no STT round-trip yet.
-- **Paused because:** Nothing to audit until Audio Producer is active.
+### 10. AudioAuditorAgent
+- **Role:** Audits the persisted audio state for a date — reads `daily_piece_audio` rows + HEADs R2, returns pass/fail verdict.
+- **Checks (majors fail audit):** missing rows, missing R2 object, 0-byte file, size <30% of expected (960 bytes/char at 96 kbps), total chars over 20k cap.
+- **Checks (minors):** size >3× expected, beat text <50 chars.
+- **No STT:** deliberately out of scope. STT catches hallucinations, which isn't what TTS gets wrong. Real-Cloudflare STT support isn't there yet anyway.
+- **Method:** `audit({ date })`
 - **File:** `agents/src/audio-auditor.ts`
 
 ### 11. PublisherAgent
-- **Role:** Commits approved MDX to GitHub repo via Contents API.
-- **Only runs when:** All three quality gates pass.
-- **Output:** Commit SHA, commit URL, file path
-- **Method:** `publishToPath(filePath, mdx, commitMsg)`
+- **Role:** Commits approved MDX to GitHub repo via Contents API. Two surfaces:
+  - `publishToPath(filePath, mdx, commitMsg)` — first commit (text). **Refuses to overwrite existing files** — published content is permanent.
+  - `publishAudio(filePath, audioBeats)` — second commit (metadata-only). Splices `audioBeats:` YAML block into frontmatter. Idempotent — re-running with the same beats returns the existing sha as a no-op.
+  - `readPublishedMdx(filePath)` — public read helper for `Director.retryAudio`.
+- **Metadata carve-out:** `publishAudio` modifies a published file. The "published pieces are permanent" rule governs teaching content (beats, narrative, facts); frontmatter metadata (voiceScore, qualityFlag, audioBeats) is an allowed exception. See `DECISIONS.md` 2026-04-18.
+- **Output:** `PublishResult` — commit SHA, commit URL, file path.
 - **File:** `agents/src/publisher.ts`
 
 ### 12. LearnerAgent
@@ -138,6 +147,10 @@ Learner: runs off-pipeline on reader engagement data
 # Trigger a daily piece (requires auth)
 POST /daily-trigger
 # Header: Authorization: Bearer <ADMIN_SECRET>
+
+# Retry audio only for an already-published piece (requires auth)
+# Invoked by admin dashboard "Retry audio" button after an audio failure.
+POST /audio-retry?date=YYYY-MM-DD
 
 # Director status (requires auth)
 GET /status
@@ -161,7 +174,7 @@ wrangler deploy
 ## Secrets (set via `wrangler secret put` in `agents/`)
 - `ANTHROPIC_API_KEY` — Claude API key for all agents that use Claude
 - `GITHUB_TOKEN` — GitHub token for Publisher commits
-- `ELEVENLABS_API_KEY` — ElevenLabs API key for Audio Producer (kept set but unused while paused)
+- `ELEVENLABS_API_KEY` — ElevenLabs API key for Audio Producer
 - `ADMIN_SECRET` — Bearer token for trigger endpoint auth
 
 ## Key shared files
@@ -178,7 +191,8 @@ wrangler deploy
 - `agents/src/shared/prompts.ts` — tombstone; prompts moved to their owning agents
 
 ## Known limitations
-- Audio Auditor does basic file checks only (no STT round-trip yet) — paused anyway
+- Audio Auditor does basic file checks only (no STT round-trip — deliberately out of scope; STT catches hallucinations, not TTS failure modes)
+- Site worker needs R2 binding + `/audio/*` route for audio URLs to resolve in production (tracked in ARCHITECTURE deviation + Phase 9 deploy list)
 - Voice contract duplicated in `.md` and `.ts` (manual sync required)
 - Fact-Checker web search uses DuckDuckGo instant answers (limited depth)
 - Scanner XML parsing uses regex (fragile with malformed RSS)

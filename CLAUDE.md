@@ -14,16 +14,16 @@ An autonomous multi-agent publishing system. 13 AI agents scan the news, decide 
 
 ## Current state
 
-**Complete.** 13 agents deployed (Audio Producer + Audio Auditor paused by design, to protect ElevenLabs spend until the text pipeline is fully trusted). Daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
+**Complete.** 13 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened. Daily pieces are the only content type.
 
-Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships. "Paused" is a structural fact, not a label: Director's pipeline does not reference the audio agents, so no ElevenLabs spend is possible by accident.
+Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships, Audio Producer narrates beat-by-beat via ElevenLabs, Audio Auditor verifies, Publisher second-commits the audio URLs into frontmatter. Audio runs in a ship-and-retry posture: text publishes the moment Integrator approves (a newspaper never skips a day); audio lands as a second commit when it's ready, or surfaces a retry button on the admin dashboard if it fails.
 
 ## What was built
 
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates (2 paused)
+4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every day at 2am UTC
@@ -37,7 +37,7 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
-- Backend: Cloudflare Workers (Astro adapter) + D1 (13 tables) + R2 (audio)
+- Backend: Cloudflare Workers (Astro adapter) + D1 (14 tables) + R2 (audio)
 - Agents: Cloudflare Agents SDK v0.11.1
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
@@ -46,7 +46,7 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 ### The 13 Agents (one job per agent, one file per agent)
 
-Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher. Audio agents excluded from the pipeline (paused). Observer receives events throughout. Learner runs off-pipeline, watching readers.
+Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner runs off-pipeline, watching readers.
 
 1. **ScannerAgent** — reads the news every morning
 2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Scheduled 2am UTC every day.
@@ -56,8 +56,8 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 6. **FactCheckerAgent** — verifies every claim (two-pass: Claude + DuckDuckGo)
 7. **StructureEditorAgent** — reviews flow and pacing
 8. **IntegratorAgent** — handles revisions before approval (3 rounds max)
-9. **AudioProducerAgent** — generates audio via ElevenLabs, saves to R2. **Paused.**
-10. **AudioAuditorAgent** — checks pronunciation and audio quality. **Paused.**
+9. **AudioProducerAgent** — generates per-beat MP3 via ElevenLabs (Frederick Surrey, `eleven_multilingual_v2`, 96 kbps), saves to R2, writes `daily_piece_audio` rows. 20k-char hard cap per piece, 3-attempt retry on transient failures, request-stitching for prosodic continuity.
+10. **AudioAuditorAgent** — reads `daily_piece_audio` rows, verifies R2 objects exist + file sizes are sane + total chars under cap. Passes/fails without touching git.
 11. **PublisherAgent** — commits to GitHub, piece goes live
 12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
 13. **ObserverAgent** — logs every pipeline event for the admin dashboard
@@ -66,11 +66,11 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 12 tables, 8 migrations)
+### Database (D1 — 13 tables, 10 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
-- Daily: daily_candidates, daily_pieces
+- Daily: daily_candidates, daily_pieces (+ `has_audio` col), daily_piece_audio (per-beat MP3 rows)
 
 ### Key directories
 ```
@@ -115,6 +115,7 @@ docs/handoff/           Original architecture + specs
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
+- Site worker needs R2 binding + `/audio/*` route so audio URLs resolve in prod (Phase 9 deploy work — the admin retry flow is ready but audio URLs will 404 from the site until this lands)
 - Rate limiter is KV-backed (Workers KV, eventually consistent)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
 - Dashboard pipeline API's `isRunning` heuristic is buggy on the API itself — admin's consumer fixes it inline; if other consumers want the right answer, fix the endpoint properly
@@ -133,6 +134,7 @@ docs/handoff/           Original architecture + specs
 - Transparency drawer (2026-04-18): every daily piece now has a "How this was made" drawer at the bottom. Shows full pipeline timeline, per-round auditor output (Voice / Facts / Structure), voice-contract rules applied, and candidates Scanner surfaced. Fed by new public endpoint `/api/daily/[date]/made` that aggregates `pipeline_log` + `audit_results` + `daily_candidates` + `daily_pieces`. Deep-linkable via `#made`. No schema, no agent changes.
 - Dashboard refocused (2026-04-18): now the cross-piece, cross-day view (the drawer owns per-piece). Sections: live header subtitle (next run countdown), one-line today status, week's output stat grid (pieces / avg voice / tier mix / avg rounds), recent-runs feed, "How it's holding up" honest signals (unresolved escalations / fact-check web / candidates-per-day), agent team with active marker, footer with Voice contract + admin link. All queries against existing tables. Removed: redundant Today fat card, redundant Quality Scores grid, redundant Recent Pieces list, redundant Library stat grid, top-level Admin Panel CTA.
 - Site polish bundle (2026-04-18): custom on-brand 404, OG/Twitter meta + branded SVG OG image, Google Fonts preconnect, library filter focus ring restored, drawer no longer fetches on every page mount (lazy-loads on first open), dashboard "How it's holding up" rows stack on mobile.
+- Audio pipeline live (2026-04-18): un-paused the two audio agents. New migration `0010_audio_pipeline.sql` adds `daily_piece_audio` (per-beat rows: r2_key, public_url, character_count, request_id, model, voice_id) + `has_audio` on `daily_pieces`. Producer switched to `mp3_44100_96`, added `use_speaker_boost`/`speed: 0.95`/request-stitching/"Zeemish → Zee-mish" alias, 20k-char budget cap (`AudioBudgetExceededError`), 3-attempt retry on 5xx, 4xx fails fast. Auditor rewritten to read rows + HEAD R2 (0.3×–3× expected-size tolerance). Director gained `runAudioPipeline` (ship-and-retry after Publisher) + public `retryAudio(date)`. Publisher gained `publishAudio` (second commit, idempotent, metadata-only). AudioPlayer.astro is now a `<audio-player>` web component that listens for `lesson-beat:change` and auto-advances on clip end. Transparency drawer gains Audio section. Admin piece deep-dive gains Audio section + Retry button (proxies `/audio-retry` → Director). `publishToPath` still refuses to overwrite content — `publishAudio` is an allowed metadata-only carve-out (see DECISIONS 2026-04-18).
 - Admin control room + per-piece deep-dive + login refresh (2026-04-18): `/dashboard/admin/` rewritten to match the design system — today's run, system-state stat grid, observer events (with in-place ack), all-pieces list with filter, pipeline history. New route `/dashboard/admin/piece/[date]/` shows everything about one day: full timeline, all rounds with full violations/claims/issues (no truncation), all 50 candidates (no cap), observer events for that day, raw JSON dumps. Login page updated to use the eyebrow/title/subtitle header. Engagement section dropped from admin (legacy lessons-era data), placeholder pointing to CLAUDE.md. `isRunning` heuristic fixed inline on admin's poller (step name + status, not just step name).
 
 ## Quality surfacing (2026-04-17)

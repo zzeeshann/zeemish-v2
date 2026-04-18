@@ -8,6 +8,8 @@ import { ObserverAgent } from './observer';
 import { ScannerAgent } from './scanner';
 import { CuratorAgent } from './curator';
 import { DrafterAgent } from './drafter';
+import { AudioProducerAgent, AudioBudgetExceededError } from './audio-producer';
+import { AudioAuditorAgent } from './audio-auditor';
 import type { Env, DirectorState, DirectorPhase, DailyPieceBrief } from './types';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
@@ -23,8 +25,11 @@ const MAX_REVISIONS = 3;
  *
  *   Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher
  *
- * Audio Producer + Auditor are paused (by design, for cost control)
- * and deliberately excluded from this pipeline.
+ * Audio runs AFTER the text piece is committed (ship-and-retry —
+ * a newspaper never skips a day). Flow: AudioProducer → AudioAuditor
+ * → Publisher.publishAudio (second commit splicing audioBeats into
+ * frontmatter). Any audio failure is observed + retryable from the
+ * admin dashboard; the text piece stays permanent either way.
  *
  * Scheduled at 2:00 AM UTC every day.
  */
@@ -289,12 +294,158 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
     }
 
+    // ─── Audio pipeline (ship-and-retry, text already live) ──────────
+    // Runs regardless of text quality — audio for rough-tier pieces
+    // is still valuable. Any audio failure escalates via Observer;
+    // the text commit above is permanent either way.
+    await this.runAudioPipeline(today, currentMdx, publishResult.filePath, brief.headline);
+
     this.setState({
       ...this.state, status: 'idle', currentPhase: null, currentTask: null,
       lastDailyPiece: { title: brief.headline, date: today },
     });
 
     return { brief, mdx: currentMdx };
+  }
+
+  /**
+   * Run the audio pipeline AFTER the text piece has been committed.
+   *
+   * Ship-and-retry semantics: any failure here is logged to Observer
+   * as an escalation and returns cleanly. Text stays live regardless.
+   * Admin can retry audio from the dashboard (Phase 7).
+   *
+   * Flow: audio-producer → audio-auditor → audio-publisher (second
+   * commit splicing audioBeats into MDX frontmatter). audioBeats is
+   * metadata, not content — the "published pieces are permanent"
+   * rule governs teaching content, not frontmatter metadata like
+   * voiceScore or audioBeats.
+   */
+  private async runAudioPipeline(
+    date: string,
+    mdx: string,
+    filePath: string,
+    title: string,
+  ): Promise<void> {
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+
+    // ─── audio-producer ─────────────────────────────────────────────
+    this.enterPhase('audio-producer');
+    await this.logStep(date, 'audio-producing', 'running', {});
+    let producerResult;
+    try {
+      const producer = await this.subAgent(AudioProducerAgent, `audio-producer-${date}`);
+      producerResult = await producer.generateAudio({ date }, mdx);
+    } catch (err) {
+      const reason = err instanceof AudioBudgetExceededError
+        ? `Over ${err.cap}-char cap (would spend ${err.totalChars} chars)`
+        : err instanceof Error ? err.message : 'Producer failed';
+      await this.logStep(date, 'audio-producing', 'failed', { reason });
+      await observer.logAudioFailure(date, title, 'producer', reason);
+      return;
+    }
+    await this.logStep(date, 'audio-producing', 'done', {
+      beatCount: producerResult.beatAudioPaths.length,
+      totalCharacters: producerResult.totalCharacters,
+      durationEstimate: producerResult.totalDurationEstimate,
+    });
+
+    // ─── audio-auditor ──────────────────────────────────────────────
+    this.enterPhase('audio-auditor');
+    await this.logStep(date, 'audio-auditing', 'running', {});
+    const auditor = await this.subAgent(AudioAuditorAgent, `audio-auditor-${date}`);
+    const auditResult = await auditor.audit({ date });
+    await this.logStep(date, 'audio-auditing', auditResult.passed ? 'done' : 'failed', {
+      passed: auditResult.passed,
+      beatCount: auditResult.beatCount,
+      totalCharacters: auditResult.totalCharacters,
+      totalSizeBytes: auditResult.totalSizeBytes,
+      issueCount: auditResult.issues.length,
+      majorIssues: auditResult.issues.filter((i) => i.severity === 'major').map((i) => i.issue),
+    });
+    if (!auditResult.passed) {
+      const majorReasons = auditResult.issues
+        .filter((i) => i.severity === 'major')
+        .map((i) => i.issue)
+        .join('; ');
+      await observer.logAudioFailure(date, title, 'auditor', majorReasons);
+      return;
+    }
+
+    // ─── audio-publisher (second commit) ────────────────────────────
+    this.enterPhase('audio-publisher');
+    await this.logStep(date, 'audio-publishing', 'running', {});
+    const audioBeats: Record<string, string> = Object.fromEntries(
+      producerResult.beatAudioPaths.map((b) => [b.beatName, b.publicUrl]),
+    );
+    try {
+      const publisher = await this.subAgent(PublisherAgent, `audio-publisher-${date}`);
+      const publishResult = await publisher.publishAudio(filePath, audioBeats);
+      await this.env.DB
+        .prepare('UPDATE daily_pieces SET has_audio = 1 WHERE date = ?')
+        .bind(date)
+        .run()
+        .catch(() => {});
+      await this.logStep(date, 'audio-publishing', 'done', {
+        commitUrl: publishResult.commitUrl,
+        beatCount: producerResult.beatAudioPaths.length,
+      });
+      await observer.logAudioPublished(
+        date,
+        title,
+        producerResult.beatAudioPaths.length,
+        producerResult.totalCharacters,
+        publishResult.commitUrl,
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Publisher failed';
+      await this.logStep(date, 'audio-publishing', 'failed', { reason });
+      await observer.logAudioFailure(date, title, 'publisher', reason);
+    }
+  }
+
+  /**
+   * Re-run the audio pipeline for an already-published piece. Invoked
+   * from the admin dashboard's "Retry audio" button after an earlier
+   * audio failure (observer escalation).
+   *
+   * Steps: look up the piece + file path, read the committed MDX from
+   * GitHub, call runAudioPipeline. Idempotent — if audio already
+   * landed, Producer's R2 head-check skips generation, Auditor re-
+   * verifies, Publisher's splice is a no-op.
+   */
+  async retryAudio(date: string): Promise<void> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new Error(`retryAudio: invalid date "${date}"`);
+    }
+
+    const piece = await this.env.DB
+      .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
+      .bind(date)
+      .first<{ headline: string }>();
+    if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
+
+    // filePath lives in the publishing.done step's data column.
+    const pubRow = await this.env.DB
+      .prepare(
+        `SELECT data FROM pipeline_log
+         WHERE run_id = ? AND step = 'publishing' AND status = 'done'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(date)
+      .first<{ data: string | null }>();
+    if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
+    let filePath: string | null = null;
+    try {
+      filePath = JSON.parse(pubRow.data)?.filePath ?? null;
+    } catch { /* malformed JSON */ }
+    if (!filePath) throw new Error(`retryAudio: no filePath in publishing.done for ${date}`);
+
+    const publisher = await this.subAgent(PublisherAgent, `retry-reader-${date}`);
+    const current = await publisher.readPublishedMdx(filePath);
+    if (!current) throw new Error(`retryAudio: file not in repo: ${filePath}`);
+
+    await this.runAudioPipeline(date, current.mdx, filePath, piece.headline);
   }
 
   getStatus(): DirectorState {

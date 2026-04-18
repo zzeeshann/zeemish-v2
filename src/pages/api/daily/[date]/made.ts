@@ -8,6 +8,8 @@ import type {
   MadeCandidate,
   MadeCandidates,
   MadeFactClaim,
+  MadeAudio,
+  MadeAudioBeat,
 } from '../../../../lib/made-by';
 
 export const prerender = false;
@@ -43,6 +45,14 @@ export const GET: APIRoute = async ({ params, locals }) => {
     timeline: [],
     rounds: [],
     candidates: { total: 0, picked: null, alsoConsidered: [] },
+    audio: {
+      beats: [],
+      totalCharacters: 0,
+      totalSizeBytes: null,
+      model: null,
+      voiceId: null,
+      generatedAt: null,
+    },
   };
 
   // --- Piece metadata --------------------------------------------------
@@ -188,6 +198,41 @@ export const GET: APIRoute = async ({ params, locals }) => {
     };
     envelope.candidates = envelopeCandidates;
   } catch { /* leave empty */ }
+
+  // --- Audio rows (may be empty if audio hasn't landed yet) -----------
+  try {
+    const audioRes = await db
+      .prepare(
+        `SELECT beat_name, public_url, character_count, model, voice_id, generated_at
+         FROM daily_piece_audio WHERE date = ? ORDER BY generated_at ASC`,
+      )
+      .bind(date)
+      .all<{
+        beat_name: string;
+        public_url: string;
+        character_count: number;
+        model: string;
+        voice_id: string;
+        generated_at: number;
+      }>();
+    const rows = audioRes.results;
+    if (rows.length > 0) {
+      const beats: MadeAudioBeat[] = rows.map((r) => ({
+        beatName: r.beat_name,
+        publicUrl: r.public_url,
+        characterCount: r.character_count,
+      }));
+      const audio: MadeAudio = {
+        beats,
+        totalCharacters: rows.reduce((sum, r) => sum + r.character_count, 0),
+        totalSizeBytes: null, // not stored in D1 — R2 HEAD is agents-worker-only
+        model: rows[0].model,
+        voiceId: rows[0].voice_id,
+        generatedAt: rows[0].generated_at,
+      };
+      envelope.audio = audio;
+    }
+  } catch { /* leave audio empty */ }
 
   return new Response(JSON.stringify(envelope), {
     headers: {

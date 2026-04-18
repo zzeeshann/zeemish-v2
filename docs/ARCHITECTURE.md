@@ -20,7 +20,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Content collections (dailyPieces) with Zod schemas
 - [x] `<lesson-shell>` + `<lesson-beat>` Web Components for beat navigation (one beat at a time)
 - [x] Beat CSS in standalone `src/styles/beats.css` (not Tailwind-processed, survives purging)
-- [x] AudioPlayer component (shell — real audio via R2 when generated)
+- [x] AudioPlayer web component — beat-aware `<audio-player>` that reads `audioBeats: { beatName → publicUrl }` from frontmatter, listens for `lesson-beat:change` (emitted by `<lesson-shell>`) to swap clips, auto-advances to the next beat when a clip ends. Graceful degrade: missing audio shows "coming soon"; 404 shows "unavailable".
 - [x] BaseLayout + LessonLayout with breadcrumbs, date eyebrow, beat/subject meta line
 - [x] Progressive enhancement (without JS, beats show as long scroll)
 - [x] `formatDate()` and `formatTime()` helpers in `src/lib/format.ts`
@@ -40,7 +40,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — 13 agents, 2 paused)
+### Stage 4 — Agent Team (complete — 13 agents, all wired)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — pure orchestrator, zero LLM calls, scheduled daily at 2am UTC, manual trigger
 - [x] CuratorAgent — picks most teachable story, plans beats (restored from v10 deletion; owns its prompt file)
@@ -49,16 +49,16 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] StructureEditorAgent — reviews beat structure, pacing; writes learnings for both passing (confidence 60) and failing (40) drafts (owns its prompt file)
 - [x] FactCheckerAgent — verifies claims (two-pass: Claude + DuckDuckGo web search); exposes `searchAvailable` on result, Director logs an Observer warn when search fails so the pipeline honours the "no silent failure" principle (owns its prompt file)
 - [x] IntegratorAgent — merges audit feedback, revises draft, up to 3 rounds; stateless (fresh DO per day: `integrator-daily-${today}`) (owns its prompt file)
-- [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey), saves MP3 to R2 — **paused** (excluded from pipeline)
-- [x] AudioAuditorAgent — verifies audio files in R2, checks sizes — **paused** (excluded from pipeline)
+- [x] AudioProducerAgent — ElevenLabs TTS (Frederick Surrey, `eleven_multilingual_v2`, `mp3_44100_96`), saves per-beat MP3 to R2, writes `daily_piece_audio` rows. 20k-char budget cap, 3-attempt retry, request-stitching for prosodic continuity, "Zeemish → Zee-mish" alias preprocessing. Live 2026-04-18.
+- [x] AudioAuditorAgent — reads `daily_piece_audio` rows + HEADs R2, checks size (0.3×–3× of expected for 96 kbps narration at ~12.5 chars/sec), total char cap, missing objects. Live 2026-04-18.
 - [x] PublisherAgent — commits MDX to GitHub via Contents API
 - [x] ObserverAgent — logs events, provides digest/events endpoints
 - [x] LearnerAgent — watches engagement + writes learnings for future pieces; uses shared `extractJson` parser (merged from EngagementAnalyst + Reviser; owns its prompt file)
-- [x] Full pipeline: Scanner → Curator → Drafter → 3 parallel auditors → Integrator (if any gate fails) → Publisher
+- [x] Full pipeline: Scanner → Curator → Drafter → 3 parallel auditors → Integrator (if any gate fails) → Publisher (text commit) → Audio Producer → Audio Auditor → Publisher.publishAudio (metadata-only second commit splicing audioBeats). Text commit is atomic — newspaper-never-skips — audio retries asynchronously via admin dashboard button on failure.
 - [x] Auth on trigger endpoint (ADMIN_SECRET bearer token)
 - [x] Dashboard: `/dashboard/` (public factory floor) + `/dashboard/admin/` (ADMIN_EMAIL gated)
 - [x] Audit results persisted to D1 `audit_results` table (migration 0008 fixed the orphaned FK that had silently blocked all writes — see DECISIONS.md)
-- [x] R2 bucket `zeemish-audio` for audio storage (unused while audio paused)
+- [x] R2 bucket `zeemish-audio` for audio storage (agents worker writes per-beat MP3s at `audio/daily/{date}/{beat}.mp3`)
 - [x] Optional `SCANNER_RSS_FEEDS_JSON` env override lets ops change Scanner's feed list without a redeploy
 
 ### Stage 5 — First Course (removed)
@@ -104,7 +104,8 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 4. **Dashboard is in Astro site** not a separate `dashboard/` project.
 5. **Fact-Checker uses Claude reasoning only**, not Workers AI Search.
 6. **Daily pieces only** — courses removed, daily news-driven teaching is the only content type.
-7. **Audio failure doesn't block publishing** — text lesson still ships, audio issue logged (audio currently paused anyway).
-8. **Audio agents paused by design** — Audio Producer and Audio Auditor exist as files but are not wired into Director's pipeline. Cost control until text pipeline is fully trusted.
-9. **Per-agent prompt files** — every pipeline agent owns its prompt file: `curator-prompt.ts`, `drafter-prompt.ts`, `voice-auditor-prompt.ts`, `structure-editor-prompt.ts`, `fact-checker-prompt.ts`, `integrator-prompt.ts`, `learner-prompt.ts`. Matches the "one prompt per agent, co-located" principle in AGENTS.md. `shared/prompts.ts` is a tombstone.
-10. **No silent failure enforcement** — Director logs an Observer warn (severity='warn') when FactChecker's web search is unavailable, so the draft is known to have been assessed by Claude's first-pass only.
+7. **Audio failure doesn't block publishing — ship-and-retry** — text commits the moment Integrator approves. Audio runs as a separate phase; if Producer, Auditor, or `publishAudio` fails, Observer logs an escalation and the admin dashboard shows a "Retry audio" button on the piece's deep-dive page (`/dashboard/admin/piece/{date}/`). A newspaper never skips a day.
+8. **Metadata carve-out to the permanence rule** — `publishAudio` modifies an already-committed MDX file to add `audioBeats: {…}` to frontmatter. This is a deliberate carve-out: the "published pieces are permanent" hard rule governs teaching **content** (beats, narrative, facts), not frontmatter **metadata** (`voiceScore`, `qualityFlag`, `audioBeats`). `publishToPath` still refuses to overwrite; `publishAudio` is the only metadata-only path. See DECISIONS 2026-04-18.
+9. **Site worker serves `/audio/*` from R2 via an Astro catch-all route** — `src/pages/audio/[...path].ts` + `AUDIO_BUCKET` R2 binding on the site worker's wrangler.toml. Not a middleware rule (initially built that way but Cloudflare Static Assets intercepts unrecognised paths with the prerendered 404.html before middleware runs; registering as a real Astro route makes the worker run). Range requests supported for seeking. Immutable Cache-Control since published audio never changes.
+10. **Per-agent prompt files** — every pipeline agent owns its prompt file: `curator-prompt.ts`, `drafter-prompt.ts`, `voice-auditor-prompt.ts`, `structure-editor-prompt.ts`, `fact-checker-prompt.ts`, `integrator-prompt.ts`, `learner-prompt.ts`. Matches the "one prompt per agent, co-located" principle in AGENTS.md. `shared/prompts.ts` is a tombstone.
+11. **No silent failure enforcement** — Director logs an Observer warn (severity='warn') when FactChecker's web search is unavailable, so the draft is known to have been assessed by Claude's first-pass only.

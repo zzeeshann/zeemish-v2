@@ -278,6 +278,31 @@ class MadeDrawer extends HTMLElement {
       `);
     }
 
+    // --- Audio ---------------------------------------------------------
+    if (env.audio && env.audio.beats.length > 0) {
+      const a = env.audio;
+      const modelLabel = a.model === 'eleven_multilingual_v2'
+        ? 'ElevenLabs Multilingual v2'
+        : (a.model ?? 'ElevenLabs');
+      html.push(`
+        <section class="made-section">
+          <h3 class="made-section-header">Audio</h3>
+          <p class="made-section-note">
+            ${a.beats.length} beat${a.beats.length === 1 ? '' : 's'} narrated by
+            <strong>Frederick Surrey</strong> via ${escapeHtml(modelLabel)} ·
+            ${a.totalCharacters.toLocaleString()} characters
+          </p>
+          <ul class="made-list" style="margin-top:0.5rem">
+            ${a.beats
+              .map(
+                (b) => `<li>${escapeHtml(b.beatName)} — ${b.characterCount.toLocaleString()} chars</li>`,
+              )
+              .join('')}
+          </ul>
+        </section>
+      `);
+    }
+
     // --- Commit link ---------------------------------------------------
     if (env.piece?.commitUrl || env.piece?.filePath) {
       const published = env.piece.publishedAt

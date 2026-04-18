@@ -4,5 +4,6 @@
  */
 import './lesson-beat';
 import './lesson-shell';
+import './audio-player';
 import './zita-chat';
 import './made-drawer';

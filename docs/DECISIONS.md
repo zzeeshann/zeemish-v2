@@ -2,6 +2,29 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-18: Un-pause audio pipeline (ship-and-retry, metadata carve-out)
+**Context:** Audio Producer + Audio Auditor had been paused since build (not wired into Director's pipeline, zero ElevenLabs spend possible by accident). Text pipeline was trusted; time to un-pause.
+
+**Decision:** Wire audio in as a phase AFTER Publisher, not before. Ship text the moment Integrator approves. Run Audio Producer → Audio Auditor → `Publisher.publishAudio` (second commit splicing `audioBeats` into frontmatter) as a best-effort chase. Failures escalate to Observer; the admin piece-deep-dive page shows a "Retry audio" button that POSTs `/audio-retry` and re-runs the audio pipeline against the committed MDX.
+
+**Reason — ship-and-retry over atomic:** The user framed it clearly: "have you seen a day where a newspaper didn't publish?" Strict atomic (block text publish on audio failure) would let ElevenLabs outages, Workers quirks, or a one-character typo in the transcript skip a day. A daily-cadence product can't afford that. Audio is a preferred-but-not-required enhancement. Text is the contract.
+
+**Reason — metadata carve-out:** The `publishAudio` second commit modifies an already-published MDX file. A strict reading of CLAUDE.md's "Published pieces are permanent. No agent writes to, revises, regenerates, or updates any published piece." forbids this. User's explicit clarification: the rule governs teaching **content** (beats, narrative, facts), not frontmatter **metadata** (voiceScore, qualityFlag, audioBeats). `publishToPath` still refuses to overwrite (content rule intact). `publishAudio` is the only metadata-update path.
+
+**Decisions bundled in:**
+- **Model:** stay on `eleven_multilingual_v2`. `eleven_v3` is alpha + audio tags, no prosodic stitching, wrong fit for calm teaching narration. Flash v2.5 is speed-not-quality.
+- **Voice:** Frederick Surrey (`j9jfwdrw7BRfcR43Qohk`), added to "My Voices" to guard against shared-library removal.
+- **Format:** `mp3_44100_96`. Indistinguishable from 128 for a single voice; ~25% smaller R2 + egress.
+- **Pronunciation:** "Zeemish" → "Zee-mish" via `prepareForTTS` text substitution. SSML not supported; PLS dictionaries work on v2 only for alias rules, not IPA — text substitution is simpler and equivalent for one brand word.
+- **Budget:** 20,000 chars/piece hard cap (`AudioBudgetExceededError`). Sized for a 12-beat newspaper-style piece (~$2/day at $0.10/1k chars). Checked pre-flight, before any API call.
+- **Granularity:** per-beat MP3s. `<lesson-shell>` → `<audio-player>` sync lets readers jump to any beat; future 12-beat newspaper pieces work cleanly on this shape.
+- **Retry:** Producer does 3-attempt exponential backoff internally on 5xx. 4xx fails fast (bad key, quota). Director escalates to Observer on any uncaught failure. Admin dashboard retry button re-runs the audio pipeline against the committed MDX.
+- **Schema:** new `daily_piece_audio` table (per-beat rows) is the query source of truth. `daily_pieces.has_audio` boolean for fast dashboard filtering. Frontmatter `audioBeats` map is the render source of truth for the site. Both kept in sync by `Publisher.publishAudio`.
+
+**References:** `migrations/0010_audio_pipeline.sql`, `agents/src/audio-producer.ts`, `agents/src/audio-auditor.ts`, `agents/src/director.ts` (`runAudioPipeline`, `retryAudio`), `agents/src/publisher.ts` (`publishAudio`), `src/interactive/audio-player.ts`, `src/components/AudioPlayer.astro`, `src/pages/audio/[...path].ts` (site worker's R2 audio route).
+
+**Deploy-time gotcha learned 2026-04-18:** Cloudflare Static Assets intercepts unrecognised paths with the prerendered 404.html **before** the worker runs, so a middleware-only `/audio/*` handler never executed. Fix: register as a real Astro route (`src/pages/audio/[...path].ts`). Also: manual `wrangler deploy` from a local build can overwrite the auto-deploy from GitHub Actions if local state is out of sync (e.g., Publisher just pushed `audioBeats` to a piece's frontmatter on GitHub — `git pull` before rebuilding).
+
 ## 2026-04-16: Chose pnpm over npm
 **Context:** Setting up the repo.
 **Decision:** Use pnpm for package management.

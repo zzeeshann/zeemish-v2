@@ -8,7 +8,7 @@ import '../styles/zita.css';
 interface Props {
   title: string;
   estimatedTime: string;
-  audioSrc?: string;
+  audioBeats?: Record<string, string>;
   beatCount?: number;
   subject?: string;
   date?: string;
@@ -18,7 +18,7 @@ interface Props {
   description?: string;
 }
 
-const { title, estimatedTime, audioSrc, beatCount, subject, date, voiceScore, qualityFlag, description } = Astro.props;
+const { title, estimatedTime, audioBeats, beatCount, subject, date, voiceScore, qualityFlag, description } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
 // Tier is a quiet, consistent signal shown in the metadata line — same
 // visual weight as the date. Every piece shows its tier (not just rough
@@ -63,21 +63,13 @@ if (date) {
     )}
   </p>
 
-  {audioSrc && (
-    <div class="mb-8">
-      <AudioPlayer audioSrc={audioSrc} />
-    </div>
-  )}
+  <div class="mb-8">
+    <AudioPlayer audioBeats={audioBeats} />
+  </div>
 
   <article class="prose">
     <slot />
   </article>
-
-  {!audioSrc && (
-    <p class="mt-12 text-xs text-zee-muted/70 italic">
-      Audio version coming soon.
-    </p>
-  )}
 
   <zita-chat
     course="daily"

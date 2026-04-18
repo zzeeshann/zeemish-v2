@@ -79,7 +79,7 @@ wrangler secret put SCANNER_RSS_FEEDS_JSON
 ## D1 Database
 
 ### Run migrations
-There are 7 migrations (`0001_init.sql` … `0007_pipeline_log.sql`).
+There are 10 migrations (`0001_init.sql` … `0010_audio_pipeline.sql`).
 Run them in order on a fresh database:
 ```bash
 for f in migrations/*.sql; do
@@ -167,6 +167,7 @@ DATE=$(date -u +%Y-%m-%d)
 npx wrangler d1 execute zeemish --remote --command \
   "DELETE FROM daily_pieces WHERE date = '$DATE'; \
    DELETE FROM daily_candidates WHERE date = '$DATE'; \
+   DELETE FROM daily_piece_audio WHERE date = '$DATE'; \
    DELETE FROM pipeline_log WHERE run_id = '$DATE'; \
    DELETE FROM audit_results WHERE task_id LIKE 'daily/$DATE%'; \
    DELETE FROM observer_events WHERE created_at >= (strftime('%s','now','start of day') * 1000);"
@@ -219,6 +220,52 @@ GET /api/dashboard/stats      # Library counters
 GET  /api/dashboard/analytics # Engagement data
 GET  /api/dashboard/observer  # Observer events
 POST /api/dashboard/observer  # Acknowledge event { eventId }
+```
+
+## Audio — retry, troubleshooting, cost
+
+### Retry audio for a piece
+If an audio phase failed (observer escalation titled `Audio failure: …`), visit `/dashboard/admin/piece/{date}/` and press **Retry audio**. That proxies to `POST /audio-retry?date={date}` on the agents worker, which re-reads the committed MDX from GitHub and re-runs Producer → Auditor → publishAudio. Idempotent: R2 head-check skips already-generated beats; `INSERT OR REPLACE` refreshes rows; `publishAudio` detects identical content and returns without a new commit.
+
+Via curl:
+```bash
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?date=2026-04-18" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+### Audio failure modes — what Observer will say
+- **"Audio failure: {title}"** phase `producer` + reason "Over 20000-char cap…" — piece is longer than the budget. Shorten the piece (trim beats) or bump `CHAR_CAP` in `audio-producer.ts`.
+- **"Audio failure: {title}"** phase `producer` + reason "ElevenLabs 401/403" — bad/expired `ELEVENLABS_API_KEY`. Rotate it via `wrangler secret put`.
+- **"Audio failure: {title}"** phase `producer` + reason "ElevenLabs 429" — concurrency or rate limit. Wait and retry. If recurring, upgrade the ElevenLabs plan tier.
+- **"Audio failure: {title}"** phase `auditor` + reason "Audio file missing in R2…" — producer wrote a row but R2 put silently failed (rare). Retry.
+- **"Audio failure: {title}"** phase `auditor` + reason "Audio suspiciously small…" — truncated download. Retry.
+- **"Audio failure: {title}"** phase `publisher` + reason "GitHub API error…" — token expired or repo write permissions changed. Check `GITHUB_TOKEN`.
+
+### Cost monitoring
+`daily_piece_audio.character_count` is the source of truth for ElevenLabs spend. At $0.10 / 1k chars on pay-as-you-go:
+```bash
+# Chars used in the last 30 days
+npx wrangler d1 execute zeemish --remote --command \
+  "SELECT SUM(character_count) as chars FROM daily_piece_audio WHERE date >= date('now', '-30 day');"
+
+# Chars used today
+npx wrangler d1 execute zeemish --remote --command \
+  "SELECT COALESCE(SUM(character_count), 0) as chars FROM daily_piece_audio WHERE date = date('now');"
+```
+
+### Force-regenerate one beat's audio
+(Rare — normally covered by the retry flow above.) Delete the R2 object + row, then retry:
+```bash
+# Delete from R2 (set BUCKET to zeemish-audio)
+npx wrangler r2 object delete zeemish-audio/audio/daily/2026-04-18/hook.mp3
+
+# Delete the row
+npx wrangler d1 execute zeemish --remote --command \
+  "DELETE FROM daily_piece_audio WHERE date = '2026-04-18' AND beat_name = 'hook';"
+
+# Retry
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?date=2026-04-18" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
 
 ## Revert a bad publish

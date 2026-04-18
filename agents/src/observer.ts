@@ -74,6 +74,40 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Audio landed — text + audio both live. Info severity, no action
+   *  needed. Fires AFTER publisher.publishAudio second commit. */
+  async logAudioPublished(
+    date: string,
+    title: string,
+    beatCount: number,
+    totalCharacters: number,
+    commitUrl: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'info',
+      title: `Audio published: ${title}`,
+      body: `Audio for "${title}" landed in ${beatCount} beats (${totalCharacters} chars). Commit: ${commitUrl}`,
+      context: { date, beatCount, totalCharacters, commitUrl },
+    });
+  }
+
+  /** Audio pipeline failed somewhere — text is already live, admin
+   *  needs to know so they can retry. Escalation severity so it
+   *  surfaces in the admin feed next to low-quality publishes. */
+  async logAudioFailure(
+    date: string,
+    title: string,
+    phase: 'producer' | 'auditor' | 'publisher',
+    reason: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'escalation',
+      title: `Audio failure: ${title}`,
+      body: `Audio ${phase} failed for "${title}" on ${date}. Text is already live. Reason: ${reason}. Retry from admin dashboard.`,
+      context: { date, phase, reason },
+    });
+  }
+
   /** Get recent events for the dashboard */
   async getRecentEvents(limit = 20): Promise<ObserverEvent[]> {
     try {

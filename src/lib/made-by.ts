@@ -74,12 +74,34 @@ export interface MadeCandidates {
   alsoConsidered: MadeCandidate[];
 }
 
+export interface MadeAudioBeat {
+  beatName: string;
+  publicUrl: string;
+  characterCount: number;
+}
+
+/**
+ * Audio state for a published piece. Populated only if audio landed
+ * (has_audio = 1 on daily_pieces + rows in daily_piece_audio). If
+ * audio hasn't run yet or failed, `beats` is empty — the drawer
+ * shows nothing rather than lying about the state.
+ */
+export interface MadeAudio {
+  beats: MadeAudioBeat[];
+  totalCharacters: number;
+  totalSizeBytes: number | null;
+  model: string | null;
+  voiceId: string | null;
+  generatedAt: number | null;
+}
+
 export interface MadeEnvelope {
   date: string;
   piece: MadePiece | null;
   timeline: MadeTimelineStep[];
   rounds: MadeRound[];
   candidates: MadeCandidates;
+  audio: MadeAudio;
 }
 
 /**

@@ -17,6 +17,11 @@ const dailyPieces = defineCollection({
     beatCount: z.number(),
     description: z.string(),
     audioSrc: z.string().optional(),
+    // Per-beat audio map: { beatName: publicUrl }. Spliced in by
+    // Publisher.publishAudio (second commit) after AudioProducer +
+    // AudioAuditor succeed. Missing on pieces whose audio hasn't landed
+    // yet (text-first ship-and-retry) and on legacy pre-un-pause pieces.
+    audioBeats: z.record(z.string(), z.string()).optional(),
     // Voice auditor's 0-100 score from the last audit round, spliced in
     // at publish time. Feeds the public-facing audit tier (polished /
     // solid / rough) via src/lib/audit-tier.ts. Optional because older

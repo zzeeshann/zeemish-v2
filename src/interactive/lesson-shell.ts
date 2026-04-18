@@ -17,6 +17,7 @@ class LessonShell extends HTMLElement {
   private currentIndex = 0;
   private nav: HTMLElement | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private audioEndedHandler: EventListener | null = null;
 
   private get storageKey(): string {
     return `zeemish-beat:${window.location.pathname}`;
@@ -78,6 +79,13 @@ class LessonShell extends HTMLElement {
     };
     window.addEventListener('keydown', this.keyHandler);
 
+    // Auto-advance when <audio-player> finishes the current beat's
+    // clip. Last beat is a no-op — we don't jump to /daily/ from audio.
+    this.audioEndedHandler = () => {
+      if (this.currentIndex < this.beats.length - 1) this.go(1);
+    };
+    window.addEventListener('audio-player:ended', this.audioEndedHandler);
+
     this.render();
   }
 
@@ -87,6 +95,10 @@ class LessonShell extends HTMLElement {
     if (this.keyHandler) {
       window.removeEventListener('keydown', this.keyHandler);
       this.keyHandler = null;
+    }
+    if (this.audioEndedHandler) {
+      window.removeEventListener('audio-player:ended', this.audioEndedHandler);
+      this.audioEndedHandler = null;
     }
     // Show all beats again when component disconnects
     for (const beat of this.beats) {
@@ -149,6 +161,14 @@ class LessonShell extends HTMLElement {
         this.go(1);
       }
     });
+
+    // Announce the current beat so <audio-player> can swap clips.
+    const currentName = this.beats[this.currentIndex]?.getAttribute('name') ?? null;
+    window.dispatchEvent(
+      new CustomEvent('lesson-beat:change', {
+        detail: { beatName: currentName, index: this.currentIndex, total: this.beats.length },
+      }),
+    );
   }
 
   private go(direction: -1 | 1) {

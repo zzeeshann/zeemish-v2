@@ -43,6 +43,10 @@ export interface BeatPlan {
 /**
  * Which pipeline phase Director is coordinating.
  * Each value names the agent currently running — Director itself only routes.
+ *
+ * Audio phases run AFTER publisher — text ships first (newspaper never
+ * skips a day), then audio is produced + audited, then publisher does a
+ * second commit splicing the audio URLs into frontmatter.
  */
 export type DirectorPhase =
   | 'scanner'
@@ -50,7 +54,10 @@ export type DirectorPhase =
   | 'drafter'
   | 'auditors'
   | 'integrator'
-  | 'publisher';
+  | 'publisher'
+  | 'audio-producer'
+  | 'audio-auditor'
+  | 'audio-publisher';
 
 /** Director agent state — pure orchestrator, no content work */
 export interface DirectorState {
