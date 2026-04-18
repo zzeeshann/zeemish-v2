@@ -107,7 +107,7 @@ docs/handoff/           Original architecture + specs
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 13 agents, endpoints, secrets
-- `docs/SCHEMA.md` — all 13 D1 tables, 7 migrations
+- `docs/SCHEMA.md` — all 13 D1 tables, 10 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
@@ -115,15 +115,13 @@ docs/handoff/           Original architecture + specs
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
 - Audio-Auditor does file checks only (no STT round-trip)
-- Site worker needs R2 binding + `/audio/*` route so audio URLs resolve in prod (Phase 9 deploy work — the admin retry flow is ready but audio URLs will 404 from the site until this lands)
+- Audio `/audio/*` route returns 200 with full body for Range requests instead of 206 partial — browsers buffer the whole clip rather than seek. Per-beat clips are small so it's tolerable; revisit if seek behaviour or bandwidth becomes a concern
 - Rate limiter is KV-backed (Workers KV, eventually consistent)
 - CSP uses `unsafe-inline` for scripts (required by Astro)
 - Dashboard pipeline API's `isRunning` heuristic is buggy on the API itself — admin's consumer fixes it inline; if other consumers want the right answer, fix the endpoint properly
-- `public/_headers` has full CSP/HSTS but the live response shows none of them — Cloudflare Workers Static Assets uses a different mechanism, needs investigation
 - Zita chat panel uses white background — feels off-brand vs the cream `zee-bg` used elsewhere; rebrand needed
 - OG image is one static SVG for every page; per-piece dynamic OG (headline + tier rendered to PNG at the edge) is a future Worker route project
 - No skip-to-content link for keyboard users; full WCAG audit deferred
-- Daily-piece engagement (views, completions, drop-off) is not wired. The `engagement` table accepts `course_id`/`lesson_id` keys; daily pieces have neither. Two paths: (a) repurpose by passing `course_id='daily'` + `lesson_id={date}` from `lesson-shell.ts`, or (b) add a `daily_engagement` table. Until then, `/dashboard/admin/` shows a placeholder, not misleading legacy data.
 
 ## Design pass (2026-04-17)
 - Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.
@@ -136,6 +134,12 @@ docs/handoff/           Original architecture + specs
 - Site polish bundle (2026-04-18): custom on-brand 404, OG/Twitter meta + branded SVG OG image, Google Fonts preconnect, library filter focus ring restored, drawer no longer fetches on every page mount (lazy-loads on first open), dashboard "How it's holding up" rows stack on mobile.
 - Audio pipeline live (2026-04-18): un-paused the two audio agents. New migration `0010_audio_pipeline.sql` adds `daily_piece_audio` (per-beat rows: r2_key, public_url, character_count, request_id, model, voice_id) + `has_audio` on `daily_pieces`. Producer switched to `mp3_44100_96`, added `use_speaker_boost`/`speed: 0.95`/request-stitching/"Zeemish → Zee-mish" alias, 20k-char budget cap (`AudioBudgetExceededError`), 3-attempt retry on 5xx, 4xx fails fast. Auditor rewritten to read rows + HEAD R2 (0.3×–3× expected-size tolerance). Director gained `runAudioPipeline` (ship-and-retry after Publisher) + public `retryAudio(date)`. Publisher gained `publishAudio` (second commit, idempotent, metadata-only). AudioPlayer.astro is now a `<audio-player>` web component that listens for `lesson-beat:change` and auto-advances on clip end. Transparency drawer gains Audio section. Admin piece deep-dive gains Audio section + Retry button (proxies `/audio-retry` → Director). `publishToPath` still refuses to overwrite content — `publishAudio` is an allowed metadata-only carve-out (see DECISIONS 2026-04-18).
 - Admin control room + per-piece deep-dive + login refresh (2026-04-18): `/dashboard/admin/` rewritten to match the design system — today's run, system-state stat grid, observer events (with in-place ack), all-pieces list with filter, pipeline history. New route `/dashboard/admin/piece/[date]/` shows everything about one day: full timeline, all rounds with full violations/claims/issues (no truncation), all 50 candidates (no cap), observer events for that day, raw JSON dumps. Login page updated to use the eyebrow/title/subtitle header. Engagement section dropped from admin (legacy lessons-era data), placeholder pointing to CLAUDE.md. `isRunning` heuristic fixed inline on admin's poller (step name + status, not just step name).
+
+## Launch readiness (2026-04-18)
+Pre-launch pass before pointing zeemish.io at the new worker. Audit revealed several "Remaining minor items" were already done (audio R2 wiring, /audio/* route, engagement writes via lesson-shell); the docs were drifting. Real fixes:
+- **`audio_plays` engagement now wired**: `<audio-player>` dispatches `audio-player:firstplay` on first play in a session, `<lesson-shell>` listens and POSTs `event_type='audio_play'` once per session per piece. Previously the column was always 0 — silent gap. Files: [src/interactive/audio-player.ts](src/interactive/audio-player.ts), [src/interactive/lesson-shell.ts](src/interactive/lesson-shell.ts).
+- **Admin engagement widget rendered**: `/dashboard/admin/` now shows per-piece views/completions/audio_plays/drop-off, aggregated across activity dates via `GROUP BY lesson_id` from the existing `engagement` table. Each row deep-links to the per-piece admin route. Replaces the honest placeholder. Reader-side data was already flowing from lesson-shell since the daily-pieces era — only the surface was missing.
+- **Security headers moved into middleware**: `public/_headers` was silently ignored by Cloudflare Workers Static Assets (live response had zero security headers). Now `src/middleware.ts` applies CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response. Required `run_worker_first = true` in `[assets]` so prerendered pages (home, daily, library) also pick them up — without this, Static Assets serves prerendered files without invoking the worker. CSP `connect-src 'self'` (Agents worker is reached via service binding, not browser fetch). `public/_headers` deleted to avoid future confusion.
 
 ## Quality surfacing (2026-04-17)
 Every published piece shows a tier in the metadata line: `Polished` (voice ≥ 85), `Solid` (70–84), `Rough` (< 70). Derived at render time from `voiceScore` in MDX frontmatter via `src/lib/audit-tier.ts`. No archive filtering — a published piece is a published piece. Admin surface (`/dashboard/admin/`) keeps raw `Voice: N/100` + `LOW QUALITY` labels for operator truth. See `docs/DECISIONS.md` 2026-04-17 "Soften quality surfacing" for the full rationale.

@@ -20,6 +20,7 @@ class AudioPlayer extends HTMLElement {
   private audio: HTMLAudioElement | null = null;
   private audioBeats: AudioBeatsMap = {};
   private currentBeat: string | null = null;
+  private hasReportedFirstPlay = false;
 
   private playBtn: HTMLButtonElement | null = null;
   private progressEl: HTMLElement | null = null;
@@ -109,6 +110,10 @@ class AudioPlayer extends HTMLElement {
     if (!this.audio) return;
     if (this.audio.paused) {
       this.audio.play().catch(() => {});
+      if (!this.hasReportedFirstPlay) {
+        this.hasReportedFirstPlay = true;
+        window.dispatchEvent(new CustomEvent('audio-player:firstplay'));
+      }
     } else {
       this.audio.pause();
     }

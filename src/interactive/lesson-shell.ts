@@ -18,6 +18,7 @@ class LessonShell extends HTMLElement {
   private nav: HTMLElement | null = null;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private audioEndedHandler: EventListener | null = null;
+  private audioFirstPlayHandler: EventListener | null = null;
 
   private get storageKey(): string {
     return `zeemish-beat:${window.location.pathname}`;
@@ -86,6 +87,10 @@ class LessonShell extends HTMLElement {
     };
     window.addEventListener('audio-player:ended', this.audioEndedHandler);
 
+    // Track audio engagement once per session (first play in this view).
+    this.audioFirstPlayHandler = () => this.trackEngagement('audio_play');
+    window.addEventListener('audio-player:firstplay', this.audioFirstPlayHandler);
+
     this.render();
   }
 
@@ -99,6 +104,10 @@ class LessonShell extends HTMLElement {
     if (this.audioEndedHandler) {
       window.removeEventListener('audio-player:ended', this.audioEndedHandler);
       this.audioEndedHandler = null;
+    }
+    if (this.audioFirstPlayHandler) {
+      window.removeEventListener('audio-player:firstplay', this.audioFirstPlayHandler);
+      this.audioFirstPlayHandler = null;
     }
     // Show all beats again when component disconnects
     for (const beat of this.beats) {

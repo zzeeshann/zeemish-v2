@@ -2,6 +2,8 @@
 
 How to run, deploy, operate, and troubleshoot. Written for a developer who just cloned the repo.
 
+> **URLs in this document.** The site is in the process of moving from `zeemish-v2.zzeeshann.workers.dev` to `zeemish.io` (the agents worker remains on `zeemish-agents.zzeeshann.workers.dev` — it's an internal API, not user-facing). Until the cutover commit lands, use the workers.dev URLs as written below. After cutover, replace `https://zeemish-v2.zzeeshann.workers.dev` with `https://zeemish.io` everywhere in this file.
+
 ## Prerequisites
 - Node.js 20+
 - pnpm (`npm install -g pnpm`)

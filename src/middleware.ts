@@ -18,20 +18,43 @@ import { createUser, getUser } from './lib/db';
  * paths. Putting it at a route makes Astro recognise /audio/* as a
  * live path, which routes through the worker instead.
  */
+
+// Security headers applied to every response. `public/_headers` is
+// ignored by Cloudflare Workers Static Assets, so we set them here.
+// connect-src: 'self' covers the agents worker too — it's reached via
+// service binding in the worker, not from the browser.
+function applySecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; media-src 'self'; frame-ancestors 'none'",
+  );
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export const onRequest = defineMiddleware(async (context, next) => {
   const url = new URL(context.request.url);
 
   // Audio route is public — skip auth for it. The actual serving is
   // done by src/pages/audio/[...path].ts.
   if (url.pathname.startsWith('/audio/')) {
-    return next();
+    return applySecurityHeaders(await next());
   }
 
   // Only run auth on server-rendered routes
   const serverRoutes = ['/api/', '/account', '/login', '/dashboard', '/auth/'];
   const isServerRoute = serverRoutes.some((prefix) => url.pathname.startsWith(prefix));
   if (!isServerRoute) {
-    return next();
+    return applySecurityHeaders(await next());
   }
 
   // CSRF protection: reject cross-origin POST requests
@@ -42,10 +65,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
       try {
         const originHost = new URL(origin).host;
         if (originHost !== host) {
-          return new Response('Forbidden', { status: 403 });
+          return applySecurityHeaders(new Response('Forbidden', { status: 403 }));
         }
       } catch {
-        return new Response('Forbidden', { status: 403 });
+        return applySecurityHeaders(new Response('Forbidden', { status: 403 }));
       }
     }
   }
@@ -68,11 +91,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
     await createUser(db, userId);
     context.locals.userId = userId;
 
-    const response = await next();
+    const response = applySecurityHeaders(await next());
     response.headers.append('Set-Cookie', sessionCookie(userId));
     return response;
   }
 
   context.locals.userId = userId;
-  return next();
+  return applySecurityHeaders(await next());
 });

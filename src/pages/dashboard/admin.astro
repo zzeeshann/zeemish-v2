@@ -49,6 +49,16 @@ let errorsThisWeek = 0;
 let avgRevisionsLifetime: number | null = null;
 let pipelineHistory: { runId: string; finalStep: string; finalStatus: string; data: any; tMs: number }[] = [];
 
+type EngagementRow = {
+  lesson_id: string;
+  views: number;
+  completions: number;
+  audio_plays: number;
+  top_drop_off: string | null;
+  last_active: string;
+};
+let engagement: EngagementRow[] = [];
+
 try {
   // Observer events — last 30 (raise the cap from 20 so admin can audit further back).
   const events = await db
@@ -138,6 +148,25 @@ try {
     data: r.data ? safeJson(r.data) : {},
     tMs: r.created_at,
   }));
+
+  // Engagement per daily piece. lesson-shell POSTs course_id='daily', lesson_id={piece_date}.
+  // Aggregate across activity dates (engagement.date) so each piece is one row.
+  const engagementRes = await db
+    .prepare(
+      `SELECT lesson_id,
+              SUM(views) AS views,
+              SUM(completions) AS completions,
+              SUM(audio_plays) AS audio_plays,
+              MAX(drop_off_beat) AS top_drop_off,
+              MAX(date) AS last_active
+       FROM engagement
+       WHERE course_id = 'daily'
+       GROUP BY lesson_id
+       ORDER BY lesson_id DESC
+       LIMIT 30`,
+    )
+    .all<EngagementRow>();
+  engagement = engagementRes.results;
 } catch { /* D1 may be empty in dev */ }
 
 function safeJson(input: string): any {
@@ -368,13 +397,45 @@ function shortDate(iso: string): string {
     </section>
   )}
 
-  <!-- Engagement (honest placeholder) -->
-  <section class="mb-12">
-    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Engagement</h2>
-    <p class="text-sm text-zee-muted leading-relaxed">
-      Per-piece reader engagement (views, completions, drop-off) is not yet tracked for daily pieces. The legacy
-      <code class="text-xs bg-zee-border/40 px-1 rounded">engagement</code> table holds reader data from the deleted lessons era and is no longer surfaced here. Path to enable: see <code class="text-xs">CLAUDE.md → Remaining minor items</code>.
-    </p>
+  <!-- Engagement -->
+  <section class="mb-10">
+    <div class="flex items-baseline justify-between gap-4 mb-4">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Engagement</h2>
+      <span class="text-xs text-zee-muted">{engagement.length} {engagement.length === 1 ? 'piece' : 'pieces'}</span>
+    </div>
+    {engagement.length === 0 ? (
+      <p class="text-sm text-zee-muted italic py-4">No reader activity recorded yet.</p>
+    ) : (
+      <ul class="divide-y divide-zee-border/60">
+        {engagement.map((e) => {
+          const completionPct = e.views > 0 ? Math.round((e.completions / e.views) * 100) : 0;
+          return (
+            <li>
+              <a href={`/dashboard/admin/piece/${e.lesson_id}/`} class="flex items-start gap-4 py-3 group">
+                <div class="flex-1 min-w-0">
+                  <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
+                    <span class="text-zee-text font-medium">{shortDate(e.lesson_id)}</span>
+                    <span class="opacity-40" aria-hidden="true">·</span>
+                    <span><span class="text-zee-text">{e.views}</span> {e.views === 1 ? 'view' : 'views'}</span>
+                    <span class="opacity-40" aria-hidden="true">·</span>
+                    <span><span class="text-zee-text">{e.completions}</span> done ({completionPct}%)</span>
+                    <span class="opacity-40" aria-hidden="true">·</span>
+                    <span><span class="text-zee-text">{e.audio_plays}</span> audio</span>
+                    {e.top_drop_off && (
+                      <>
+                        <span class="opacity-40" aria-hidden="true">·</span>
+                        <span>drop @ <span class="text-zee-text">{e.top_drop_off}</span></span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span class="text-xs text-zee-muted opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">→</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
   </section>
 </BaseLayout>
 

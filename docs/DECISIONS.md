@@ -2,6 +2,25 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-18: Launch-readiness pass before zeemish.io domain swap
+**Context:** About to retire the old `zeemish.io` (separate breathing-tools product) and bind `zeemish-v2` to the apex. Audited what was actually broken vs. what CLAUDE.md *claimed* was broken. CLAUDE.md "Remaining minor items" had drifted: site worker R2 binding and `/audio/*` route were already shipped, daily-piece engagement writes were already firing from `<lesson-shell>`, only the surface was missing. Real launch blockers turned out to be smaller and different.
+
+**Decisions made in this pass:**
+
+1. **Wire `audio_plays` engagement once-per-session.** `<audio-player>` knows when audio plays; `<lesson-shell>` owns the engagement HTTP. Bridge them with a `audio-player:firstplay` custom event (paused→playing transition, fires once per page load via `hasReportedFirstPlay` guard). Lesson-shell already had `trackEngagement('audio_play')` plumbing. Alternative considered: inline POST in audio-player. Rejected — duplicates URL-parsing logic for course_id/lesson_id that lesson-shell already does, and event-based keeps audio-player free of HTTP concerns.
+
+2. **Surface engagement on admin via server-side query.** Admin is a `.astro` page with full D1 access — no need to call the JSON `/api/dashboard/analytics` endpoint client-side. One `GROUP BY lesson_id` query; rows render with the same Tailwind/eyebrow patterns as the All Pieces list. Each row deep-links to `/dashboard/admin/piece/{lesson_id}/`. The legacy `analytics.ts` endpoint is now unused but kept (could become useful for scripted admin tooling later).
+
+3. **Move security headers from `public/_headers` into middleware + flip `run_worker_first = true`.** Cloudflare Workers Static Assets does not honour `_headers` (that's Cloudflare Pages, a different product). Live response had ZERO security headers despite a fully-populated `_headers` file. Middleware can apply headers — but only runs for requests that hit the worker, so prerendered pages (home, daily, library) were skipped. Two options: (a) copy headers into a build-time HTML transform, or (b) `run_worker_first = true` so the worker handles every request including static assets. Picked (b): one extra worker invocation per asset, negligible at our scale, single source of truth, no build-step gymnastics. Cost: paying ~1ms CPU per asset request that previously was free. Worth it for headers correctness across the full surface. `public/_headers` deleted to prevent future devs from trusting it.
+
+4. **CSP simplified.** Old policy hard-coded `connect-src https://zeemish-agents.zzeeshann.workers.dev` because the live `_headers` was the model. New policy: `connect-src 'self'`. The site does NOT call the Agents worker from the browser — site→agents traffic uses the Cloudflare service binding (`[[services]]` in wrangler.toml) which is in-process, not a network fetch. Removing the workers.dev URL from CSP also avoids stale-domain rot once we move to zeemish.io.
+
+5. **Documented Range-request bug as deferred minor item.** `/audio/*` route claims Range support but returns 200 with full body on `Range: bytes=0-1023`. Per-beat clips are small (~480KB) so browsers cope; deferring the fix until a real seek-bandwidth complaint arrives.
+
+**Reason — why audit instead of just executing:** First instinct was "audio's broken, engagement's not tracked, fix both." Reading the code showed both were further along than CLAUDE.md indicated. The honest pre-launch list was much shorter (and different) than the claimed one. Lesson: trust code over docs when they disagree. Added to the launch process: walk CLAUDE.md against reality before any release.
+
+**References:** [src/interactive/audio-player.ts](../src/interactive/audio-player.ts), [src/interactive/lesson-shell.ts](../src/interactive/lesson-shell.ts), [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro), [src/middleware.ts](../src/middleware.ts), [wrangler.toml](../wrangler.toml).
+
 ## 2026-04-18: Un-pause audio pipeline (ship-and-retry, metadata carve-out)
 **Context:** Audio Producer + Audio Auditor had been paused since build (not wired into Director's pipeline, zero ElevenLabs spend possible by accident). Text pipeline was trusted; time to un-pause.
 
