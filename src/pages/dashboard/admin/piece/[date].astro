@@ -193,19 +193,28 @@ for (const p of pipeline) {
 const timeline = stepOrder.map((s) => stepMap.get(s)!);
 
 // Strip HTML tags + collapse whitespace + decode common entities.
-// Scanner stores raw RSS item descriptions which often contain inline
-// markup (anchor tags, <ol>/<li>, source attributions). We don't want
-// that markup leaking into the admin display as visible text.
+// Scanner stores raw RSS item descriptions which contain inline markup
+// (anchor tags, <ol>/<li>, source attributions). The markup may arrive
+// HTML-escaped (&lt;a href=…&gt;) OR raw (<a href=…>) depending on the
+// feed, so we decode entities FIRST, then strip tags. We then also drop
+// any naked URLs left in the visible text (article links from the feed
+// boilerplate).
 function stripHtml(input: string | null): string {
   if (!input) return '';
   return input
-    .replace(/<[^>]*>/g, ' ')
+    // 1. decode entities so escaped tags become real tags we can strip
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    // 2. strip tags
+    .replace(/<[^>]*>/g, ' ')
+    // 3. drop bare URLs (RSS items frequently leave naked article URLs in summary text)
+    .replace(/https?:\/\/\S+/g, '')
+    // 4. collapse whitespace
     .replace(/\s+/g, ' ')
     .trim();
 }
