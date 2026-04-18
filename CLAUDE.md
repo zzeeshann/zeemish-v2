@@ -119,6 +119,11 @@ docs/handoff/           Original architecture + specs
 - CSP uses `unsafe-inline` for scripts (required by Astro)
 - Dashboard pipeline API's `isRunning` heuristic is buggy — treats non-terminal step names like `drafting/done` as "still running"
 - Admin trigger button's fire-and-forget fetch swallows errors silently — UI stuck on "Starting pipeline..." on failures
+- `public/_headers` has full CSP/HSTS but the live response shows none of them — Cloudflare Workers Static Assets uses a different mechanism, needs investigation
+- Login page (`src/pages/login.astro`) is still pre-design-pass styling — would benefit from same eyebrow/title/tagline treatment as account/dashboard
+- Zita chat panel uses white background — feels off-brand vs the cream `zee-bg` used elsewhere; rebrand needed
+- OG image is one static SVG for every page; per-piece dynamic OG (headline + tier rendered to PNG at the edge) is a future Worker route project
+- No skip-to-content link for keyboard users; full WCAG audit deferred
 
 ## Design pass (2026-04-17)
 - Beat navigation activated: `src/lib/rehype-beats.ts` wraps `##`-demarcated MDX sections in `<lesson-shell>`/`<lesson-beat>` at build time. No agent changes.

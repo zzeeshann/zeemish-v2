@@ -45,12 +45,6 @@ if (todaysPiece) {
           </p>
           <div class="mt-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zee-muted">
             <span>{formatTime(todaysPiece.data.estimatedTime)}</span>
-            {todaysPiece.data.beatCount && (
-              <>
-                <span class="opacity-40" aria-hidden="true">·</span>
-                <span>{todaysPiece.data.beatCount} {todaysPiece.data.beatCount === 1 ? 'beat' : 'beats'}</span>
-              </>
-            )}
             {todaysPiece.data.underlyingSubject && (
               <>
                 <span class="opacity-40" aria-hidden="true">·</span>
