@@ -405,9 +405,9 @@ function shortDate(iso: string): string {
       <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">How it's holding up</h2>
       <dl class="divide-y divide-zee-border/60 text-sm">
         {unresolvedEscalations > 0 && (
-          <div class="flex items-baseline justify-between gap-4 py-3">
+          <div class="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 py-3">
             <dt class="text-zee-text">Escalations unresolved</dt>
-            <dd class="text-right">
+            <dd class="text-left sm:text-right">
               <span class="font-semibold tabular-nums">{unresolvedEscalations}</span>
               {escalationContext && (
                 <span class="text-xs text-zee-muted ml-2">— {escalationContext}</span>
@@ -417,7 +417,7 @@ function shortDate(iso: string): string {
         )}
         <div class="flex items-baseline justify-between gap-4 py-3">
           <dt class="text-zee-text">Fact-check web</dt>
-          <dd class="text-right">
+          <dd class="text-left sm:text-right">
             {factCheckOfflineCount > 0 ? (
               <>
                 <span class="font-semibold text-zee-muted">Offline</span>
@@ -429,9 +429,9 @@ function shortDate(iso: string): string {
           </dd>
         </div>
         {avgCandidatesPerDay != null && (
-          <div class="flex items-baseline justify-between gap-4 py-3">
+          <div class="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4 py-3">
             <dt class="text-zee-text">Candidates per day</dt>
-            <dd class="text-right">
+            <dd class="text-left sm:text-right">
               <span class="font-semibold tabular-nums">{avgCandidatesPerDay}</span>
               <span class="text-xs text-zee-muted ml-2">avg — Scanner reads Google News across 6 feeds</span>
             </dd>

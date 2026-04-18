@@ -4,9 +4,14 @@ import '../styles/global.css';
 interface Props {
   title: string;
   description?: string;
+  /** "article" for daily pieces, "website" for everything else (default). */
+  ogType?: 'website' | 'article';
 }
 
-const { title, description } = Astro.props;
+const { title, description, ogType = 'website' } = Astro.props;
+const ogDescription = description ?? 'Educate yourself for humble decisions. Daily teaching, made by 13 agents.';
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+const ogImageUrl = new URL('/og-image.svg', Astro.site ?? Astro.url).toString();
 ---
 
 <html lang="en">
@@ -21,6 +26,25 @@ const { title, description } = Astro.props;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
+    <link rel="canonical" href={canonicalUrl} />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={ogDescription} />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={ogImageUrl} />
+    <meta property="og:site_name" content="Zeemish" />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={ogDescription} />
+    <meta name="twitter:image" content={ogImageUrl} />
+
+    <!-- Fonts: preconnect first, then load -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap"
       rel="stylesheet"

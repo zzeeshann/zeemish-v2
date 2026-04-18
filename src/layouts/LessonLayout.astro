@@ -14,9 +14,11 @@ interface Props {
   date?: string;
   voiceScore?: number;
   qualityFlag?: 'low';
+  /** Optional one-line description for social-share meta. */
+  description?: string;
 }
 
-const { title, estimatedTime, audioSrc, beatCount, subject, date, voiceScore, qualityFlag } = Astro.props;
+const { title, estimatedTime, audioSrc, beatCount, subject, date, voiceScore, qualityFlag, description } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
 // Tier is a quiet, consistent signal shown in the metadata line — same
 // visual weight as the date. Every piece shows its tier (not just rough
@@ -38,7 +40,7 @@ if (date) {
 }
 ---
 
-<BaseLayout title={`${title} — Zeemish`}>
+<BaseLayout title={`${title} — Zeemish`} description={description} ogType="article">
   <nav class="text-sm text-zee-muted mb-6" aria-label="Breadcrumb">
     <a href="/daily/" class="hover:text-zee-primary transition-colors">Daily</a>
     <span class="mx-2 opacity-50">/</span>

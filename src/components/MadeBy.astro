@@ -3,13 +3,14 @@
  * "How this was made" — open affordance + drawer shell.
  *
  * Server-renders only the static scaffold:
- *   - the open affordance button (static "13 agents" + client-filled counts)
+ *   - the open affordance button (static, no dynamic counts)
  *   - the empty drawer with a skeleton
  *
- * The daily piece page is statically prerendered (no D1 access at build
- * time), so the two dynamic teaser numbers (rounds, candidates) and the
- * full drawer content are all fetched client-side from
- * /api/daily/{date}/made by src/interactive/made-drawer.ts.
+ * Daily piece pages are statically prerendered (no D1 at build time).
+ * The full drawer content is fetched client-side from
+ * /api/daily/{date}/made by src/interactive/made-drawer.ts — but only
+ * on first open, not on mount. Saves one D1 query per page view for
+ * readers who never open the drawer.
  */
 interface Props {
   date: string;
@@ -28,7 +29,7 @@ const { date } = Astro.props;
   >
     <span>
       <span class="made-open-label">How this was made</span>
-      <span class="made-open-meta" data-made-teaser>
+      <span class="made-open-meta">
         The pipeline of 13 agents behind this piece
       </span>
     </span>

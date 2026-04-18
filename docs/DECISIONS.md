@@ -443,3 +443,25 @@ Data that doesn't exist is explicitly not displayed: no reader visits (engagemen
 **Rationale:** Trust through specificity. The dashboard tells the truth at one piece (sample size shown) and at thirty pieces (week-vs-lifetime split). Empty sections vanish rather than show dashes. Every number is a thing the system actually knows.
 
 **Verified:** `npm run build` clean. Static pages still 200. Dashboard requires D1 — verified post-deploy on the live worker.
+
+## 2026-04-18: Site polish bundle — 404, OG meta, drawer lazy-load
+
+**Context:** Post-dashboard-redesign audit found seven fixable rough edges. Shipped together as one quick-wins bundle.
+
+### What landed
+1. **Custom 404 page** (`src/pages/404.astro`) — replaces the default Astro dark/monospace 404. On-brand: gold eyebrow + "You've reached a dead end" title + three exit doors (today / library / dashboard).
+2. **OG / Twitter sharing meta** (`src/layouts/BaseLayout.astro`) — full set of og:title / og:description / og:type / og:url / og:image / og:site_name + twitter:card + canonical link. Daily pieces pass `ogType="article"` and the piece description; everything else defaults to `"website"`. Requires `astro.config.mjs` to set `site` for absolute URL resolution.
+3. **OG image** (`public/og-image.svg`) — typography-only branded card, 1200×630, cream + teal + gold. Same image for every page (per-piece dynamic OG is a separate project).
+4. **Google Fonts preconnect** — added `<link rel="preconnect">` for both `fonts.googleapis.com` and `fonts.gstatic.com` (with crossorigin) before the font stylesheet load. ~50ms first-paint improvement.
+5. **Library filter focus ring** — replaced `focus:ring-0` with `focus:ring-2 focus:ring-zee-primary/30 rounded`. Was an a11y regression — keyboard users had no focus indication on the filter input.
+6. **Drawer lazy-load** (`src/interactive/made-drawer.ts` + `src/components/MadeBy.astro`) — `<made-drawer>` no longer fetches `/api/daily/[date]/made` on mount. Only on click or `#made` hash. Saves one D1 query per page view for readers who never open the drawer. Trade-off accepted: the button copy is now static ("The pipeline of 13 agents behind this piece") with no live audit-round count. Inside the drawer the reader sees real numbers.
+7. **Dashboard mobile wrap** — "How it's holding up" rows now stack `flex-col` on small screens, revert to `sm:flex-row sm:justify-between` at 640px+. Fixes the awkward two-line wrap of "3 checks this week used Claude-only" at 375px.
+
+### What was deferred (still real, just bigger)
+- `public/_headers` exists with full CSP/HSTS but isn't being honored by the live response. Cloudflare Workers Static Assets uses a different mechanism — needs separate investigation.
+- Login page styling refresh
+- Zita panel rebrand (white → zee-bg)
+- Per-piece dynamic OG image generation (Cloudflare Worker route)
+- Skip-link / full WCAG audit
+
+**Verified:** `npm run build` clean. Static preview confirmed: `/totally-fake/` renders custom 404; daily page no longer fires the made-API call on mount; drawer opens and fetches on click. Live verification post-deploy.

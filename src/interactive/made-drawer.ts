@@ -72,10 +72,9 @@ class MadeDrawer extends HTMLElement {
     });
     this.backdropEl?.addEventListener('click', () => this.close());
 
-    // Fetch the envelope on mount so the teaser counts under the button
-    // are accurate *and* the drawer opens instantly. Single request,
-    // cached per session.
-    this.load().then(() => this.updateTeaser());
+    // Lazy-load: do NOT fetch on mount. Only fetch on first open (or if the
+    // page lands with #made in the URL). Saves one D1 query per page view
+    // for readers who never open the drawer.
 
     // Auto-open when URL hash is #made on page load
     if (window.location.hash === '#made') {
@@ -89,16 +88,6 @@ class MadeDrawer extends HTMLElement {
     window.addEventListener('hashchange', this.hashHandler);
   }
 
-  private updateTeaser() {
-    const teaserEl = this.querySelector<HTMLElement>('[data-made-teaser]');
-    if (!teaserEl || !this.envelope) return;
-    const rounds = this.envelope.rounds.length;
-    const cands = this.envelope.candidates.total;
-    const parts = ['13 agents'];
-    if (rounds > 0) parts.push(`${rounds} ${rounds === 1 ? 'audit round' : 'audit rounds'}`);
-    if (cands > 0) parts.push(`${cands} candidates`);
-    teaserEl.textContent = parts.join(' · ');
-  }
 
   disconnectedCallback() {
     if (this.keyHandler) {
