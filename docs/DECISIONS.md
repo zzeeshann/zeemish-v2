@@ -650,3 +650,35 @@ async onStart() {
 **Verified:** `npx tsc --noEmit` on agents/ — zero errors in touched files. `server.ts` pre-existing Durable Object stub type errors are unrelated and pre-date this change.
 
 **References:** [agents/src/drafter-prompt.ts](../agents/src/drafter-prompt.ts), [agents/src/audio-producer.ts](../agents/src/audio-producer.ts), [agents/src/fact-checker.ts](../agents/src/fact-checker.ts), [src/lib/rehype-beats.ts](../src/lib/rehype-beats.ts). CLAUDE.md "Remaining minor items" now lists the DDG IA narrow-coverage limitation and the `beatCount` declared-vs-actual drift.
+
+## 2026-04-19: Audio pipeline hardening — fetch timeout + Continue/Start-over retry UX
+
+**Context:** After the first three-bug fix landed and 04-19 was re-triggered, text + beats published cleanly but audio stalled at 2 of 6 beats. Last row (`the-cost-structure`) persisted at 08:19:05 UTC; 18+ minutes later, `pipeline_log` still showed `audio-producing running`, no `done`, no `failed`, no observer escalation, and the admin page showed no retry button because the existing logic was a binary branch: *show rows if any exist, show retry button only if none exist.* Operator had partial state + zero way to act on it.
+
+**Root cause:** `agents/src/audio-producer.ts` `callElevenLabs()` had no fetch timeout. When ElevenLabs stalled the TCP connection on beat 3 (likely rate limit or transient network glitch with no response), `fetch()` hung indefinitely. The Durable Object eventually hibernated, leaving Director's `await producer.generateAudio(...)` in limbo — no resolve, no reject. Same silent-failure pattern we'd just fixed in DDG fact-checker but never propagated to ElevenLabs.
+
+Retry UI gap compounded the problem: partial rows are exactly when operators need a retry button most (the pipeline is stuck, not complete), but the existing template hid it.
+
+**Decisions:**
+
+1. **30-second `AbortSignal.timeout` on ElevenLabs fetch.** Matches the DDG fix pattern. Typical response for a 2000-char beat is 5-15s; 30s is generous headroom. On timeout, `fetch` rejects, existing 3-attempt retry loop in `callElevenLabs` fires (1s then 2s backoff), all 3 fail fast, exception bubbles up to Director's try/catch at `director.ts:336-346`, which logs `audio-producing failed` + emits an Observer escalation via `logAudioFailure`. Silent hang → visible escalation.
+
+2. **`retryAudioFresh(date)` on Director.** Wipes R2 objects (`list({prefix: audio/daily/YYYY-MM-DD/}) → delete` each), `daily_piece_audio` rows, `daily_pieces.has_audio`, and `pipeline_log` rows matching `step LIKE 'audio%'`. Then delegates to existing `retryAudio(date)` for MDX read + pipeline re-run. Text-phase pipeline rows (scanning/curating/drafting/auditing/publishing/done) are preserved — they describe a piece that remains published. Only audio-side state is reset.
+
+3. **`/audio-retry` endpoint accepts `mode=continue|fresh` query param** (default `continue` for backwards compatibility with any external callers). Site proxy at `src/pages/api/agents/audio-retry.ts` passes through.
+
+4. **Admin UI rework** at `src/pages/dashboard/admin/piece/[date].astro`. New completion signal: `piece.has_audio === 1`. Whenever that's false, retry affordance is visible. When partial rows exist, TWO buttons appear: **Continue** (default `mode=continue`, resumes missing beats) and **Start over** (`mode=fresh`, confirm() dialog stating the clip count that will be deleted + cost, then wipe-and-regenerate). Row listing and retry affordance stack vertically instead of being mutually exclusive — operator sees current state AND has an action.
+
+**Alternatives considered:**
+
+- **Per-beat retry buttons (regenerate just this one clip).** Rejected — adds UI complexity for a rare need. If one beat's audio is bad, Start over with six cheap ElevenLabs calls is simpler than per-row targeting, and production traffic is low enough that the extra cost is negligible.
+- **Double-click-to-confirm on Start over instead of browser confirm() dialog.** Cleaner visual feel but needs state management for the 3-second arm window. Browser `confirm()` is zero-JS-state, explicit about consequences (clip count in the message), and idiomatic for destructive admin actions.
+- **Auto-retry on stall (detect `audio-producing running` > 5min and re-fire).** Rejected for now — adds a polling/watchdog dimension to the system. The new timeout on ElevenLabs fetch should prevent stalls in the first place; if they still happen, operator gets a visible retry button. Revisit if stalls recur despite the timeout.
+
+**Reason — why the timeout is a 30s per-attempt and not a smaller outer deadline:** ElevenLabs latency varies by text length and server load. 5-15s typical, occasionally 20-25s for long beats. A 10s timeout would false-positive frequently. 30s gives headroom for normal variance but still fails fast if the connection is truly stuck.
+
+**Reason — why `retryAudioFresh` wipes before delegating instead of having `runAudioPipeline` take a `reset` flag:** Keeps the pipeline method free of mode branching. `runAudioPipeline` should only know how to produce + audit + publish given fresh input; the "is this a fresh attempt or a resume" decision belongs at the caller. Cleaner separation.
+
+**Verified:** `npx tsc --noEmit` on agents/ — zero new errors in touched files. The server.ts DurableObjectStub noise that flags `retryAudioFresh` is the same pre-existing pattern that flags `retryAudio`, `getStatus`, `triggerDailyPiece`, etc. Runtime is unaffected.
+
+**References:** [agents/src/audio-producer.ts](../agents/src/audio-producer.ts) (callElevenLabs + AbortSignal.timeout), [agents/src/director.ts](../agents/src/director.ts) (retryAudioFresh), [agents/src/server.ts](../agents/src/server.ts) (/audio-retry mode dispatch), [src/pages/api/agents/audio-retry.ts](../src/pages/api/agents/audio-retry.ts) (proxy passthrough), [src/pages/dashboard/admin/piece/[date].astro](../src/pages/dashboard/admin/piece/[date].astro) (UI + script).

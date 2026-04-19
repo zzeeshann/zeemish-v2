@@ -183,10 +183,18 @@ export default {
       }
     }
 
-    // Audio retry: POST /audio-retry?date=YYYY-MM-DD (requires auth)
+    // Audio retry: POST /audio-retry?date=YYYY-MM-DD&mode=continue|fresh
     // Re-runs just the audio pipeline for an already-published piece
     // after an earlier audio failure. Text is already permanent —
     // this call cannot un-publish or revise the piece's prose.
+    //
+    // mode=continue (default): R2 head-check skips already-generated
+    // beats, fills in missing ones. Safe, cheap, resumes where prior
+    // attempt left off.
+    //
+    // mode=fresh: deletes existing R2 clips + D1 rows + has_audio flag
+    // first, then regenerates every beat from scratch. Used when the
+    // existing audio is bad.
     if (url.pathname === '/audio-retry' && request.method === 'POST') {
       try {
         const date = url.searchParams.get('date') ?? '';
@@ -195,14 +203,18 @@ export default {
             status: 400, headers: corsHeaders(request),
           });
         }
+        const mode = url.searchParams.get('mode') === 'fresh' ? 'fresh' : 'continue';
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        const run = mode === 'fresh'
+          ? director.retryAudioFresh(date)
+          : director.retryAudio(date);
         ctx.waitUntil(
-          director.retryAudio(date).catch((err) => {
+          run.catch((err) => {
             const message = err instanceof Error ? err.message : 'Unknown error';
-            console.error(`[audio-retry] failed for ${date}:`, message);
+            console.error(`[audio-retry:${mode}] failed for ${date}:`, message);
           }),
         );
-        return new Response(JSON.stringify({ status: 'started', date }), {
+        return new Response(JSON.stringify({ status: 'started', date, mode }), {
           status: 202, headers: corsHeaders(request),
         });
       } catch (err) {

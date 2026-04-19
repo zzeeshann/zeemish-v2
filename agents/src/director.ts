@@ -448,6 +448,54 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     await this.runAudioPipeline(date, current.mdx, filePath, piece.headline);
   }
 
+  /**
+   * "Start over" audio variant — wipe every trace of a prior audio
+   * attempt (R2 objects, daily_piece_audio rows, has_audio flag,
+   * audio-* pipeline_log entries), then call retryAudio. Used when the
+   * existing audio is bad (wrong content, truncated clips, stale voice
+   * settings) and a clean regenerate is safer than resuming.
+   *
+   * Text piece itself is untouched — this only resets the audio-side
+   * state. Admin dashboard's "Start over" button invokes this path.
+   */
+  async retryAudioFresh(date: string): Promise<void> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new Error(`retryAudioFresh: invalid date "${date}"`);
+    }
+
+    // Wipe R2 clips for this date (audio/daily/YYYY-MM-DD/*.mp3)
+    const prefix = `audio/daily/${date}/`;
+    const listed = await this.env.AUDIO_BUCKET.list({ prefix });
+    await Promise.all(
+      listed.objects.map((obj) => this.env.AUDIO_BUCKET.delete(obj.key)),
+    );
+
+    // Wipe D1 beat rows
+    await this.env.DB
+      .prepare('DELETE FROM daily_piece_audio WHERE date = ?')
+      .bind(date)
+      .run();
+
+    // Clear has_audio on the piece so dashboard + site reflect "pending"
+    await this.env.DB
+      .prepare('UPDATE daily_pieces SET has_audio = 0 WHERE date = ?')
+      .bind(date)
+      .run()
+      .catch(() => {});
+
+    // Clear audio-* pipeline_log rows so the timeline resets cleanly.
+    // Text-phase rows (scanning, curating, drafting, auditing_*,
+    // publishing, done) stay — they describe a published piece that
+    // remains published.
+    await this.env.DB
+      .prepare("DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'")
+      .bind(date)
+      .run();
+
+    // Delegate to existing retryAudio — it handles MDX read + audio pipeline
+    await this.retryAudio(date);
+  }
+
   getStatus(): DirectorState {
     return this.state;
   }

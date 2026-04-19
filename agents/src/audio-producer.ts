@@ -187,8 +187,16 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
 
   /**
    * POST to ElevenLabs TTS. 3-attempt retry with exponential backoff
-   * on 5xx / network errors. 4xx errors (bad key, quota, bad voice ID)
-   * throw immediately — retrying won't fix them.
+   * on 5xx / network errors / timeouts. 4xx errors (bad key, quota, bad
+   * voice ID) throw immediately — retrying won't fix them.
+   *
+   * 30-second AbortSignal timeout per attempt. Without it, if ElevenLabs
+   * stalls the TCP connection (no response, no error), the fetch hangs
+   * indefinitely, the Durable Object eventually hibernates, and
+   * Director's await on `generateAudio()` stays pending forever — which
+   * is how 2026-04-19's second run silently failed at beat 3 of 6. A
+   * single beat of ~2000 chars typically returns in 5-15s; 30s is
+   * generous headroom before we call it stuck and move on.
    */
   private async callElevenLabs(
     text: string,
@@ -219,6 +227,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
             Accept: 'audio/mpeg',
           },
           body,
+          signal: AbortSignal.timeout(30_000),
         });
 
         if (!response.ok) {

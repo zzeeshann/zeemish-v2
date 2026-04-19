@@ -34,6 +34,7 @@ type Piece = {
   beat_count: number | null;
   reading_minutes: number | null;
   has_interactive: number | null;
+  has_audio: number | null;
   published_at: number | null;
   created_at: number;
 };
@@ -239,7 +240,7 @@ function relativeFromStart(tMs: number, startMs: number): string {
 
 const timelineStart = timeline[0]?.tMs ?? 0;
 
-// Audio state — decides whether to show per-beat rows or a retry affordance.
+// Audio state — decides whether to show per-beat rows, retry affordance, or both.
 const audioFailureStep = pipeline.find(
   (p) => (p.step === 'audio-producing' || p.step === 'audio-auditing' || p.step === 'audio-publishing')
     && p.status === 'failed',
@@ -248,6 +249,15 @@ const audioFailureReason: string | null = audioFailureStep
   ? (safeJson(audioFailureStep.data)?.reason ?? null)
   : null;
 const totalAudioChars = audioRows.reduce((sum, r) => sum + r.character_count, 0);
+// has_audio = 1 is the definitive "audio done" signal (set by Publisher
+// after the second commit splices audioBeats into frontmatter). Any
+// other state (partial rows, failed step, zero rows, stalled with no
+// error) means a retry affordance should be visible.
+const audioComplete = piece?.has_audio === 1;
+// Expected beat count for the piece. beat_count on daily_pieces is the
+// Drafter's declared value; fall back to row count if unset (older
+// pieces from before beat_count was populated).
+const expectedBeats = piece?.beat_count ?? audioRows.length;
 
 function publishedDisplay(): string {
   if (!piece?.published_at) return '';
@@ -446,9 +456,13 @@ function publishedDisplay(): string {
       <section class="mb-10">
         <div class="flex items-baseline justify-between gap-4 mb-4">
           <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Audio</h2>
-          {audioRows.length > 0 ? (
+          {audioComplete ? (
             <span class="text-xs text-zee-muted tabular-nums">
               {audioRows.length} beat{audioRows.length === 1 ? '' : 's'} · {totalAudioChars.toLocaleString()} chars
+            </span>
+          ) : audioRows.length > 0 ? (
+            <span class="text-xs text-zee-gold tabular-nums">
+              {audioRows.length}/{expectedBeats} beats · partial
             </span>
           ) : (
             <span class="text-xs text-zee-muted">
@@ -457,8 +471,9 @@ function publishedDisplay(): string {
           )}
         </div>
 
-        {audioRows.length > 0 ? (
-          <div class="border border-zee-border rounded-xl p-4 md:p-5">
+        {/* Row listing — shown whenever any rows exist, regardless of completeness */}
+        {audioRows.length > 0 && (
+          <div class={`border border-zee-border rounded-xl p-4 md:p-5 ${audioComplete ? '' : 'mb-3'}`}>
             <p class="text-xs text-zee-muted mb-3">
               <span class="font-medium text-zee-text">{audioRows[0].model}</span>
               <span class="opacity-40 mx-2">·</span>
@@ -477,7 +492,12 @@ function publishedDisplay(): string {
               ))}
             </ul>
           </div>
-        ) : (
+        )}
+
+        {/* Retry affordance — shown whenever audio is NOT complete.
+            Three sub-states: failed step / partial rows with no recorded
+            failure (stalled) / zero rows. */}
+        {!audioComplete && (
           <div class="border border-zee-border rounded-xl p-4 md:p-5">
             {audioFailureReason ? (
               <>
@@ -486,19 +506,44 @@ function publishedDisplay(): string {
                 </p>
                 <p class="text-xs text-zee-muted mb-4 leading-relaxed">{audioFailureReason}</p>
               </>
+            ) : audioRows.length > 0 ? (
+              <p class="text-sm text-zee-text mb-4">
+                <span class="text-zee-gold font-medium">Audio incomplete</span> — expected {expectedBeats} beat{expectedBeats === 1 ? '' : 's'}, have {audioRows.length}. The pipeline may have stalled without recording an error.
+              </p>
             ) : (
               <p class="text-sm text-zee-muted mb-4 italic">
                 No audio yet for this piece. Run the audio pipeline from here.
               </p>
             )}
-            <button
-              id="audio-retry-btn"
-              data-date={date}
-              class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
-            >
-              Retry audio
-            </button>
-            <span id="audio-retry-status" class="ml-3 text-xs text-zee-muted"></span>
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                id="audio-retry-btn"
+                data-date={date}
+                data-mode="continue"
+                class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                {audioRows.length > 0 ? 'Continue' : 'Retry audio'}
+              </button>
+              {audioRows.length > 0 && (
+                <button
+                  id="audio-retry-fresh-btn"
+                  data-date={date}
+                  data-mode="fresh"
+                  data-count={audioRows.length}
+                  class="px-4 py-2 border border-zee-border text-zee-text rounded-lg text-sm font-medium hover:bg-zee-border/20 transition-colors"
+                >
+                  Start over
+                </button>
+              )}
+              <span id="audio-retry-status" class="text-xs text-zee-muted"></span>
+            </div>
+            {audioRows.length > 0 && (
+              <p class="text-xs text-zee-muted mt-3 leading-relaxed">
+                <strong class="text-zee-text">Continue</strong> resumes where the prior attempt stopped — reuses the {audioRows.length} existing clip{audioRows.length === 1 ? '' : 's'}.
+                <span class="mx-1">·</span>
+                <strong class="text-zee-text">Start over</strong> wipes all existing clips + D1 rows and regenerates every beat from scratch.
+              </p>
+            )}
           </div>
         )}
       </section>
@@ -613,16 +658,32 @@ function publishedDisplay(): string {
 </BaseLayout>
 
 <script>
-  const btn = document.getElementById('audio-retry-btn') as HTMLButtonElement | null;
+  // Two retry buttons: "Continue" (resume from where it stopped) and
+  // "Start over" (wipe existing R2 + D1 rows, regenerate all). Start over
+  // requires a confirm() dialog because it costs ElevenLabs credits to
+  // regenerate content we already have.
+  const continueBtn = document.getElementById('audio-retry-btn') as HTMLButtonElement | null;
+  const freshBtn = document.getElementById('audio-retry-fresh-btn') as HTMLButtonElement | null;
   const statusEl = document.getElementById('audio-retry-status');
-  btn?.addEventListener('click', async () => {
-    if (!btn || !statusEl) return;
+
+  async function runRetry(btn: HTMLButtonElement, mode: 'continue' | 'fresh') {
+    if (!statusEl) return;
     const date = btn.dataset.date;
     if (!date) return;
-    btn.disabled = true;
-    statusEl.textContent = 'Starting…';
+
+    if (mode === 'fresh') {
+      const count = btn.dataset.count ?? '0';
+      const msg = `Start over will DELETE ${count} existing audio clip${count === '1' ? '' : 's'} and their R2 objects, then regenerate every beat from scratch. This costs ElevenLabs credits. Continue?`;
+      if (!window.confirm(msg)) return;
+    }
+
+    // Lock both buttons while the request is in flight
+    if (continueBtn) continueBtn.disabled = true;
+    if (freshBtn) freshBtn.disabled = true;
+    statusEl.textContent = mode === 'fresh' ? 'Wiping and regenerating…' : 'Starting…';
+
     try {
-      const res = await fetch(`/api/agents/audio-retry?date=${date}`, { method: 'POST' });
+      const res = await fetch(`/api/agents/audio-retry?date=${date}&mode=${mode}`, { method: 'POST' });
       if (!res.ok) {
         let detail = res.statusText;
         try {
@@ -630,7 +691,8 @@ function publishedDisplay(): string {
           if (body.error) detail = body.error;
         } catch { /* not JSON */ }
         statusEl.textContent = `Failed: ${res.status} ${detail}`;
-        btn.disabled = false;
+        if (continueBtn) continueBtn.disabled = false;
+        if (freshBtn) freshBtn.disabled = false;
         return;
       }
       statusEl.textContent = 'Started — refresh in a minute to see results.';
@@ -640,7 +702,12 @@ function publishedDisplay(): string {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Network error';
       statusEl.textContent = `Failed: ${msg}`;
-      btn.disabled = false;
+      if (continueBtn) continueBtn.disabled = false;
+      if (freshBtn) freshBtn.disabled = false;
     }
+  }
+
+  continueBtn?.addEventListener('click', () => runRetry(continueBtn, 'continue'));
+  freshBtn?.addEventListener('click', () => runRetry(freshBtn, 'fresh'));
   });
 </script>

@@ -26,11 +26,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  // mode=continue (default): resume where prior attempt stopped, skip
+  // already-generated clips. mode=fresh: wipe existing audio state
+  // first, then regenerate everything. Admin's "Start over" button
+  // passes mode=fresh after a confirm() dialog.
+  const mode = url.searchParams.get('mode') === 'fresh' ? 'fresh' : 'continue';
 
   const ADMIN_SECRET = (locals.runtime.env as Record<string, string>).AGENTS_ADMIN_SECRET ?? '';
   const AGENTS = (locals.runtime.env as unknown as { AGENTS: { fetch: typeof fetch } }).AGENTS;
 
-  const res = await AGENTS.fetch(`https://agents/audio-retry?date=${date}`, {
+  const res = await AGENTS.fetch(`https://agents/audio-retry?date=${date}&mode=${mode}`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${ADMIN_SECRET}` },
   });
