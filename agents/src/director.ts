@@ -304,10 +304,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
-    // Runs regardless of text quality — audio for rough-tier pieces
-    // is still valuable. Any audio failure escalates via Observer;
-    // the text commit above is permanent either way.
-    await this.runAudioPipeline(today, currentMdx, publishResult.filePath, brief.headline);
+    // Schedule audio to run in an alarm-triggered invocation instead of
+    // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
+    // after ~30s of compute between incoming network requests (our text
+    // phase alone is ~100s, making the audio tail unsafe). Alarm handlers
+    // have a separate 15-minute wall-clock budget and are a fresh DO
+    // invocation — exactly the boundary we need. The text piece is
+    // already permanent either way; audio is ship-and-retry. See
+    // DECISIONS 2026-04-19 "Audio via alarm, not inline".
+    await this.schedule(1, 'runAudioPipelineScheduled', {
+      date: today,
+      filePath: publishResult.filePath,
+      title: brief.headline,
+    });
 
     this.setState({
       ...this.state, status: 'idle', currentPhase: null, currentTask: null,
@@ -318,6 +327,45 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     } finally {
       keepAliveDispose();
     }
+  }
+
+  /**
+   * Alarm callback — runs the audio pipeline in a fresh DO invocation.
+   *
+   * Invoked by the Agents SDK scheduler after `triggerDailyPiece` (or
+   * `retryAudio`) calls `this.schedule(1, 'runAudioPipelineScheduled',
+   * payload)`. Running under an alarm gives us up to 15 minutes of wall
+   * time — plenty for all 6-12 beats × ~10-15s each of ElevenLabs
+   * latency, well clear of the ~30s compute-between-requests eviction
+   * risk that hits HTTP-triggered invocations.
+   *
+   * Re-reads the committed MDX from GitHub rather than carrying it in
+   * the payload — scheduled payloads live in SQLite and stay small.
+   */
+  async runAudioPipelineScheduled(payload: {
+    date: string;
+    filePath: string;
+    title: string;
+  }): Promise<void> {
+    const { date, filePath, title } = payload;
+
+    const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
+    const current = await publisher.readPublishedMdx(filePath);
+    if (!current) {
+      // Piece was deleted or renamed between scheduling and firing —
+      // nothing to do. Log it and exit cleanly.
+      console.error(`runAudioPipelineScheduled: MDX not found at ${filePath} for ${date}`);
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logAudioFailure(
+        date,
+        title,
+        'producer',
+        `Scheduled audio skipped — MDX not found at ${filePath}`,
+      );
+      return;
+    }
+
+    await this.runAudioPipeline(date, current.mdx, filePath, title);
   }
 
   /**
@@ -460,50 +508,51 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * from the admin dashboard's "Retry audio" button after an earlier
    * audio failure (observer escalation).
    *
-   * Steps: look up the piece + file path, read the committed MDX from
-   * GitHub, call runAudioPipeline. Idempotent — if audio already
-   * landed, Producer's R2 head-check skips generation, Auditor re-
-   * verifies, Publisher's splice is a no-op.
+   * Validates inputs, then schedules `runAudioPipelineScheduled` to run
+   * in an alarm-triggered invocation (15-minute wall budget) instead of
+   * running inline. Same reason as triggerDailyPiece: HTTP-triggered
+   * invocations risk eviction after ~30s of compute between incoming
+   * requests; alarms get a fresh budget. Returns quickly — admin UI
+   * polls pipeline_log / daily_piece_audio for progress.
+   *
+   * Idempotent — if audio already landed, Producer's R2 head-check
+   * skips generation, Auditor re-verifies, Publisher's splice is a no-op.
    */
   async retryAudio(date: string): Promise<void> {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       throw new Error(`retryAudio: invalid date "${date}"`);
     }
 
-    // Same DO-eviction guard as triggerDailyPiece — audio alone can
-    // run past the 70-140s inactivity threshold for longer pieces.
-    const keepAliveDispose = await this.keepAlive();
+    const piece = await this.env.DB
+      .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
+      .bind(date)
+      .first<{ headline: string }>();
+    if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
+
+    // filePath lives in the publishing.done step's data column.
+    const pubRow = await this.env.DB
+      .prepare(
+        `SELECT data FROM pipeline_log
+         WHERE run_id = ? AND step = 'publishing' AND status = 'done'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .bind(date)
+      .first<{ data: string | null }>();
+    if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
+    let filePath: string | null = null;
     try {
-      const piece = await this.env.DB
-        .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
-        .bind(date)
-        .first<{ headline: string }>();
-      if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
+      filePath = JSON.parse(pubRow.data)?.filePath ?? null;
+    } catch { /* malformed JSON */ }
+    if (!filePath) throw new Error(`retryAudio: no filePath in publishing.done for ${date}`);
 
-      // filePath lives in the publishing.done step's data column.
-      const pubRow = await this.env.DB
-        .prepare(
-          `SELECT data FROM pipeline_log
-           WHERE run_id = ? AND step = 'publishing' AND status = 'done'
-           ORDER BY created_at DESC LIMIT 1`,
-        )
-        .bind(date)
-        .first<{ data: string | null }>();
-      if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
-      let filePath: string | null = null;
-      try {
-        filePath = JSON.parse(pubRow.data)?.filePath ?? null;
-      } catch { /* malformed JSON */ }
-      if (!filePath) throw new Error(`retryAudio: no filePath in publishing.done for ${date}`);
-
-      const publisher = await this.subAgent(PublisherAgent, `retry-reader-${date}`);
-      const current = await publisher.readPublishedMdx(filePath);
-      if (!current) throw new Error(`retryAudio: file not in repo: ${filePath}`);
-
-      await this.runAudioPipeline(date, current.mdx, filePath, piece.headline);
-    } finally {
-      keepAliveDispose();
-    }
+    // Schedule audio to fire in an alarm-triggered invocation (15-min wall
+    // budget). Validation above catches common error paths before the
+    // alarm is scheduled — so the caller sees failures synchronously.
+    await this.schedule(1, 'runAudioPipelineScheduled', {
+      date,
+      filePath,
+      title: piece.headline,
+    });
   }
 
   /**

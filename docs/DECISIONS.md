@@ -784,3 +784,42 @@ Pattern matched "30s Cloudflare RPC timeout" — a known Cloudflare limit I'd se
 **Lesson for next time:** When empirical pattern-matching gives a plausible story that fits the symptoms, resist the urge to ship without verifying against the SDK/platform source. The 30s RPC timeout story was plausible enough to waste a deploy cycle. Ten minutes of grepping `node_modules/agents/dist/` would have surfaced `keepAlive()` immediately.
 
 **References:** [agents/src/director.ts](../agents/src/director.ts) (keepAlive wrappers on triggerDailyPiece, retryAudio, retryAudioFresh); SDK doc in `agents/node_modules/agents/dist/index.js:1671-1699`.
+
+## 2026-04-19: Audio via alarm, not inline (keepAlive was a partial fix)
+
+**Context:** Phase G added `keepAlive()` based on the Agents SDK docstring *"eviction after ~70-140s of inactivity"*. Next trigger still stalled at 2/5 beats after 117s. keepAlive wasn't helping. Asked a research agent to pull **actual Cloudflare docs** instead of continuing to guess.
+
+**What the docs actually say** (quoted from [Cloudflare DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) and [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/)):
+
+- HTTP/RPC-triggered DO invocations: *"If you consume more than 30 seconds of compute between incoming network requests, there is a heightened chance that the individual Durable Object is evicted and reset."* **There is no hard wall-clock limit** while the caller stays connected — but the "30s of compute between incoming requests" eviction rule kills long-running inline work.
+- **Alarm handlers: "maximum wall time of 15 minutes."** They are a separate invocation boundary with their own fresh budget.
+- **CPU budget: 30s default, up to 5 minutes via `limits.cpu_ms`.** CPU time excludes I/O waits (fetch, KV, D1), so our ElevenLabs-heavy audio phase burns almost no CPU — CPU wasn't the blocker.
+- `keepAlive()` uses alarm-system heartbeats to simulate "incoming network requests" and reset the inactivity timer. But **Durable Objects are single-threaded**: alarms can't fire while the current invocation is holding the DO. So during a long inline method call, queued heartbeats can't actually deliver — they pile up waiting for the current call to finish, exactly when we need them.
+
+**Root cause (definitive):** Our `triggerDailyPiece` runs inline from an HTTP-triggered invocation. Text phase: ~90s. Audio starts: ~2s of compute per beat × 5 beats = ~10s CPU with ~60s wall (ElevenLabs I/O). Cumulative compute-between-requests hits the ~30s eviction threshold midway through audio, and since no new HTTP request arrives during the whole pipeline, the DO gets reset. keepAlive heartbeats can't fire because the DO is busy running triggerDailyPiece. Whole invocation dies silently around 110-120s.
+
+**Decision:** Move audio out of the HTTP-triggered invocation entirely. After text publishes, `triggerDailyPiece` calls `await this.schedule(1, 'runAudioPipelineScheduled', { date, filePath, title })` and returns. Schedule row is persisted in SQLite, alarm fires 1 second later in a **fresh DO invocation with up to 15 minutes of wall time**. Audio runs comfortably under that budget (6 beats × 15s ≈ 90s).
+
+New method: `runAudioPipelineScheduled(payload)` — receives payload from the SDK scheduler, re-reads committed MDX from GitHub (keeps scheduled payloads small), calls existing `runAudioPipeline`. If MDX is missing (piece was deleted), logs an observer failure and exits cleanly.
+
+Same change applied to `retryAudio`: validates inputs synchronously (so admin sees bad-date errors immediately), then schedules the audio work on an alarm. `retryAudioFresh` cascades through `retryAudio` so it inherits the schedule.
+
+**Why Phase F and Phase G aren't wasted work:**
+
+- **Phase F chunking** still lets the producer resume cleanly from partial prior runs via R2 head-check skip. Safer retry semantics, cross-chunk `request_id` stitching from D1.
+- **Phase G keepAlive** stays on `triggerDailyPiece` + `retryAudioFresh`. Not the primary mechanism, but harmless; it protects shorter stretches of work (text phase alone is ~107s) and costs nothing when the DO isn't near the eviction boundary.
+
+**Alternatives considered:**
+
+- **`keepAliveWhile` helper + longer CPU limits.** Research agent suggested using `keepAliveWhile` instead of manual try/finally. Same result — still bound by the "compute between incoming requests" rule even if CPU is raised to 5min via `limits.cpu_ms`. The rule is about incoming request cadence, not CPU budget.
+- **Split audio into per-beat alarms** (one alarm per beat). Overkill — single alarm invocation has 15 minutes, more than enough for 12 beats. Adds scheduling overhead without benefit.
+- **Have `/audio-retry` call the alarm handler directly via fetch.** The SDK's `schedule()` does this cleanly already; no reason to reinvent it.
+- **Use `runFiber` for automatic checkpointing + recovery.** Tempting (it uses `keepAlive` + `cf_agents_runs` for resumable work) but adds complexity we don't need — our audio work is already resumable via R2 head-check skip. Save `runFiber` for work with non-idempotent state.
+
+**Reason — why we hit this specifically for audio and not text:** Text phase's work is dominated by Claude API calls via the Anthropic SDK, each of which is one outbound fetch. Between calls, Director does short logic (parse response, log step). The pattern of "call → await → short sync work → next call" keeps the DO regularly yielding, and Cloudflare's eviction heuristic apparently gives leeway to that shape. Audio's work is dominated by ElevenLabs fetches + R2 puts + D1 inserts — similar shape, but by the time audio starts, we've already burned most of the compute-between-requests budget on text. The issue is cumulative, not about audio being structurally different.
+
+**Lesson for next time:** When a platform behavior doesn't match a plausible reading of the SDK docs, pull the actual platform docs before shipping another fix. Two wrong fixes (Phase F chunking, Phase G keepAlive) preceded the one that reads the platform limits page. Total cost: two CI cycles and one user retry cycle. Verifying the platform doc would have taken 5 minutes.
+
+**Verified:** `npx tsc --noEmit` clean; `pnpm build` passes. End-to-end verification in Phase H.5 via reset + fresh trigger.
+
+**References:** [agents/src/director.ts](../agents/src/director.ts) (runAudioPipelineScheduled + schedule(1, ...) wiring); [Cloudflare DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/); [Workers platform limits](https://developers.cloudflare.com/workers/platform/limits/).
