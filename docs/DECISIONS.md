@@ -724,3 +724,63 @@ Each producer invocation cleared ~2 beats in ~20-25s then silently died — no e
 **Verified:** `npx tsc --noEmit` — zero errors in touched files. `pnpm build` — site build passes. End-to-end verification pending reset + re-trigger.
 
 **References:** [agents/src/audio-producer.ts](../agents/src/audio-producer.ts) (generateAudioChunk + ChunkResult + priorRequestIds from D1), [agents/src/director.ts](../agents/src/director.ts) (runAudioPipeline chunk-loop + audioBeats from D1 for publisher).
+
+## 2026-04-19: DO eviction was the real root cause (not a per-RPC budget) — keepAlive() fix
+
+**Context:** Phase F chunking made the producer robust but didn't fix the underlying stall. After Phase F deployed, next trigger stalled at **1/5 beats** — even worse than the 2/6 we'd seen before. Only explanation: the problem wasn't at the producer-RPC level. Going back to the pipeline_log timestamps told the real story:
+
+```
+scanning      0s  → done 2s      (Scanner)
+curating      2s  → done 30s     (Curator, 28s — Claude call)
+drafting      30s → done 78s     (Drafter, 48s — Claude generates ~1300 words)
+auditing_r1   78s → done 106s    (three auditors in parallel)
+publishing    106s → done 107s   (GitHub commit)
+done          107s
+audio-producing 108s → running
+  └─ hook beat generated at 116s (8s into audio)
+  └─ silence after 116s
+```
+
+Director's Durable Object ran for 116 seconds and died. The text phase alone consumed 107s of that. Audio only got 9 seconds before the DO was evicted.
+
+**Root cause (found, not guessed):** Grepping the Agents SDK source at `agents/node_modules/agents/dist/index.js` for timeout/hibernation code surfaced the `keepAlive()` method docstring:
+
+> *"Use this when you have long-running work and need to prevent the DO from going idle (**eviction after ~70-140s of inactivity**). The heartbeat fires every `keepAliveIntervalMs` (default 30s) via the alarm system."*
+
+This is a documented Agents SDK feature, not a Cloudflare platform limit. Without `keepAlive()`, the runtime considers a long-running DO "inactive" after ~70-140s and hibernates it — killing any in-flight awaits including cross-facet RPC chains. The exact 70-140s range is why we saw stalls in that window consistently. The reason the Continue button worked is that `/audio-retry` kicks off a fresh HTTP request → fresh Director invocation → fresh 70-140s window, which gave audio enough budget to do 2 more beats before hitting the window again.
+
+**Decision:** Wrap `Director.triggerDailyPiece`, `retryAudio`, and `retryAudioFresh` with `await this.keepAlive()` + `try/finally` disposer. The SDK's keepAlive uses the alarm system to fire a 30s heartbeat that resets the inactivity timer. Reference-counted internally, so nested calls (`retryAudioFresh` → `retryAudio`) are safe and the heartbeat only stops once all refs are disposed.
+
+```ts
+async triggerDailyPiece(force = false) {
+  const dispose = await this.keepAlive();
+  try {
+    // full pipeline body — text + audio
+  } finally {
+    dispose();
+  }
+}
+```
+
+**What Phase F chunking still buys us (not wasted work):**
+
+1. **Retry semantics are cleaner.** `generateAudioChunk(maxBeats=2)` processes bounded work per call. A retry resumes exactly where prior runs left off via R2 head-check; no infinite loops on weird state.
+2. **Cross-chunk prosodic continuity via D1.** Loading the last 3 `request_id`s from `daily_piece_audio` at chunk start means ElevenLabs stitching works across multiple retries, not just within one invocation's in-memory window.
+3. **Safer per-RPC budget.** Even with `keepAlive`, Agents SDK's client-side RPC timeout default is 60s. Chunked calls stay well under that regardless of DO inactivity.
+4. **Progress is visible sooner.** Each chunk persists rows incrementally, so the admin dashboard reflects progress during generation instead of all-or-nothing at the end.
+
+**Why I misdiagnosed it in Phase F:**
+
+Pattern matched "30s Cloudflare RPC timeout" — a known Cloudflare limit I'd seen mentioned in platform docs. The 2/6-beat ceiling and the ~25s elapsed time both fit. But the correlation wasn't causation: the real signal was the **total Director invocation wall-clock**, not the producer-RPC-call duration. Chunking addressed the symptom (per-producer-call stays short) without fixing the cause (Director's surrounding invocation times out). 1/5 on the next trigger — worse than 2/6 — was the data point that broke the hypothesis and forced me to actually read the SDK source.
+
+**Alternatives considered:**
+
+- **Split audio into a separate HTTP request after text completes.** Would give audio its own fresh Director invocation (same trick the Continue button uses). Rejected: more moving parts than `keepAlive()`, and still needs `keepAlive()` for pieces whose audio alone runs past 140s (12-beat newspapers).
+- **Use DO alarms to chain audio chunks.** Each alarm fire is a fresh invocation. Rejected same reason — adds orchestration complexity (state machine, completion detection, timeout handling) when a single SDK method call does the same thing cleaner.
+- **Static options `keepAliveIntervalMs: 20000`** (tighter heartbeat). Rejected — 30s default is fine; the eviction timer is 70-140s, so 30s heartbeats have 40-110s of slack. Changing it adds config surface without improving reliability.
+
+**Verified:** `npx tsc --noEmit` clean in touched files; `pnpm build` passes. End-to-end verification via reset + fresh trigger next.
+
+**Lesson for next time:** When empirical pattern-matching gives a plausible story that fits the symptoms, resist the urge to ship without verifying against the SDK/platform source. The 30s RPC timeout story was plausible enough to waste a deploy cycle. Ten minutes of grepping `node_modules/agents/dist/` would have surfaced `keepAlive()` immediately.
+
+**References:** [agents/src/director.ts](../agents/src/director.ts) (keepAlive wrappers on triggerDailyPiece, retryAudio, retryAudioFresh); SDK doc in `agents/node_modules/agents/dist/index.js:1671-1699`.

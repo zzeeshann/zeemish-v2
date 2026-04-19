@@ -83,6 +83,15 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    *   want to test end-to-end even after today's piece has published.
    */
   async triggerDailyPiece(force = false): Promise<{ brief: DailyPieceBrief; mdx: string } | null> {
+    // Keep the Director DO alive across the multi-phase pipeline. Agents
+    // SDK documents eviction "after ~70-140s of inactivity" and our text
+    // pipeline alone runs ~100-110s — audio always straddled the cliff.
+    // `keepAlive()` fires a 30s heartbeat alarm that resets the inactivity
+    // timer. Held until the end of the method via the try/finally; the
+    // disposer stops the heartbeat so the DO can hibernate normally when
+    // we're done. See DECISIONS 2026-04-19 "DO eviction root cause".
+    const keepAliveDispose = await this.keepAlive();
+    try {
     const today = new Date().toISOString().slice(0, 10);
 
     // Guard: skip if today's piece already exists (bypassed when force=true)
@@ -306,6 +315,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     });
 
     return { brief, mdx: currentMdx };
+    } finally {
+      keepAliveDispose();
+    }
   }
 
   /**
@@ -458,33 +470,40 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       throw new Error(`retryAudio: invalid date "${date}"`);
     }
 
-    const piece = await this.env.DB
-      .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
-      .bind(date)
-      .first<{ headline: string }>();
-    if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
-
-    // filePath lives in the publishing.done step's data column.
-    const pubRow = await this.env.DB
-      .prepare(
-        `SELECT data FROM pipeline_log
-         WHERE run_id = ? AND step = 'publishing' AND status = 'done'
-         ORDER BY created_at DESC LIMIT 1`,
-      )
-      .bind(date)
-      .first<{ data: string | null }>();
-    if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
-    let filePath: string | null = null;
+    // Same DO-eviction guard as triggerDailyPiece — audio alone can
+    // run past the 70-140s inactivity threshold for longer pieces.
+    const keepAliveDispose = await this.keepAlive();
     try {
-      filePath = JSON.parse(pubRow.data)?.filePath ?? null;
-    } catch { /* malformed JSON */ }
-    if (!filePath) throw new Error(`retryAudio: no filePath in publishing.done for ${date}`);
+      const piece = await this.env.DB
+        .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
+        .bind(date)
+        .first<{ headline: string }>();
+      if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
 
-    const publisher = await this.subAgent(PublisherAgent, `retry-reader-${date}`);
-    const current = await publisher.readPublishedMdx(filePath);
-    if (!current) throw new Error(`retryAudio: file not in repo: ${filePath}`);
+      // filePath lives in the publishing.done step's data column.
+      const pubRow = await this.env.DB
+        .prepare(
+          `SELECT data FROM pipeline_log
+           WHERE run_id = ? AND step = 'publishing' AND status = 'done'
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .bind(date)
+        .first<{ data: string | null }>();
+      if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
+      let filePath: string | null = null;
+      try {
+        filePath = JSON.parse(pubRow.data)?.filePath ?? null;
+      } catch { /* malformed JSON */ }
+      if (!filePath) throw new Error(`retryAudio: no filePath in publishing.done for ${date}`);
 
-    await this.runAudioPipeline(date, current.mdx, filePath, piece.headline);
+      const publisher = await this.subAgent(PublisherAgent, `retry-reader-${date}`);
+      const current = await publisher.readPublishedMdx(filePath);
+      if (!current) throw new Error(`retryAudio: file not in repo: ${filePath}`);
+
+      await this.runAudioPipeline(date, current.mdx, filePath, piece.headline);
+    } finally {
+      keepAliveDispose();
+    }
   }
 
   /**
@@ -502,37 +521,45 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       throw new Error(`retryAudioFresh: invalid date "${date}"`);
     }
 
-    // Wipe R2 clips for this date (audio/daily/YYYY-MM-DD/*.mp3)
-    const prefix = `audio/daily/${date}/`;
-    const listed = await this.env.AUDIO_BUCKET.list({ prefix });
-    await Promise.all(
-      listed.objects.map((obj) => this.env.AUDIO_BUCKET.delete(obj.key)),
-    );
+    // keepAlive is reference-counted inside the SDK — nesting with the
+    // inner retryAudio() call is safe; the heartbeat stops only when all
+    // refs are disposed.
+    const keepAliveDispose = await this.keepAlive();
+    try {
+      // Wipe R2 clips for this date (audio/daily/YYYY-MM-DD/*.mp3)
+      const prefix = `audio/daily/${date}/`;
+      const listed = await this.env.AUDIO_BUCKET.list({ prefix });
+      await Promise.all(
+        listed.objects.map((obj) => this.env.AUDIO_BUCKET.delete(obj.key)),
+      );
 
-    // Wipe D1 beat rows
-    await this.env.DB
-      .prepare('DELETE FROM daily_piece_audio WHERE date = ?')
-      .bind(date)
-      .run();
+      // Wipe D1 beat rows
+      await this.env.DB
+        .prepare('DELETE FROM daily_piece_audio WHERE date = ?')
+        .bind(date)
+        .run();
 
-    // Clear has_audio on the piece so dashboard + site reflect "pending"
-    await this.env.DB
-      .prepare('UPDATE daily_pieces SET has_audio = 0 WHERE date = ?')
-      .bind(date)
-      .run()
-      .catch(() => {});
+      // Clear has_audio on the piece so dashboard + site reflect "pending"
+      await this.env.DB
+        .prepare('UPDATE daily_pieces SET has_audio = 0 WHERE date = ?')
+        .bind(date)
+        .run()
+        .catch(() => {});
 
-    // Clear audio-* pipeline_log rows so the timeline resets cleanly.
-    // Text-phase rows (scanning, curating, drafting, auditing_*,
-    // publishing, done) stay — they describe a published piece that
-    // remains published.
-    await this.env.DB
-      .prepare("DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'")
-      .bind(date)
-      .run();
+      // Clear audio-* pipeline_log rows so the timeline resets cleanly.
+      // Text-phase rows (scanning, curating, drafting, auditing_*,
+      // publishing, done) stay — they describe a published piece that
+      // remains published.
+      await this.env.DB
+        .prepare("DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'")
+        .bind(date)
+        .run();
 
-    // Delegate to existing retryAudio — it handles MDX read + audio pipeline
-    await this.retryAudio(date);
+      // Delegate to existing retryAudio — it handles MDX read + audio pipeline
+      await this.retryAudio(date);
+    } finally {
+      keepAliveDispose();
+    }
   }
 
   getStatus(): DirectorState {
