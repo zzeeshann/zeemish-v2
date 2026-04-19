@@ -130,16 +130,19 @@ Learner: runs off-pipeline on reader engagement data
 - **File:** `agents/src/publisher.ts`
 
 ### 12. LearnerAgent
-- **Role:** Watches reader engagement data (completions, drop-offs, audio vs text, return rate) AND writes patterns into the learnings database for future pieces. Merged from the former EngagementAnalyst + Reviser.
-- **Methods:** `analyse(courseId, days)` — engagement report; `analyseAndLearn(lessonData)` — extract learnings
-- **Output:** Engagement reports + learnings written to D1 `learnings` table
-- **Does NOT touch published content.** Published pieces are permanent.
+- **Role:** Writes patterns into the `learnings` database so tomorrow's Drafter can see what today's pipeline and readers taught us. Two signal sources wired, two more scaffolded:
+  - **Producer-side (P1.3, wired 2026-04-19):** `analysePiecePostPublish(date)` reads the full quality record for a just-published piece — `daily_pieces`, `audit_results`, `pipeline_log`, `daily_candidates` — and writes `source='producer'` learnings. Fired by Director off-pipeline immediately after `publishing done`, via a 1-second `this.schedule(...)` so it never blocks the ship. Caps writes at 10 per run; overflow logs to observer_events. Non-retriable by design: a DB/Claude/JSON failure logs to observer_events and moves on.
+  - **Reader-side (P1.5 pending traffic):** `analyse(courseId, days)` produces an engagement report from `engagement`; `analyseAndLearn(lessonData)` extracts learnings and writes `source='reader'`. Only fires when readers generate engagement events (no readers on the daily pieces yet).
+  - **Self-reflection (P1.4 pending):** Drafter's own post-draft review, `source='self-reflection'`.
+  - **Zita (P1.5 pending traffic):** patterns in reader Zita questions, `source='zita'`.
+- **Output:** Producer post-publish result (`{date, written, overflowCount, considered}`) returned to Director for overflow logging; learning rows written to `learnings` with `source` populated.
+- **Does NOT touch published content.** Published pieces are permanent. All improvements feed forward.
 - **File:** `agents/src/learner.ts`
-- **Prompt:** `agents/src/learner-prompt.ts`
+- **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side)
 
 ### 13. ObserverAgent
-- **Role:** Logs events (published, escalated, errors) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `getRecentEvents()`, `getDailyDigest()`
+- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `getRecentEvents()`, `getDailyDigest()`
 - **File:** `agents/src/observer.ts`
 
 ## Endpoints

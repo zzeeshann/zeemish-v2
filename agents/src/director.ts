@@ -10,6 +10,7 @@ import { CuratorAgent } from './curator';
 import { DrafterAgent } from './drafter';
 import { AudioProducerAgent, AudioBudgetExceededError } from './audio-producer';
 import { AudioAuditorAgent } from './audio-auditor';
+import { LearnerAgent } from './learner';
 import type { Env, DirectorState, DirectorPhase, DailyPieceBrief } from './types';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
@@ -303,6 +304,18 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
     }
 
+    // ─── Post-publish producer-side learning (P1.3, off-pipeline) ────
+    // Right after publishing done, kick the Learner to read the full
+    // quality record and write producer-origin rows into `learnings`
+    // for tomorrow's Drafter to see. Scheduled (not awaited) so it
+    // never blocks the ship. Non-retriable by design — if it fails,
+    // the scheduled method logs to observer_events and moves on. Fires
+    // before the audio schedule so alarm ordering is deterministic.
+    await this.schedule(1, 'analyseProducerSignalsScheduled', {
+      date: today,
+      title: brief.headline,
+    });
+
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
     // Schedule audio to run in an alarm-triggered invocation instead of
     // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
@@ -312,7 +325,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // invocation — exactly the boundary we need. The text piece is
     // already permanent either way; audio is ship-and-retry. See
     // DECISIONS 2026-04-19 "Audio via alarm, not inline".
-    await this.schedule(1, 'runAudioPipelineScheduled', {
+    await this.schedule(2, 'runAudioPipelineScheduled', {
       date: today,
       filePath: publishResult.filePath,
       title: brief.headline,
@@ -326,6 +339,45 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     return { brief, mdx: currentMdx };
     } finally {
       keepAliveDispose();
+    }
+  }
+
+  /**
+   * Alarm callback — runs the Learner's post-publish producer analysis
+   * in a fresh DO invocation, off the main publishing path. Scheduled
+   * by `triggerDailyPiece` right after `publishing done`.
+   *
+   * Non-retriable by design: if anything throws (DB read, Claude call,
+   * JSON parse), we log to observer_events and return. The piece is
+   * already live; a missed iteration of the learning loop isn't
+   * catastrophic and retry logic is exactly the kind of defensive
+   * plumbing that turns into mystery failures later.
+   *
+   * Overflow handling: Learner caps writes at PRODUCER_LEARNINGS_WRITE_CAP
+   * and returns the overflow count. If non-zero, we log a visibility
+   * warn — usually a signal that the analysis restated one pattern
+   * multiple ways and the prompt needs tightening.
+   */
+  async analyseProducerSignalsScheduled(payload: {
+    date: string;
+    title: string;
+  }): Promise<void> {
+    const { date, title } = payload;
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    try {
+      const learner = await this.subAgent(LearnerAgent, 'learner');
+      const result = await learner.analysePiecePostPublish(date);
+      if (result.overflowCount > 0) {
+        await observer
+          .logLearnerOverflow(date, title, result.written, result.overflowCount)
+          .catch(() => { /* observer write failure never blocks */ });
+      }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      await observer
+        .logLearnerFailure(date, title, reason)
+        .catch(() => { /* observer write failure never blocks */ });
+      // non-retriable: logged, moving on
     }
   }
 

@@ -2,6 +2,35 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-19: Learner writes producer-origin learnings post-publish (P1.3 — behaviour)
+**Context:** Plumbing for the `source` column landed in the previous commit ([DECISIONS entry elided — see migration 0011 + writeLearning signature change]). This commit turns it on. The Learner has been reader-engagement-only since launch; since no readers exist on daily pieces yet, the learnings feed the Drafter reads has been narrow (mostly StructureEditor's auditor-time writes). Producer-side signal — which auditor findings recurred, which candidate Curator picked vs the 49 it skipped, how many revision rounds a piece needed, what the final voice score was — was visible to the Director in `audit_results` + `pipeline_log` + `daily_candidates` but never flowed into the learning loop.
+
+**Decision:** After every `publishing done`, Director fires `Learner.analysePiecePostPublish(date)` off-pipeline via `this.schedule(1, 'analyseProducerSignalsScheduled', ...)`. The Learner reads the full quality record for the date, sends a compact context to Claude (Sonnet 4.5), parses a strict JSON response `{learnings: [{category, observation}]}`, and writes the first 10 rows with `source='producer'`. Drafter's `getRecentLearnings(10)` from P1.1 then picks these up on the next run.
+
+**Design choices — explicit:**
+- **Trigger at `publishing done`, not `audio-publishing done`.** Producer-side signal is complete the moment text is live — the revision rounds, voice score, candidates picked vs skipped are all settled. Audio lands in its own separate signal category (audio-producer failures, character budgets) that can flow through a future hook without waiting for audio to bind to text. Firing earlier means tomorrow's Drafter starts benefiting from today's lessons ~2 minutes sooner, which matters at zero cost.
+- **Off-pipeline, non-blocking.** `this.schedule(1, ...)` not `await learner.analysePiecePostPublish(...)` directly. The piece is already live; the learning is nice-to-have, and must never delay publishing.
+- **Non-retriable on failure.** If Claude errors, JSON is malformed, or D1 chokes, Director's `analyseProducerSignalsScheduled` logs to `observer_events` via `observer.logLearnerFailure(date, title, reason)` and returns. No retry loop. The piece is live; a missed batch of learnings isn't catastrophic and retry logic is exactly the kind of defensive code that turns into mystery failures later — deliberate constraint from Zishan.
+- **Cap writes at 10 per run; log overflow.** Learner slices `.slice(0, 10)` and returns `overflowCount`. If >0, Director calls `observer.logLearnerOverflow(...)` as a warn event. Usually means the analysis restated the same pattern N ways — a cheap signal that the prompt needs tightening. Constant `PRODUCER_LEARNINGS_WRITE_CAP = 10` in [learner.ts](../agents/src/learner.ts) so the number is searchable.
+- **Category normalisation, not constraint.** Claude's returned `category` is lowercased and matched against the four known values (voice / structure / fact / engagement). Anything else falls back to `structure` — a safe default because every prompt sees structure findings. No CHECK constraint, no throw; the `category` column's enum is a convention, not a contract.
+- **Dedicated observer methods over reused `logError`.** `logLearnerFailure` (warn) and `logLearnerOverflow` (warn) surface with specific titles in the admin feed rather than generic "Error: learner-post-publish" noise. Small observability win; ~15 lines in `observer.ts`.
+
+**Alternatives considered:**
+- **Hand the Learner its own alarm loop with per-piece retry.** Rejected per Zishan's non-retriable constraint. Dead simple to add later if the failure rate turns out to warrant it — for now, silence on failure is fine.
+- **Write from the Director directly, skip the LearnerAgent subagent hop.** Rejected — agents own their own prompts and state. The Learner is already the right place to think about learnings; routing producer signal through the same agent keeps the "watch everything, write to learnings" concept honest.
+- **Trigger at `done done` (final step) instead of `publishing done`.** Rejected — `done done` fires one log-line after `publishing done` with no new information. Earlier is strictly better.
+- **Deeper quality record (include full MDX body, entire pipeline_log payloads).** Rejected for v1. Context is already ~3-10KB for a typical piece; adding the MDX body would triple it for marginal extra signal. If a specific learning needs body context, add it selectively.
+
+**Loop status after P1.3:**
+- Producer signal → Drafter: **wired end-to-end.** Post-publish Learner → `learnings (source='producer')` → Drafter's `getRecentLearnings(10)` on the next run.
+- Reader signal → Drafter: scaffolded but dormant (no readers yet).
+- Self-reflection → Drafter: not yet (P1.4).
+- Zita signal → Drafter: not yet (P1.5).
+
+**Verification:** Type-check on agents workspace — 33 errors before, 33 after (all pre-existing Agents-SDK inference issues in server.ts; zero from the changes in this commit). Behaviour will first exercise tonight's 2am UTC cron: after `publishing done`, a `analyseProducerSignalsScheduled` alarm fires; on success, 0–10 rows land in `learnings` with `source='producer'`; on failure, a warn event titled "Post-publish learnings missed: …" appears in observer_events.
+
+**References:** [agents/src/learner.ts](../agents/src/learner.ts) `analysePiecePostPublish`, [agents/src/learner-prompt.ts](../agents/src/learner-prompt.ts) `LEARNER_POST_PUBLISH_PROMPT`, [agents/src/director.ts](../agents/src/director.ts) `analyseProducerSignalsScheduled`, [agents/src/observer.ts](../agents/src/observer.ts) `logLearnerFailure` + `logLearnerOverflow`, [docs/AGENTS.md](AGENTS.md) LearnerAgent section.
+
 ## 2026-04-19: Drafter reads learnings at runtime (P1.1 — closing the self-improvement loop)
 **Context:** Twelve of thirteen agents have been running identical prompts every day since launch. The `learnings` table was effectively write-only — StructureEditor and Learner wrote into it, but no agent's runtime prompt read from it. That meant every day started from scratch regardless of what prior pieces taught us. The self-improvement loop existed in principle only.
 

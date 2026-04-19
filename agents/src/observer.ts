@@ -91,6 +91,40 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Post-publish producer learnings analysis failed. Non-retriable —
+   *  the piece is already live, a missed batch of learnings isn't
+   *  catastrophic, and we don't want defensive retry logic. Surfaced
+   *  as a warn (not escalation) because nothing downstream breaks. */
+  async logLearnerFailure(
+    date: string,
+    title: string,
+    reason: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Post-publish learnings missed: ${title}`,
+      body: `Producer-side analysis failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
+      context: { date, reason },
+    });
+  }
+
+  /** Post-publish producer analysis produced more learnings than the
+   *  cap allows (currently 10). Logged for visibility — usually a
+   *  signal that the analysis restated one pattern multiple ways. */
+  async logLearnerOverflow(
+    date: string,
+    title: string,
+    written: number,
+    overflowCount: number,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Learning overflow: ${title}`,
+      body: `Post-publish analysis for "${title}" produced ${written + overflowCount} learnings; wrote ${written}, dropped ${overflowCount}. Usually means the analysis restated the same pattern multiple ways — worth a look if it keeps happening.`,
+      context: { date, written, overflowCount },
+    });
+  }
+
   /** Audio pipeline failed somewhere — text is already live, admin
    *  needs to know so they can retry. Escalation severity so it
    *  surfaces in the admin feed next to low-quality publishes. */

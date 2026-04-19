@@ -3,7 +3,32 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { writeLearning } from './shared/learnings';
 import { extractJson } from './shared/parse-json';
-import { LEARNER_ANALYSE_PROMPT } from './learner-prompt';
+import { LEARNER_ANALYSE_PROMPT, LEARNER_POST_PUBLISH_PROMPT } from './learner-prompt';
+
+/** Cap on producer-side learnings written per post-publish run. If
+ *  the analysis produces more than this from one piece, something is
+ *  wrong (same pattern restated N ways). We write the first N and log
+ *  the overflow to observer_events — it's easier to notice the
+ *  over-generation than to let it flood the table. */
+const PRODUCER_LEARNINGS_WRITE_CAP = 10;
+
+/** Producer-side analysis output from Claude. Category/observation
+ *  shape mirrors the prompt's JSON contract. */
+interface ProducerLearning {
+  category: string;
+  observation: string;
+}
+
+function normalizeProducerCategory(
+  c: string,
+): 'voice' | 'structure' | 'engagement' | 'fact' {
+  const k = (c ?? '').toLowerCase().trim();
+  if (k === 'voice') return 'voice';
+  if (k === 'structure') return 'structure';
+  if (k === 'engagement') return 'engagement';
+  if (k === 'fact') return 'fact';
+  return 'structure'; // safe default — all four prompts see structure findings
+}
 
 // --- Types (merged from EngagementAnalyst + Learner) ---
 
@@ -41,6 +66,16 @@ export interface EngagementLearning {
 interface LearnerState {
   learningsWritten: number;
   lastReport: EngagementReport | null;
+}
+
+/** Result of a post-publish producer analysis — surfaced back to
+ *  Director so it can log overflow to observer_events. Not persisted
+ *  in LearnerState because Director is the one that acts on it. */
+export interface PostPublishResult {
+  date: string;
+  written: number;      // how many rows actually landed in learnings
+  overflowCount: number; // how many were produced beyond PRODUCER_LEARNINGS_WRITE_CAP
+  considered: number;   // total learnings Claude produced (written + overflowCount on success)
 }
 
 /**
@@ -195,5 +230,158 @@ Extract learnings for future pieces. What should the Drafter do differently next
       problem: lessonData.reason,
       learnings: parsed.learnings,
     };
+  }
+
+  // --- Producer-side post-publish analysis (P1.3) ---
+
+  /**
+   * Read the full pipeline record for a just-published piece and write
+   * producer-origin learnings. Called off-pipeline after Publisher's
+   * `publishing done` so it never blocks a ship.
+   *
+   * Non-retriable by design: if any step throws (DB read, Claude call,
+   * JSON parse), Director catches and logs to observer_events. The
+   * piece is already live; a missed batch of learnings isn't
+   * catastrophic and retry logic is exactly the kind of defensive
+   * code that turns into mystery failures later.
+   */
+  async analysePiecePostPublish(date: string): Promise<PostPublishResult> {
+    // ── 1. Read the piece's full quality record ──────────────────
+    const piece = await this.env.DB
+      .prepare(
+        `SELECT headline, underlying_subject, source_story, word_count,
+                beat_count, voice_score, fact_check_passed, quality_flag,
+                published_at
+         FROM daily_pieces WHERE date = ? LIMIT 1`,
+      )
+      .bind(date)
+      .first<{
+        headline: string;
+        underlying_subject: string;
+        source_story: string;
+        word_count: number | null;
+        beat_count: number | null;
+        voice_score: number | null;
+        fact_check_passed: number | null;
+        quality_flag: string | null;
+        published_at: number | null;
+      }>();
+
+    if (!piece) {
+      throw new Error(`analysePiecePostPublish: no daily_pieces row for ${date}`);
+    }
+
+    const auditsRes = await this.env.DB
+      .prepare(
+        `SELECT auditor, passed, score, notes, created_at
+         FROM audit_results
+         WHERE task_id LIKE ?
+         ORDER BY created_at ASC`,
+      )
+      .bind(`daily/${date}%`)
+      .all<{ auditor: string; passed: number; score: number | null; notes: string | null; created_at: number }>();
+
+    const candsRes = await this.env.DB
+      .prepare(
+        `SELECT headline, source, teachability_score, selected
+         FROM daily_candidates
+         WHERE date = ?
+         ORDER BY selected DESC, teachability_score DESC
+         LIMIT 8`,
+      )
+      .bind(date)
+      .all<{ headline: string; source: string; teachability_score: number | null; selected: number }>();
+
+    const logRes = await this.env.DB
+      .prepare(
+        `SELECT step, status, data, created_at
+         FROM pipeline_log
+         WHERE run_id = ?
+         ORDER BY created_at ASC`,
+      )
+      .bind(date)
+      .all<{ step: string; status: string; data: string | null; created_at: number }>();
+
+    // ── 2. Build a compact, readable context for Claude ──────────
+    const roundsCount = logRes.results.filter((r) => r.step.startsWith('auditing_') && r.status === 'done').length;
+    const pickedCandidate = candsRes.results.find((c) => c.selected === 1);
+    const skipped = candsRes.results.filter((c) => c.selected === 0).slice(0, 5);
+
+    const context = `## Piece
+- Date: ${date}
+- Headline: "${piece.headline}"
+- Underlying subject: ${piece.underlying_subject}
+- Source story: ${piece.source_story}
+- Word count: ${piece.word_count ?? 'unknown'}
+- Beat count: ${piece.beat_count ?? 'unknown'}
+- Final voice score: ${piece.voice_score ?? 'unknown'}/100
+- Fact-check passed: ${piece.fact_check_passed ? 'yes' : 'no'}
+- Quality flag: ${piece.quality_flag ?? 'none'}
+- Revision rounds: ${Math.max(0, roundsCount - 1)}
+
+## Candidate Curator picked
+${pickedCandidate ? `"${pickedCandidate.headline}" (${pickedCandidate.source}, teachability ${pickedCandidate.teachability_score ?? '—'})` : '(picked candidate not found in daily_candidates)'}
+
+## Top skipped candidates (what Curator passed on)
+${skipped.length === 0 ? '(none)' : skipped.map((c) => `- "${c.headline}" (${c.source}, teachability ${c.teachability_score ?? '—'})`).join('\n')}
+
+## Audit results (in order)
+${auditsRes.results.length === 0 ? '(no audit_results rows)' : auditsRes.results.map((a) => {
+  const verdict = a.passed ? 'passed' : 'failed';
+  const scoreStr = a.score == null ? '' : ` score=${a.score}`;
+  const notes = (a.notes ?? '').slice(0, 1500);
+  return `- ${a.auditor} ${verdict}${scoreStr}\n  notes: ${notes}`;
+}).join('\n')}
+
+## Pipeline timeline (step — status)
+${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
+
+    // ── 3. Ask Claude for producer-side learnings ────────────────
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 2000,
+      system: LEARNER_POST_PUBLISH_PROMPT,
+      messages: [{ role: 'user', content: context }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    let parsed: { learnings?: ProducerLearning[] };
+    try {
+      parsed = extractJson<typeof parsed>(text);
+    } catch {
+      parsed = { learnings: [] };
+    }
+    const all: ProducerLearning[] = Array.isArray(parsed.learnings) ? parsed.learnings : [];
+
+    // ── 4. Cap writes + log overflow signal back to caller ───────
+    const toWrite = all.slice(0, PRODUCER_LEARNINGS_WRITE_CAP);
+    const overflowCount = Math.max(0, all.length - PRODUCER_LEARNINGS_WRITE_CAP);
+
+    let written = 0;
+    for (const l of toWrite) {
+      if (!l?.observation) continue;
+      const category = normalizeProducerCategory(l.category);
+      try {
+        await writeLearning(
+          this.env.DB,
+          category,
+          l.observation,
+          { date, phase: 'post-publish', voiceScore: piece.voice_score, rounds: Math.max(0, roundsCount - 1) },
+          60,
+          'producer',
+        );
+        written += 1;
+      } catch {
+        // per-row write failure isn't fatal — the others still land
+      }
+    }
+
+    this.setState({
+      ...this.state,
+      learningsWritten: this.state.learningsWritten + written,
+    });
+
+    return { date, written, overflowCount, considered: all.length };
   }
 }
