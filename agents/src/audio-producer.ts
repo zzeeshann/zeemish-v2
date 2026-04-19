@@ -20,6 +20,27 @@ export interface BeatAudio {
   requestId: string | null;
 }
 
+/**
+ * Return shape of a single `generateAudioChunk` call. Director uses
+ * `completedCount` vs `totalBeats` to decide whether to call again.
+ *
+ * - `processedBeats` — beats actually generated in THIS call (newly
+ *   created MP3s). Empty if all remaining beats already existed in R2.
+ * - `totalBeats` — total beats extracted from the MDX (stable across
+ *   chunks for a given piece).
+ * - `completedCount` — total beats with rows in `daily_piece_audio` for
+ *   this date AFTER this chunk finished. When `completedCount ===
+ *   totalBeats`, Director stops looping.
+ * - `totalCharacters` — sum of characters across all prepared beats
+ *   (used for budget check + duration estimate; stable across chunks).
+ */
+export interface ChunkResult {
+  processedBeats: BeatAudio[];
+  totalBeats: number;
+  completedCount: number;
+  totalCharacters: number;
+}
+
 interface AudioProducerState {
   lastResult: AudioResult | null;
 }
@@ -65,15 +86,33 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
   initialState: AudioProducerState = { lastResult: null };
 
   /**
-   * Generate audio for every beat in a piece.
+   * Generate audio for up to `maxBeats` of a piece's beats, then return.
+   *
+   * Why chunked: Cloudflare Durable Object RPC calls have a ~30s wall-
+   * clock ceiling. A 6-beat piece at ~10-15s/beat of ElevenLabs latency
+   * blows past that in a single call — the producer DO silently
+   * hibernates mid-loop and the caller's await never resolves. Proven
+   * empirically on 2026-04-19: both runs stalled at exactly 2 beats in
+   * ~20-25s elapsed, regardless of content. See DECISIONS 2026-04-19
+   * "Audio RPC wall-clock budget" for the investigation.
+   *
+   * Director calls this in a loop, checking `completedCount` vs
+   * `totalBeats` to know when to stop. Each call stays well under the
+   * RPC ceiling (2 beats × ~15s ≈ 30s worst case).
+   *
    * Order of operations:
-   *   1. Extract beats from MDX, prepare text for TTS
+   *   1. Extract beats from MDX, prepare text for TTS (stable per call)
    *   2. Sum characters — abort with AudioBudgetExceededError if > CHAR_CAP
-   *   3. For each beat: R2 head-check → generate if missing → R2 put
-   *   4. Persist row to daily_piece_audio (upsert)
-   *   5. Maintain rolling previous_request_ids window (max 3) for prosodic continuity
+   *   3. Load last 3 request_ids from D1 for cross-chunk prosodic continuity
+   *   4. Iterate prepared beats — skip any already in R2, process up to
+   *      maxBeats new ones. For each: ElevenLabs call → R2 put → D1 upsert.
+   *   5. Return ChunkResult with counts so Director can decide to loop
    */
-  async generateAudio(brief: AudioBrief, mdx: string): Promise<AudioResult> {
+  async generateAudioChunk(
+    brief: AudioBrief,
+    mdx: string,
+    maxBeats: number = 2,
+  ): Promise<ChunkResult> {
     const beats = this.extractBeats(mdx);
 
     const prepared = beats
@@ -85,22 +124,42 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       throw new AudioBudgetExceededError(totalCharacters);
     }
 
-    const beatAudioPaths: BeatAudio[] = [];
-    const priorRequestIds: string[] = [];
+    // Cross-chunk prosodic continuity: pull the last 3 request_ids from
+    // D1 so ElevenLabs can stitch this chunk's audio onto the prior
+    // chunk's naturally. In-memory window doesn't survive across RPC
+    // calls because each call may land on a fresh DO instance.
+    const priorRes = await this.env.DB
+      .prepare(
+        `SELECT request_id FROM daily_piece_audio
+         WHERE date = ? AND request_id IS NOT NULL
+         ORDER BY generated_at DESC LIMIT 3`,
+      )
+      .bind(brief.date)
+      .all<{ request_id: string }>();
+    // Reverse so oldest-first, matching the order ElevenLabs expects
+    const priorRequestIds: string[] = priorRes.results
+      .map((r) => r.request_id)
+      .reverse();
+
+    const processedBeats: BeatAudio[] = [];
+    let processedThisCall = 0;
 
     for (const beat of prepared) {
+      if (processedThisCall >= maxBeats) break;
+
       const r2Key = `audio/daily/${brief.date}/${beat.name}.mp3`;
       const existing = await this.env.AUDIO_BUCKET.head(r2Key);
 
-      let requestId: string | null = null;
+      // Skip already-done beats without counting against maxBeats — a
+      // retry on a 4/6 piece should find 4 existing, skip them fast,
+      // and generate the remaining 2 (fitting in one call). Only newly
+      // generated beats count toward the cap.
+      if (existing) continue;
 
-      if (!existing) {
-        const res = await this.callElevenLabs(beat.text, priorRequestIds);
-        await this.env.AUDIO_BUCKET.put(r2Key, res.audio, {
-          httpMetadata: { contentType: 'audio/mpeg' },
-        });
-        requestId = res.requestId;
-      }
+      const res = await this.callElevenLabs(beat.text, priorRequestIds);
+      await this.env.AUDIO_BUCKET.put(r2Key, res.audio, {
+        httpMetadata: { contentType: 'audio/mpeg' },
+      });
 
       const publicUrl = `/${r2Key}`;
       const beatAudio: BeatAudio = {
@@ -108,22 +167,34 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
         r2Key,
         publicUrl,
         characterCount: beat.text.length,
-        requestId,
+        requestId: res.requestId,
       };
-      beatAudioPaths.push(beatAudio);
+      processedBeats.push(beatAudio);
 
       await this.persistBeatRow(brief.date, beatAudio);
 
-      if (requestId) {
-        priorRequestIds.push(requestId);
+      if (res.requestId) {
+        priorRequestIds.push(res.requestId);
         if (priorRequestIds.length > 3) priorRequestIds.shift();
       }
+      processedThisCall++;
     }
 
-    const totalDurationEstimate = Math.round((totalCharacters / 5 / 150) * 60);
-    const result: AudioResult = { beatAudioPaths, totalDurationEstimate, totalCharacters };
-    this.setState({ lastResult: result });
-    return result;
+    // Source of truth for completion is D1, not an in-memory counter.
+    // Retries, partial prior runs, and concurrent invocations all land
+    // here consistently.
+    const countRow = await this.env.DB
+      .prepare('SELECT COUNT(*) AS cnt FROM daily_piece_audio WHERE date = ?')
+      .bind(brief.date)
+      .first<{ cnt: number }>();
+    const completedCount = countRow?.cnt ?? 0;
+
+    return {
+      processedBeats,
+      totalBeats: prepared.length,
+      completedCount,
+      totalCharacters,
+    };
   }
 
   /**

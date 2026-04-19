@@ -682,3 +682,45 @@ Retry UI gap compounded the problem: partial rows are exactly when operators nee
 **Verified:** `npx tsc --noEmit` on agents/ — zero new errors in touched files. The server.ts DurableObjectStub noise that flags `retryAudioFresh` is the same pre-existing pattern that flags `retryAudio`, `getStatus`, `triggerDailyPiece`, etc. Runtime is unaffected.
 
 **References:** [agents/src/audio-producer.ts](../agents/src/audio-producer.ts) (callElevenLabs + AbortSignal.timeout), [agents/src/director.ts](../agents/src/director.ts) (retryAudioFresh), [agents/src/server.ts](../agents/src/server.ts) (/audio-retry mode dispatch), [src/pages/api/agents/audio-retry.ts](../src/pages/api/agents/audio-retry.ts) (proxy passthrough), [src/pages/dashboard/admin/piece/[date].astro](../src/pages/dashboard/admin/piece/[date].astro) (UI + script).
+
+## 2026-04-19: Audio RPC wall-clock budget — chunked generation
+
+**Context:** After Phase D fixes (ElevenLabs timeout + retry UI + retryAudioFresh) deployed and 04-19 was re-triggered, audio again stalled at exactly 2 of 6 beats. Hit **Continue** once → 2→4. Hit it again → 4→6. Pattern made the root cause crisp:
+
+| Run | Beat 1 | Beat 2 | Elapsed |
+|---|---|---|---|
+| First autonomous | 08:18:47 | 08:19:05 | ~18s |
+| First retrigger | 09:14:08 | 09:14:20 | ~12s |
+| Continue click 1 | N/A | N/A | ~20s, +2 beats |
+| Continue click 2 | N/A | N/A | ~15s, +2 beats |
+
+Each producer invocation cleared ~2 beats in ~20-25s then silently died — no error logged, no observer escalation, no pipeline_log `failed` row. The 30s AbortSignal.timeout we added in Phase D wasn't the culprit: individual ElevenLabs calls completed in 10-15s. The **outer RPC call** from Director → Producer was the thing hitting a ~30s wall-clock budget.
+
+**Root cause:** Cloudflare Durable Object RPC calls are bounded by a wall-clock budget (~30 seconds) before the platform considers them stuck and terminates/hibernates the callee. When producer's `generateAudio(brief, mdx)` ran a for-loop over 6 beats × ~10-15s each of ElevenLabs latency, total wall time was 60-90s — well over budget. Cloudflare silently killed the DO; the pending promise in Director's `await` never resolved. Every symptom tonight — silent hang, no error, admin UI showing partial state indefinitely — traces back to this single budget.
+
+**Decision:** Chunk the producer work. Rename + refactor `generateAudio()` to `generateAudioChunk(brief, mdx, maxBeats = 2)` — processes at most N new beats per call, returns `{processedBeats, totalBeats, completedCount, totalCharacters}`. Director's `runAudioPipeline` replaces the single `await producer.generateAudio(...)` with a bounded while-loop (≤10 iterations) calling `generateAudioChunk` until `completedCount >= totalBeats`. Each call runs for ≤25s (2 beats × ~12s + overhead), comfortably under the RPC budget. All remaining state (auditor, publisher second-commit) is unchanged — they already read from D1.
+
+**Chunk size chosen = 2:** Safe margin under the 30s budget even at ElevenLabs' slow end (2 × 15s = 30s + overhead is risky; 2 × 12s = 24s + overhead fits). Could raise to 3 but no reason to — the loop cost is negligible.
+
+**Cross-chunk prosodic continuity:** ElevenLabs stitches audio across calls via `previous_request_ids` (up to 3 prior request IDs per call). In the old single-call version, this lived in an in-memory array that survived because the whole loop was one DO invocation. Across chunks, that array is gone on each new call. **Fix:** at the start of each chunk, query `daily_piece_audio` for the last 3 non-null `request_id`s by `generated_at DESC`, reverse to oldest-first, use those as the seed `previous_request_ids`. The stitching works unchanged across chunk boundaries — listeners can't tell the audio was generated in 3 calls instead of 1.
+
+**Publisher reads audioBeats map from D1, not from Director's in-memory accumulation.** D1 is the only source of truth that covers (a) all beats from the current run's chunks, (b) any beats carried over from a prior partial run via R2 head-check skip. In-memory accumulation in Director would miss case (b) if a retry happened to land on Continue after a partial.
+
+**Safety belts in Director's while-loop:**
+- `MAX_CHUNK_ITERATIONS = 10` — hard ceiling on loop reruns; for a 20k-char piece at 2 beats/chunk, ≤6 iterations is expected; throws at 10 to prevent runaway cost
+- `processedBeats.length === 0 && completedCount < totalBeats` → no progress → throw (prevents infinite loops if producer silently refuses work)
+
+**Alternatives considered:**
+
+- **Use DO alarm() to chain beat generation.** Producer schedules an alarm to fire in ~2s which picks up the next beat, continues until done, sets a "complete" state that Director polls. Rejected — adds state machine complexity (alarm scheduling, completion polling, timeout detection) for no real benefit over the cleaner synchronous loop. Also leaks "running" state if Director's polling side dies.
+- **Use Cloudflare Queues between Director and Producer.** Over-engineered for a sequential 6-step pipeline. Queues are for decoupling async consumers, not orchestrating a deterministic sequence.
+- **Use `ctx.waitUntil` on the producer side to return early + continue in background.** Changes the RPC contract (caller gets back instantly without results) and introduces the same polling + completion-detection complexity as the alarm approach. Rejected for the same reasons.
+- **Put the loop inside the producer (use ctx.waitUntil + multiple inner RPCs).** Same wall-clock budget still applies to the outer producer RPC; just shifts the problem.
+
+**Reason — why a bounded loop rather than "just keep calling until done":** A runaway loop could spend unbounded ElevenLabs credits if producer gets into a weird state where beats look unprocessed but can't be generated. `MAX_CHUNK_ITERATIONS = 10` is roughly 2× the expected ceiling for the largest piece we'd ship (12 beats × 2 per chunk = 6 iterations), so legitimate work always succeeds but a bug never costs more than ~$1 of credits before escalating.
+
+**Reason — why not just do 1 beat per chunk:** Each chunk has fixed overhead (subAgent lookup, D1 queries for priorRequestIds + countRow, return-trip latency). Doing 1 beat per chunk means 6 chunks of overhead. 2 per chunk halves that; 3 would start flirting with the 30s budget at ElevenLabs' slow end. 2 is the Pareto sweet spot.
+
+**Verified:** `npx tsc --noEmit` — zero errors in touched files. `pnpm build` — site build passes. End-to-end verification pending reset + re-trigger.
+
+**References:** [agents/src/audio-producer.ts](../agents/src/audio-producer.ts) (generateAudioChunk + ChunkResult + priorRequestIds from D1), [agents/src/director.ts](../agents/src/director.ts) (runAudioPipeline chunk-loop + audioBeats from D1 for publisher).

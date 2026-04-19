@@ -329,13 +329,40 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   ): Promise<void> {
     const observer = await this.subAgent(ObserverAgent, 'observer');
 
-    // ─── audio-producer ─────────────────────────────────────────────
+    // ─── audio-producer (chunked) ───────────────────────────────────
+    // Single-call producer blew the ~30s DO RPC ceiling once pieces got
+    // to ~3+ beats (ElevenLabs 10-15s/beat × 6 beats > 30s). Now we
+    // call producer.generateAudioChunk in a bounded loop — each call
+    // processes at most MAX_BEATS_PER_CHUNK new beats, stays well under
+    // the ceiling, and persists rows incrementally. The loop ends when
+    // D1's row count reaches `totalBeats`. See DECISIONS 2026-04-19
+    // "Audio RPC wall-clock budget" for why chunking over alarms.
+    const MAX_BEATS_PER_CHUNK = 2;
+    const MAX_CHUNK_ITERATIONS = 10; // safety belt for runaway loops
     this.enterPhase('audio-producer');
     await this.logStep(date, 'audio-producing', 'running', {});
-    let producerResult;
+    let totalBeats = 0;
+    let totalCharacters = 0;
+    let chunkIterations = 0;
     try {
       const producer = await this.subAgent(AudioProducerAgent, `audio-producer-${date}`);
-      producerResult = await producer.generateAudio({ date }, mdx);
+      while (true) {
+        if (++chunkIterations > MAX_CHUNK_ITERATIONS) {
+          throw new Error(
+            `Audio pipeline exceeded ${MAX_CHUNK_ITERATIONS} chunk iterations — likely stuck`,
+          );
+        }
+        const chunk = await producer.generateAudioChunk({ date }, mdx, MAX_BEATS_PER_CHUNK);
+        totalBeats = chunk.totalBeats;
+        totalCharacters = chunk.totalCharacters;
+        if (chunk.completedCount >= totalBeats) break;
+        if (chunk.processedBeats.length === 0) {
+          // No progress and still incomplete — producer is stuck
+          throw new Error(
+            `Producer made no progress at ${chunk.completedCount}/${totalBeats} beats`,
+          );
+        }
+      }
     } catch (err) {
       const reason = err instanceof AudioBudgetExceededError
         ? `Over ${err.cap}-char cap (would spend ${err.totalChars} chars)`
@@ -345,9 +372,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       return;
     }
     await this.logStep(date, 'audio-producing', 'done', {
-      beatCount: producerResult.beatAudioPaths.length,
-      totalCharacters: producerResult.totalCharacters,
-      durationEstimate: producerResult.totalDurationEstimate,
+      beatCount: totalBeats,
+      totalCharacters,
+      durationEstimate: Math.round((totalCharacters / 5 / 150) * 60),
+      chunks: chunkIterations,
     });
 
     // ─── audio-auditor ──────────────────────────────────────────────
@@ -373,11 +401,22 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     // ─── audio-publisher (second commit) ────────────────────────────
+    // Source of truth for the audioBeats map is D1 — covers the full
+    // set of beats regardless of how many chunks produced them, plus
+    // any beats from prior partial runs picked up via R2 head-check.
     this.enterPhase('audio-publisher');
     await this.logStep(date, 'audio-publishing', 'running', {});
+    const allBeatsRes = await this.env.DB
+      .prepare(
+        `SELECT beat_name, public_url FROM daily_piece_audio
+         WHERE date = ? ORDER BY generated_at ASC`,
+      )
+      .bind(date)
+      .all<{ beat_name: string; public_url: string }>();
     const audioBeats: Record<string, string> = Object.fromEntries(
-      producerResult.beatAudioPaths.map((b) => [b.beatName, b.publicUrl]),
+      allBeatsRes.results.map((r) => [r.beat_name, r.public_url]),
     );
+    const finalBeatCount = allBeatsRes.results.length;
     try {
       const publisher = await this.subAgent(PublisherAgent, `audio-publisher-${date}`);
       const publishResult = await publisher.publishAudio(filePath, audioBeats);
@@ -388,13 +427,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         .catch(() => {});
       await this.logStep(date, 'audio-publishing', 'done', {
         commitUrl: publishResult.commitUrl,
-        beatCount: producerResult.beatAudioPaths.length,
+        beatCount: finalBeatCount,
       });
       await observer.logAudioPublished(
         date,
         title,
-        producerResult.beatAudioPaths.length,
-        producerResult.totalCharacters,
+        finalBeatCount,
+        totalCharacters,
         publishResult.commitUrl,
       );
     } catch (err) {
