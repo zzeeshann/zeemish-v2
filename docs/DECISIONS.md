@@ -2,6 +2,15 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-19: Revert 02882fd — audio double-publish corrupted frontmatter
+**Context:** Retro audio generation for 2026-04-17 via admin Continue button produced two `audio-publishing done` events — 543651b (valid) and 02882fd (corrupted). The second commit deleted the audioBeats map and collapsed `qualityFlag: "low"\n---\n` onto a single line, leaving the MDX with no YAML terminator. Live site unaffected (still serving cached HTML built from 543651b), but next deploy would have built from the corrupted state.
+
+**Decision:** `git revert 02882fd`. Smallest safe action — preserves history, doesn't hide the bug. Audio data in D1/R2 is intact; only the MDX frontmatter splice got mangled.
+
+**Root cause NOT fixed here.** Two stacked bugs (Publisher.publishAudio non-idempotent on second call + Director Continue path firing full re-run instead of resuming) tracked in [docs/FOLLOWUPS.md](FOLLOWUPS.md). Out of today's improvement-plan scope. Tonight's 2am UTC cron is a fresh pipeline (not a retry), so it's unaffected by the Continue-path trigger; tomorrow's piece should land clean.
+
+**References:** [docs/FOLLOWUPS.md](FOLLOWUPS.md) 2026-04-19 entries, [agents/src/publisher.ts:230-247](../agents/src/publisher.ts:230) (spliceAudioBeats), [agents/src/director.ts](../agents/src/director.ts) retryAudio.
+
 ## 2026-04-18: Ship as-is despite security-header gap on prerendered HTML (LAUNCH)
 **Context:** zeemish.io custom-domain swap completed. All security-critical surfaces (`/dashboard/`, `/account`, `/login`, `/api/*`, `/auth/*`, `/audio/*`) are returning all 6 security headers — confirmed via curl. But the public read-only pages (`/`, `/daily/*`, `/library`) still return without security headers and with Cloudflare's default `cache-control: public, max-age=0, must-revalidate`. Three workarounds attempted in sequence (run_worker_first=true → middleware Cache-Control no-store on HTML → post-build.sh overriding _routes.json to include /*) all failed: Cloudflare Workers Static Assets serves `.html` files directly from the asset binding, bypassing the worker entirely, regardless of all three settings. Verified: `_routes.json` IS deployed correctly (`curl https://zeemish.io/_routes.json` shows the override), and the worker IS running for non-HTML routes (the new cache-control lands on `/dashboard/`).
 
