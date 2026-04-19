@@ -2,19 +2,27 @@
 
 > **"Educate myself for humble decisions."**
 
-Daily teaching, made by 13 AI agents, anchored in today's news. Read at **[zeemish.io](https://zeemish.io)**.
+Daily teaching, anchored in today's news, produced by a pipeline of specialised Claude calls — each with one job. Live at **[zeemish.io](https://zeemish.io)**.
 
 ---
 
-Every day at 2am UTC, 13 specialised AI agents scan the news, pick the most teachable story, draft a piece, audit it through quality gates, narrate it beat-by-beat via ElevenLabs, and publish it to the live site. No human in the loop.
+Every day at 2am UTC, a pipeline of 13 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, and publishes it to the live site. No human touches the piece before you read it.
 
 You see the result the next morning — a daily teaching piece anchored in today's news, in plain English, with audio narration. A growing library of past pieces. No login needed to read.
 
 The whole pipeline runs in public. Watch it on the [factory-floor dashboard](https://zeemish.io/dashboard/). Every published piece has a "How this was made" drawer at the bottom showing which agents touched it and what each round of audit said. Transparency is the brand.
 
-## The 13 agents
+## What it actually is
 
-Scanner → Curator → Drafter → [Voice / Fact / Structure auditors] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher (audio second-commit). Director orchestrates; zero LLM calls itself. Observer logs every event for the dashboard. Learner watches readers off-pipeline and writes patterns for future pieces.
+An autonomous daily publishing pipeline of specialised Claude calls with a quality gate, orchestrated by Cloudflare Durable Objects, persisting to D1 / R2 / GitHub. The "13 agents" framing is a clean way to organise the code — thirteen distinct roles, one file per role. It is not a team of independent minds. It's a pipeline with memory.
+
+As of 2026-04-19, that memory is closed into a loop. After every publish, two off-pipeline passes run: one reads the piece's own quality record (audit scores, revision rounds, which candidates Curator picked vs passed over) and writes patterns to a `learnings` table. The other asks the Drafter to reflect honestly on what it just wrote — what felt thin, which topic it was stretching on, what it would do differently. Both feed the Drafter's prompt on the next piece. Whether the loop produces real signal or polite noise is something we'll know after a week of pieces.
+
+## The pipeline
+
+**Scan → Curate → Draft → [Voice · Fact · Structure → Integrate, up to 3 rounds] → Publish → [Audio produce → Audio audit → Publish audio, alarm-scheduled] → [Learn · Reflect, alarm-scheduled, non-blocking]**
+
+Director orchestrates; zero LLM calls of its own. Observer logs every pipeline event. Learner reads producer signals after each publish and readers when they show up. Drafter self-reflects after each publish.
 
 Each agent does one job and lives in one file. See [agents/src/](agents/src/) and [docs/AGENTS.md](docs/AGENTS.md).
 
@@ -24,9 +32,9 @@ Astro + MDX + Tailwind + TypeScript strict, on Cloudflare Workers. Two workers: 
 
 ## How this was built
 
-Largely built with Claude (Anthropic's assistant) as a development partner over a few weeks. The trade-offs and the *why* behind each non-obvious decision are captured in [docs/DECISIONS.md](docs/DECISIONS.md) — append-only, dated entries. The current-state document is [CLAUDE.md](CLAUDE.md) — read that first if you want to understand the system end-to-end.
+Largely built with Claude (Anthropic's assistant) as a development partner over a few weeks. The trade-offs and the *why* behind each non-obvious decision are captured in [docs/DECISIONS.md](docs/DECISIONS.md) — append-only, dated entries. Known bugs and work queued for future sessions live in [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md) — also append-only. The current-state document is [CLAUDE.md](CLAUDE.md) — read that first if you want to understand the system end-to-end.
 
-Honest software: the README tells you how it was built, the dashboard shows you how it runs, the decision log explains why each piece is the way it is. No seams hidden.
+Honest software: the README tells you what it is, the dashboard shows you how it runs, the decision log explains why each piece is the way it is, the followups log shows what's still wrong and waiting to be fixed. No seams hidden.
 
 ## Repo map
 
@@ -35,7 +43,7 @@ agents/src/             13 agent files (one per agent)
 content/daily-pieces/   Published daily pieces (YYYY-MM-DD-slug.mdx)
 src/pages/              Site routes (Astro)
 src/interactive/        Web Components (lesson-shell, audio-player, zita-chat)
-migrations/             D1 schema (10 migrations)
+migrations/             D1 schema (11 migrations)
 scripts/                Build, deploy, and ops scripts
 docs/                   Living documentation
 docs/handoff/           Original architecture briefs (frozen)
@@ -49,9 +57,14 @@ docs/handoff/           Original architecture briefs (frozen)
 - [docs/SCHEMA.md](docs/SCHEMA.md) — D1 tables and migrations
 - [docs/RUNBOOK.md](docs/RUNBOOK.md) — how to run, deploy, trigger, revert
 - [docs/DECISIONS.md](docs/DECISIONS.md) — append-only decisions, with the *why*
+- [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md) — append-only known bugs and work queued for future sessions
 
 ## Status
 
-Launched 2026-04-18 at https://zeemish.io. Locked at tag `v1.0.0`.
+Launched 2026-04-18 at https://zeemish.io. Tagged `v1.0.0`.
+
+Self-improvement loop closed 2026-04-19: Drafter now reads from the `learnings` table at runtime; Learner writes producer-side patterns after each publish; Drafter reflects honestly on its own work after each publish. First cron run under the new behaviour is scheduled for 2am UTC 2026-04-20.
+
+Known open items tracked in [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md). Nothing currently blocks publication.
 
 The original Zeemish (a separate breathing-tools site, 2024) lived at the same domain until launch day. That codebase is preserved at [github.com/zzeeshann/zeemish](https://github.com/zzeeshann/zeemish) (archived).
