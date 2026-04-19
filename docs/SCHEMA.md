@@ -98,20 +98,23 @@ Reader engagement metrics, aggregated per lesson per day.
 PK: (lesson_id, course_id, date). Migration: `0003_engagement_learnings.sql`
 
 ### learnings
-Cross-agent learnings database — patterns that work or don't.
+Cross-agent learnings database — patterns that work or don't. Drafter reads the 10 most recent rows (across all sources / categories) at runtime and includes them in its prompt — the loop the system uses to improve on itself.
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| category | TEXT | voice, structure, engagement, fact |
+| category | TEXT | `voice` \| `structure` \| `engagement` \| `fact`. What kind of learning it is — shapes which prompt it should inform. |
 | observation | TEXT | The insight |
 | evidence | TEXT | JSON: what supports this |
 | confidence | INTEGER | 0-100 |
 | applied_to_prompts | INTEGER | 0 or 1 |
+| source | TEXT | `reader` \| `producer` \| `self-reflection` \| `zita`. Where the signal came from. Loose TEXT, nullable — no CHECK constraint because a future fifth origin is cheap to add at the write site. NULL means "unspecified (pre-P1.3)". Indexed via `idx_learnings_source`. |
 | created_at | INTEGER | |
 | last_validated_at | INTEGER | |
 
-Migration: `0003_engagement_learnings.sql`
+`category` and `source` are orthogonal: `category` is *what* kind of learning (voice/structure/…); `source` is *who* produced the signal (reader/producer/…).
+
+Migrations: `0003_engagement_learnings.sql` (initial), `0011_learnings_source.sql` (added `source`).
 
 ### audit_results
 One row per audit pass per draft — durable audit trail. Written by DirectorAgent after each audit round.
@@ -222,7 +225,7 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 
 Migration: `0007_pipeline_log.sql`
 
-## Migrations summary (10 migrations, 13 tables)
+## Migrations summary (11 migrations, 13 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -233,3 +236,4 @@ Migration: `0007_pipeline_log.sql`
 - `0008_drop_agent_tasks.sql` — dropped unused `agent_tasks` (course-era); recreated `audit_results` without its FK so Director can write the audit trail
 - `0009_quality_flag.sql` — added `daily_pieces.quality_flag` so Director can publish-anyway on max-revision audit failure and mark the piece for archive-view filtering
 - `0010_audio_pipeline.sql` — created `daily_piece_audio` (per-beat audio rows) + added `daily_pieces.has_audio` boolean. Un-paused the audio pipeline.
+- `0011_learnings_source.sql` — added `learnings.source` (reader/producer/self-reflection/zita, nullable TEXT, no CHECK) + `idx_learnings_source`. Plumbing for P1.3 — widens the Learner from reader-only to all-signal.

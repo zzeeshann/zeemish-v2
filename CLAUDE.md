@@ -68,7 +68,7 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 13 tables, 10 migrations)
+### Database (D1 — 13 tables, 11 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log

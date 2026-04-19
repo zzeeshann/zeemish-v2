@@ -173,11 +173,18 @@ Extract learnings for future pieces. What should the Drafter do differently next
 
     for (const learning of parsed.learnings) {
       try {
-        await writeLearning(this.env.DB, 'engagement', learning, {
-          source: lessonData.lessonId,
-          completionRate: lessonData.completionRate,
-          dropOffBeat: lessonData.dropOffBeat,
-        }, 70);
+        await writeLearning(
+          this.env.DB,
+          'engagement',
+          learning,
+          {
+            lessonId: lessonData.lessonId,
+            completionRate: lessonData.completionRate,
+            dropOffBeat: lessonData.dropOffBeat,
+          },
+          70,
+          'reader',
+        );
       } catch { /* learning write shouldn't break */ }
     }
 

@@ -48,8 +48,9 @@ export class StructureEditorAgent extends Agent<Env, StructureEditorState> {
             this.env.DB,
             'structure',
             item,
-            { source: 'structure-editor', passed: result.passed },
+            { origin: 'structure-editor', passed: result.passed },
             confidence,
+            'producer',
           );
         } catch { /* learning write shouldn't break audit */ }
       }

@@ -1,5 +1,17 @@
 import type { Env } from '../types';
 
+/**
+ * Where a learning came from. Loose at the DB level (TEXT, nullable)
+ * so a future fifth origin can be added at the write site without a
+ * schema change — but typed narrowly here so callers get compile-time
+ * help for the four we currently know how to generate.
+ */
+export type LearningSource =
+  | 'reader'          // reader-behaviour signal (engagement, drop-off)
+  | 'producer'        // pipeline quality signal (auditors, curator, etc.)
+  | 'self-reflection' // Drafter's own post-draft review
+  | 'zita';           // patterns in Zita questions
+
 export interface Learning {
   id: string;
   category: string;
@@ -8,11 +20,19 @@ export interface Learning {
   confidence: number;
   applied_to_prompts: number;
   created_at: number;
+  source: LearningSource | null;
 }
 
 /**
  * Write a learning to the D1 learnings table.
  * Called by agents when they notice recurring patterns.
+ *
+ * `source` describes the *origin* of the signal (reader / producer /
+ * self-reflection / zita) and is orthogonal to `category` (voice /
+ * structure / fact / engagement — *what* kind of learning it is).
+ * Both matter: source tells you whether the system learned this from
+ * itself or from readers; category tells you which prompt the learning
+ * should inform.
  */
 export async function writeLearning(
   db: D1Database,
@@ -20,14 +40,15 @@ export async function writeLearning(
   observation: string,
   evidence: Record<string, unknown>,
   confidence: number,
+  source: LearningSource,
 ): Promise<void> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO learnings (id, category, observation, evidence, confidence, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO learnings (id, category, observation, evidence, confidence, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, category, observation, JSON.stringify(evidence), confidence, Date.now())
+    .bind(id, category, observation, JSON.stringify(evidence), confidence, source, Date.now())
     .run();
 }
 
