@@ -2,6 +2,42 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-19: Drafter self-reflects post-publish (P1.4)
+**Context:** Writers generate qualitative signal in their heads while they work — what felt thin, where the research was thinner than the writing made it sound, which beat took the most rewrites, what they'd do differently next time. Publication-time audits (voice/structure/fact) capture the *gated* signal; the honest post-hoc judgment is separate and valuable. Reader-side engagement data doesn't exist yet (no readers), and producer-side pipeline metrics (P1.3) don't capture this flavour of signal. A one-shot Sonnet call asking the Drafter role to review its own output gives the Learner a qualitative feed from day 1.
+
+**Decision:** After every `publishing done`, Director fires `Drafter.reflect(brief, mdx, date)` off-pipeline via `this.schedule(1, 'reflectOnPieceScheduled', ...)`. The call re-reads the committed MDX from GitHub (same pattern as the audio alarm), carries the original brief in the alarm payload so the prompt has both "what was asked" and "what was produced", and writes up to 10 learnings with `source='self-reflection'`.
+
+**Prompt shape — deliberate:**
+- **Opens by naming the stateless reality.** "You didn't write this piece — a prior invocation with this same role did. You're being asked to review it as the same role would, with honest post-hoc judgment. Don't LARP memories; evaluate what's on the page." Without this framing the model tends to fabricate remembered struggle; with it, the model evaluates the piece as a peer editor would. Constraint from Zishan, carried verbatim in intent.
+- **Specific in the ask.** "What felt thin? Which topic were you stretching on where the research was thinner than the writing made it sound? Which beat would have taken the most rewrites? If you wrote a follow-up tomorrow, what would you do differently?" Generic "reflect on this piece" prompts produce generic hedging output; specificity forces substance.
+- **Explicit bans on review-speak.** "No hedging. No 'overall the piece was strong' throat-clearing. No summaries of what the piece did. Write like you're telling a trusted editor what actually happened." The bullets we want are the ones a writer wouldn't put in a revision note.
+- **Output contract mirrors P1.3's `LEARNER_POST_PUBLISH_PROMPT`:** `{learnings: [{category, observation}]}`. Category normalisation + fallback same as Learner (unknown → `structure`). This is so the three origins (producer / reader / self-reflection) compound into one feed that Drafter's `getRecentLearnings(10)` reads without any slicing logic.
+- **User message includes brief + final MDX only.** No scores, no round counts. Scores anchor the model's judgment to a number and invite review-speak; we want unprompted post-hoc reflection on the writing itself.
+
+**Operational constraints — per Zishan:**
+- **Non-retriable on failure.** `Drafter.reflect` throws on Claude/JSON errors; Director catches in `reflectOnPieceScheduled`, logs via `observer.logReflectionFailure(date, title, reason)`, and returns. No retry logic. The piece is live; a missed reflection isn't catastrophic.
+- **Cap writes at 10 per run.** Same constant semantics as P1.3 (`REFLECTION_WRITE_CAP = 10` in drafter.ts, mirroring `PRODUCER_LEARNINGS_WRITE_CAP`). If the call produces more than 10, it's restating the same pattern — tightening the prompt is the fix, not raising the cap. Overflow is surfaced in the metered observer event.
+- **Metered on every run.** Director calls `observer.logReflectionMetered(date, title, {written, overflowCount, considered, tokensIn, tokensOut, durationMs})`. This is the one Sonnet call in the pipeline that doesn't gate anything — so if it silently grows in cost over time (model produces longer reflections, MDX grows, whatever), we want visibility before it matters. Not a hard cap, just a breadcrumb. Info severity so it doesn't clutter the admin feed; the warn/escalation budget stays for actual failures.
+
+**Alarm ordering:**
+Both P1.3 (`analyseProducerSignalsScheduled`) and P1.4 (`reflectOnPieceScheduled`) fire at `this.schedule(1, …)`, then audio fires at `this.schedule(2, …)`. The Agents SDK alarm queue serialises them on the same DO; no races because the DO is single-threaded. Order within the same second isn't guaranteed but doesn't matter — neither depends on the other.
+
+**Alternatives considered:**
+- **Fire inline after Integrator's final pass (pre-publish).** Rejected. Consistency was the decisive argument: keeping the post-publish learning machinery behind a single boundary (alarm → scheduled method) for both Learner and reflection means disabling or debugging either is one code path, not two. Also: Claude is stateless between calls, so there's no memory-freshness benefit to firing pre-publish.
+- **Single combined scheduled method that calls both Learner and Drafter.reflect.** Rejected. Two independent signals with independent failure modes; separate methods means one can go wrong without affecting the other. Alarm queue handles ordering for free.
+- **Pass final MDX in the alarm payload instead of re-reading from GitHub.** Rejected. Payload size discipline — Phase F audio work established the "re-read from GitHub" pattern for exactly this reason.
+- **Hard cap on reflection tokens or cost.** Rejected for v1 — user preference is visibility first, enforce later if drift actually happens.
+
+**Loop status after P1.4:**
+- Producer signal → Drafter: wired end-to-end (P1.3).
+- Self-reflection → Drafter: **wired end-to-end.** `reflect()` → `learnings (source='self-reflection')` → `getRecentLearnings(10)` on the next run.
+- Reader signal → Drafter: scaffolded but dormant (no readers yet).
+- Zita signal → Drafter: not yet (P1.5).
+
+**Verification:** Unit-tested the prompt builder — system prompt opens with the stateless-reality line, contains all the specific-ask language (be honest, what felt thin, stretching, three-to-six bullets, no hedging, no throat-clearing), carries the JSON contract; user message includes brief + full MDX but omits scores/round counts. Type-check on agents workspace: 33 pre-existing errors, 33 after. Behaviour will first exercise tonight's 2am UTC cron — expect one `Reflection: <title>` info event in observer_events per publish, with tokens-in/out + latency.
+
+**References:** [agents/src/drafter.ts](../agents/src/drafter.ts) `reflect()`, [agents/src/drafter-prompt.ts](../agents/src/drafter-prompt.ts) `DRAFTER_REFLECTION_PROMPT` + `buildDrafterReflectionPrompt`, [agents/src/director.ts](../agents/src/director.ts) `reflectOnPieceScheduled`, [agents/src/observer.ts](../agents/src/observer.ts) `logReflectionMetered` + `logReflectionFailure`, [docs/AGENTS.md](AGENTS.md) DrafterAgent section.
+
 ## 2026-04-19: Learner writes producer-origin learnings post-publish (P1.3 — behaviour)
 **Context:** Plumbing for the `source` column landed in the previous commit ([DECISIONS entry elided — see migration 0011 + writeLearning signature change]). This commit turns it on. The Learner has been reader-engagement-only since launch; since no readers exist on daily pieces yet, the learnings feed the Drafter reads has been narrow (mostly StructureEditor's auditor-time writes). Producer-side signal — which auditor findings recurred, which candidate Curator picked vs the 49 it skipped, how many revision rounds a piece needed, what the final voice score was — was visible to the Director in `audit_results` + `pipeline_log` + `daily_candidates` but never flowed into the learning loop.
 

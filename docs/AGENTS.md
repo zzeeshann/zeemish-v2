@@ -62,13 +62,15 @@ Learner: runs off-pipeline on reader engagement data
 - **Prompt:** `agents/src/curator-prompt.ts`
 
 ### 4. DrafterAgent
-- **Role:** Writes the MDX for a daily piece from a brief. Enforces `<lesson-shell>` / `<lesson-beat>` format and forces the correct date into frontmatter so it can't drift from the run date.
+- **Role:** Writes the MDX for a daily piece from a brief, AND self-reflects on the final piece post-publish (P1.4). Enforces `<lesson-shell>` / `<lesson-beat>` format and forces the correct date into frontmatter so it can't drift from the run date.
 - **Input:** `DailyPieceBrief`
-- **Output:** `{ mdx, wordCount }`
-- **Method:** `draft(brief)`
-- **Runtime context:** Before building its prompt, Drafter queries `getRecentLearnings(DB, 10)` and includes the results in a "Lessons from prior pieces" block positioned between the Voice Contract and the Brief (contract binds → lessons guide → brief specifies). Fail-open: if the DB read throws, the block is omitted and the draft proceeds. The block is also omitted when the `learnings` table is empty (day 1 of the closed loop) — no placeholder. See DECISIONS 2026-04-19 "Drafter reads learnings at runtime".
+- **Output:** `{ mdx, wordCount }` from `draft(brief)`; `ReflectionResult` (`{date, written, overflowCount, considered, tokensIn, tokensOut, durationMs}`) from `reflect(brief, mdx, date)`.
+- **Methods:**
+  - `draft(brief)` — primary MDX generation. Queries `getRecentLearnings(DB, 10)` and includes them in a "Lessons from prior pieces" block between the Voice Contract and the Brief (contract binds → lessons guide → brief specifies). Fail-open: DB error yields an empty learnings array and the block is omitted. The block is also omitted when the table is empty — no placeholder.
+  - `reflect(brief, mdx, date)` — post-publish self-reflection (P1.4). The prompt opens by naming the stateless reality ("You didn't write this piece — a prior invocation did…") so the call doesn't LARP remembered struggle. Writes up to 10 rows with `source='self-reflection'`. Throws on Claude/JSON failure so Director's alarm handler can catch + log to observer_events. Returns tokens-in/out and wall-clock latency so Director can meter cost — this is the one Sonnet call in the pipeline that doesn't gate anything, so visibility is the whole point.
+- See DECISIONS 2026-04-19 "Drafter reads learnings at runtime" (P1.1) and "Drafter self-reflects post-publish" (P1.4).
 - **File:** `agents/src/drafter.ts`
-- **Prompt:** `agents/src/drafter-prompt.ts`
+- **Prompt:** `agents/src/drafter-prompt.ts` (`DRAFTER_PROMPT` for generation, `DRAFTER_REFLECTION_PROMPT` for post-publish reflection)
 
 ### 5. VoiceAuditorAgent
 - **Role:** Reviews drafts against the voice contract. Scores 0–100, must be ≥85.
@@ -141,8 +143,8 @@ Learner: runs off-pipeline on reader engagement data
 - **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side)
 
 ### 13. ObserverAgent
-- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `getRecentEvents()`, `getDailyDigest()`
+- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `getRecentEvents()`, `getDailyDigest()`
 - **File:** `agents/src/observer.ts`
 
 ## Endpoints

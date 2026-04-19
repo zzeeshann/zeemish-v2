@@ -1,9 +1,52 @@
 import { Agent } from 'agents';
 import Anthropic from '@anthropic-ai/sdk';
 import type { Env, DrafterState, DrafterResult, DailyPieceBrief } from './types';
-import { DRAFTER_PROMPT, buildDrafterPrompt } from './drafter-prompt';
+import {
+  DRAFTER_PROMPT,
+  DRAFTER_REFLECTION_PROMPT,
+  buildDrafterPrompt,
+  buildDrafterReflectionPrompt,
+} from './drafter-prompt';
 import { VOICE_CONTRACT } from './shared/voice-contract';
-import { getRecentLearnings, type Learning } from './shared/learnings';
+import { getRecentLearnings, writeLearning, type Learning } from './shared/learnings';
+import { extractJson } from './shared/parse-json';
+
+/** Cap on self-reflection learnings written per run. Same as the
+ *  producer-side cap in Learner for consistency — if the reflection
+ *  call produces more than this, the prompt is restating the same
+ *  pattern and tightening is warranted. Overflow logged to
+ *  observer_events by Director, not silently dropped. */
+const REFLECTION_WRITE_CAP = 10;
+
+interface ReflectionLearning {
+  category: string;
+  observation: string;
+}
+
+function normalizeReflectionCategory(
+  c: string,
+): 'voice' | 'structure' | 'engagement' | 'fact' {
+  const k = (c ?? '').toLowerCase().trim();
+  if (k === 'voice') return 'voice';
+  if (k === 'structure') return 'structure';
+  if (k === 'engagement') return 'engagement';
+  if (k === 'fact') return 'fact';
+  return 'structure';
+}
+
+/** Result of a post-publish self-reflection call — surfaced back to
+ *  Director so it can meter cost + latency into observer_events. This
+ *  is the one Sonnet call in the pipeline that doesn't gate anything,
+ *  so we want visibility on what it costs over time. */
+export interface ReflectionResult {
+  date: string;
+  written: number;
+  overflowCount: number;
+  considered: number;
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number;
+}
 
 /**
  * DrafterAgent — writes the MDX for a daily piece from a brief.
@@ -69,5 +112,72 @@ export class DrafterAgent extends Agent<Env, DrafterState> {
 
   getStatus(): DrafterState {
     return this.state;
+  }
+
+  /**
+   * Post-publish self-reflection (P1.4).
+   *
+   * Fires off-pipeline via Director's `reflectOnPieceScheduled` alarm
+   * right after `publishing done`. The model evaluates the final MDX
+   * as a peer-editor role would — the prompt explicitly names the
+   * stateless reality so the call doesn't LARP remembered struggle.
+   *
+   * Writes up to REFLECTION_WRITE_CAP learnings with
+   * `source='self-reflection'`. Returns the counts plus cost/latency
+   * so Director can meter the call. Caller's responsibility to catch
+   * errors and log to observer_events; this method throws on failure
+   * rather than swallowing, so upstream can honour the "fail = log
+   * and move on" posture without hiding root cause.
+   */
+  async reflect(
+    brief: DailyPieceBrief,
+    mdx: string,
+    date: string,
+  ): Promise<ReflectionResult> {
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+    const start = Date.now();
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 1500,
+      system: DRAFTER_REFLECTION_PROMPT,
+      messages: [{ role: 'user', content: buildDrafterReflectionPrompt(brief, mdx) }],
+    });
+    const durationMs = Date.now() - start;
+
+    const tokensIn = response.usage?.input_tokens ?? 0;
+    const tokensOut = response.usage?.output_tokens ?? 0;
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    let parsed: { learnings?: ReflectionLearning[] };
+    try {
+      parsed = extractJson<typeof parsed>(text);
+    } catch {
+      parsed = { learnings: [] };
+    }
+    const all: ReflectionLearning[] = Array.isArray(parsed.learnings) ? parsed.learnings : [];
+
+    const toWrite = all.slice(0, REFLECTION_WRITE_CAP);
+    const overflowCount = Math.max(0, all.length - REFLECTION_WRITE_CAP);
+
+    let written = 0;
+    for (const l of toWrite) {
+      if (!l?.observation) continue;
+      const category = normalizeReflectionCategory(l.category);
+      try {
+        await writeLearning(
+          this.env.DB,
+          category,
+          l.observation,
+          { date, phase: 'self-reflection' },
+          60,
+          'self-reflection',
+        );
+        written += 1;
+      } catch {
+        // per-row write failure isn't fatal — others still land
+      }
+    }
+
+    return { date, written, overflowCount, considered: all.length, tokensIn, tokensOut, durationMs };
   }
 }

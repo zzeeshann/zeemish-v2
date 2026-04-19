@@ -316,6 +316,22 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       title: brief.headline,
     });
 
+    // ─── Post-publish self-reflection (P1.4, off-pipeline) ───────────
+    // Drafter reviews the final MDX as a peer editor would — captures
+    // the "what felt thin / what would I do differently" signal that
+    // writers normally lose. Writes source='self-reflection' learnings
+    // that compound with producer + reader signals in the same feed.
+    // Metered on each run so cost/latency drift is visible before it
+    // matters. Same off-pipeline + non-retriable posture as the
+    // Learner. Brief is carried in the payload (small) so the
+    // reflection prompt has the original ask alongside the MDX.
+    await this.schedule(1, 'reflectOnPieceScheduled', {
+      date: today,
+      title: brief.headline,
+      filePath: publishResult.filePath,
+      brief,
+    });
+
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
     // Schedule audio to run in an alarm-triggered invocation instead of
     // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
@@ -376,6 +392,52 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
         .logLearnerFailure(date, title, reason)
+        .catch(() => { /* observer write failure never blocks */ });
+      // non-retriable: logged, moving on
+    }
+  }
+
+  /**
+   * Alarm callback — runs the Drafter's post-publish self-reflection
+   * in a fresh DO invocation. Scheduled by `triggerDailyPiece` right
+   * after `publishing done` alongside the Learner's producer analysis.
+   *
+   * Re-reads the committed MDX from GitHub rather than carrying it in
+   * the payload — keeps the scheduled payload small. The brief IS in
+   * the payload (a few KB) because the reflection prompt wants the
+   * original ask alongside what was produced.
+   *
+   * Non-retriable on failure: logs to observer_events and returns.
+   * On success, logs a single metered info event with
+   * tokens-in/out + latency so cost drift is visible over time.
+   */
+  async reflectOnPieceScheduled(payload: {
+    date: string;
+    title: string;
+    filePath: string;
+    brief: DailyPieceBrief;
+  }): Promise<void> {
+    const { date, title, filePath, brief } = payload;
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    try {
+      const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
+      const current = await publisher.readPublishedMdx(filePath);
+      if (!current) {
+        console.error(`reflectOnPieceScheduled: MDX not found at ${filePath} for ${date}`);
+        await observer
+          .logReflectionFailure(date, title, `MDX not found at ${filePath}`)
+          .catch(() => { /* observer write failure never blocks */ });
+        return;
+      }
+      const drafter = await this.subAgent(DrafterAgent, 'drafter');
+      const result = await drafter.reflect(brief, current.mdx, date);
+      await observer
+        .logReflectionMetered(date, title, result)
+        .catch(() => { /* observer write failure never blocks */ });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      await observer
+        .logReflectionFailure(date, title, reason)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }

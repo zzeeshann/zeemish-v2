@@ -125,6 +125,49 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Self-reflection call ran — one metered info event per run so we
+   *  can spot cost/latency drift before it matters. This is the one
+   *  Sonnet call in the pipeline that doesn't gate anything, so
+   *  visibility is the whole point: no hard cap, just a breadcrumb. */
+  async logReflectionMetered(
+    date: string,
+    title: string,
+    metrics: {
+      written: number;
+      overflowCount: number;
+      considered: number;
+      tokensIn: number;
+      tokensOut: number;
+      durationMs: number;
+    },
+  ): Promise<void> {
+    const overflowNote =
+      metrics.overflowCount > 0
+        ? ` Overflow: ${metrics.overflowCount} dropped (cap 10).`
+        : '';
+    await this.writeEvent({
+      severity: 'info',
+      title: `Reflection: ${title}`,
+      body: `Self-reflection for "${title}" (${date}) produced ${metrics.considered} bullets, wrote ${metrics.written}.${overflowNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+      context: { date, ...metrics },
+    });
+  }
+
+  /** Self-reflection call failed — non-retriable by design, but worth
+   *  a warn so the admin feed knows the loop missed an iteration. */
+  async logReflectionFailure(
+    date: string,
+    title: string,
+    reason: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Reflection missed: ${title}`,
+      body: `Self-reflection failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
+      context: { date, reason },
+    });
+  }
+
   /** Audio pipeline failed somewhere — text is already live, admin
    *  needs to know so they can retry. Escalation severity so it
    *  surfaces in the admin feed next to low-quality publishes. */
