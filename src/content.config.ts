@@ -22,6 +22,14 @@ const dailyPieces = defineCollection({
     // AudioAuditor succeed. Missing on pieces whose audio hasn't landed
     // yet (text-first ship-and-retry) and on legacy pre-un-pause pieces.
     audioBeats: z.record(z.string(), z.string()).optional(),
+    // Per-beat display-title override: { beatSlug: "Human Title" }.
+    // rehype-beats prefers these over humanize(slug) at render time, so
+    // acronyms and punctuation the kebab form can't express
+    // (e.g. `qvcs-original-advantage` → "QVC's Original Advantage") can
+    // be restored without editing the piece's body. Metadata-only
+    // carve-out per the permanence rule — see DECISIONS 2026-04-19
+    // "beatTitles frontmatter map for display-layer fixes".
+    beatTitles: z.record(z.string(), z.string()).optional(),
     // Voice auditor's 0-100 score from the last audit round, spliced in
     // at publish time. Feeds the public-facing audit tier (polished /
     // solid / rough) via src/lib/audit-tier.ts. Optional because older

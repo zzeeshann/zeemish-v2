@@ -2,6 +2,25 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-19: Frontmatter edits permitted for display-layer fixes (`beatTitles` map)
+**Context:** Drafter authors beat headings in kebab-case (`## qvcs-original-advantage`). `rehype-beats.ts` humanises these for display at build time (`qvcs-original-advantage` → "Qvcs Original Advantage"). That round-trip is lossy: apostrophes, colons, and acronym casing the kebab form can't express are gone by the time the display string is generated, so pieces render headings like "Qvcs Original Advantage" instead of "QVC's Original Advantage" and "Teaching 1 The Fuel Equation" instead of "Teaching 1: The Fuel Equation". The display-layer plugin alone can't recover punctuation that was never in the MDX.
+
+**Decision:** Add an optional `beatTitles` frontmatter map — `{ beatSlug: "Human Display Title" }` — that `rehype-beats` prefers over `humanize(slug)`. Retroactively apply to pieces where the default humanise produces wrong output. Leave the Drafter-authored body untouched.
+
+**Permanence rule carve-out:** Per the existing precedent for `audioBeats`, `voiceScore`, and `qualityFlag` (see `metadata_vs_content` memory + publisher.ts:25-29 "Metadata carve-out" comment), frontmatter edits are metadata, not content. `beatTitles` joins that set. The MDX body — the piece's teaching — stays byte-for-byte identical. This explicitly permits editing published pieces' frontmatter when the change is a display-layer fix that can't be expressed any other way.
+
+**Alternatives considered:**
+- **Fix Drafter going forward to write human headings into MDX (`## QVC's Original Advantage`).** Rejected as the primary fix because it leaves the three already-published pieces mangled forever under the permanence rule. Still worth doing in parallel for future pieces, and rehype-beats already handles non-kebab headings correctly via the `isKebabOnly` branch. Tracked separately.
+- **Teach humanize() to recognise known acronyms (QVC, USA, NATO).** Rejected as too narrow and too magic — a heading like `qvcs-original-advantage` needs both an acronym-detect and a punctuation-insert (`'s`), and generalising that is a larger problem than the fix deserves.
+- **Add a separate per-beat YAML block with display fields (e.g. `beats: [{slug, title, audio}]`).** Rejected as scope creep — `audioBeats` already exists as a separate map and mirroring that shape for titles keeps the additions parallel and small.
+
+**Scope of retroactive apply (2026-04-19):**
+- 2026-04-17: `qvcs-original-advantage` → "QVC's Original Advantage". Also corrected `beatCount: 6` → `beatCount: 8` (Drafter-declared count drifted from actual `##` count — separate known issue in CLAUDE.md Remaining minor items, fixed on this piece as a metadata-only correction since we were touching frontmatter anyway).
+- 2026-04-18: not needed — `humanize()` produces correct output for all its headings.
+- 2026-04-19: four `teaching-N-*` headings → "Teaching N: ..." (restore colons + lowercase "and" in the second).
+
+**References:** [src/lib/rehype-beats.ts](../src/lib/rehype-beats.ts), [src/content.config.ts](../src/content.config.ts), CLAUDE.md "Remaining minor items" → beatCount drift entry now updated.
+
 ## 2026-04-19: Revert 02882fd — audio double-publish corrupted frontmatter
 **Context:** Retro audio generation for 2026-04-17 via admin Continue button produced two `audio-publishing done` events — 543651b (valid) and 02882fd (corrupted). The second commit deleted the audioBeats map and collapsed `qualityFlag: "low"\n---\n` onto a single line, leaving the MDX with no YAML terminator. Live site unaffected (still serving cached HTML built from 543651b), but next deploy would have built from the corrupted state.
 

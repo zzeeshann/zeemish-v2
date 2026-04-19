@@ -26,6 +26,9 @@
  * Behaviour:
  * - Headings authored in kebab-case (`## hook`) are humanised for
  *   display; headings that already look human-readable are kept as-is.
+ * - Optional `beatTitles` frontmatter map overrides humanize() per slug
+ *   for acronyms and punctuation the kebab form can't express
+ *   (e.g. `qvcs-original-advantage` → "QVC's Original Advantage").
  * - Content appearing before the first h2 is folded into the first beat
  *   so nothing is lost.
  * - No-op when the MDX has no h2 headings — legacy or intro-only
@@ -49,6 +52,14 @@ type HastNode = HastElement | HastText | { type: string; children?: HastNode[] }
 interface HastRoot {
   type: 'root';
   children: HastNode[];
+}
+
+interface VFile {
+  data?: {
+    astro?: {
+      frontmatter?: Record<string, unknown>;
+    };
+  };
 }
 
 function extractText(node: HastNode): string {
@@ -76,7 +87,7 @@ function slugify(text: string): string {
 }
 
 export default function rehypeBeats() {
-  return (tree: HastRoot) => {
+  return (tree: HastRoot, file: VFile) => {
     const children = tree.children;
     const h2Indices: number[] = [];
 
@@ -88,6 +99,12 @@ export default function rehypeBeats() {
     }
 
     if (h2Indices.length === 0) return;
+
+    const fm = file?.data?.astro?.frontmatter;
+    const beatTitles =
+      fm && typeof fm.beatTitles === 'object' && fm.beatTitles !== null
+        ? (fm.beatTitles as Record<string, string>)
+        : undefined;
 
     const preContent = children.slice(0, h2Indices[0]);
     const beats: HastElement[] = [];
@@ -101,10 +118,12 @@ export default function rehypeBeats() {
       const rawName = extractText(h2Node).trim();
 
       const isKebabOnly = /^[a-z0-9]+(-[a-z0-9]+)*$/.test(rawName);
-      const displayTitle = isKebabOnly ? humanize(rawName) : rawName;
+      const slugKey = isKebabOnly ? rawName : slugify(rawName);
+      const override = beatTitles?.[slugKey];
+      const displayTitle = override ?? (isKebabOnly ? humanize(rawName) : rawName);
       h2Node.children = [{ type: 'text', value: displayTitle } as HastText];
 
-      const name = isKebabOnly ? rawName : slugify(rawName);
+      const name = slugKey;
 
       const beatChildren = i === 0 ? [...preContent, ...segment] : segment;
 
