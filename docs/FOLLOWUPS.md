@@ -92,3 +92,32 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - Consider whether Continue vs Start-over should even share the same runAudioPipeline entry point. Start-over wipes and runs; Continue should resume from the last successful beat without re-triggering the publish step if nothing new was produced.
 
 **Priority:** Medium. Paired with the Publisher double-fire, this is what corrupted 2026-04-17. Fixing either one prevents the corruption; fixing both defends in depth.
+
+---
+
+## 2026-04-19: Book chapter 9 vs Structure Editor — "4–6 beats" vs "3–6 beats"
+
+**Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/09-the-thirteen-roles.md](../book/09-the-thirteen-roles.md) line 73 describes Structure Editor as checking "there are 4–6 beats." Actual code ([agents/src/structure-editor-prompt.ts:10](../agents/src/structure-editor-prompt.ts:10)) says "Has 3-6 beats (hook, 2-3 teaching, optional practice, close)."
+
+**Hypothesis:** Spec-vs-implementation drift, not a book error per se. The project brief's daily-piece format (4–6 beats) matches the book's claim; the Structure Editor gate is one beat more permissive than the spec. Both "the code matches the brief" and "the brief matches the book" would resolve it; currently neither is true.
+
+**Investigation hints:**
+- If the spec is canonical: tighten `STRUCTURE_EDITOR_PROMPT` in `agents/src/structure-editor-prompt.ts` to gate on 4-6, and let the next pipeline run flag any existing 3-beat pieces (there aren't any in content/daily-pieces/ as of this writing — all three shipped pieces are 6–8 beats).
+- If the code's looser gate is intentional: update the book + project brief to say "3–6 beats" and note why the floor is three, not four.
+- Related to P2.2 (Watch beat enforcement) still queued from the 2026-04-19 plan — any Structure Editor update should likely land in the same pass as that one.
+
+**Priority:** Low. Nobody's blocked; both documents-and-code read the same to ordinary readers. Worth fixing next time Structure Editor is touched for any reason.
+
+---
+
+## 2026-04-19: Book chapter 10 reconstructed commit message, not actual
+
+**Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/10-a-day-in-the-life.md](../book/10-a-day-in-the-life.md) line 71 says Publisher committed the 2026-04-19 piece with the message `feat(daily): publish 2026-04-19 piece on airline fuel shocks`. Actual commit was `feat(daily): 2026-04-19 — Airline industry faces a shakeup as jet fuel hits hard`.
+
+**Hypothesis:** Not a bug — narrative reconstruction for readability. The book chose a cleaner example commit message to illustrate the pattern, rather than the auto-generated headline-based one the Publisher actually produces.
+
+**Investigation hints:**
+- If/when the book gets machine-read against commit history (e.g. for an auto-generated "how this chapter lines up with git log" appendix), this line won't match. Either the book's example needs updating to the real string, or the machine-check needs a "narrative reconstruction" escape hatch.
+- The Publisher's actual commit-message template lives in [agents/src/director.ts](../agents/src/director.ts) near the publishing step (grep `commitMsg`) — worth a cross-reference if the book ever tries to show the actual string.
+
+**Priority:** Low. No bug, just a divergence between narrative prose and the literal git log that's worth being honest about if the book grows into a forensic record.
