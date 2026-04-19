@@ -19,6 +19,19 @@ Rules:
 - TEACH THE MECHANICS. Don't take a political position. Say how it works, why it happened, what the effects are. Let readers form their own view.
 - Same voice contract as course lessons: plain English, no jargon, no tribe words, short sentences
 
+## Beat format (required)
+Demarcate each beat with a markdown H2 heading whose text is the kebab-case beat name from the brief:
+
+    ## hook
+
+    Body of hook beat...
+
+    ## what-is-a-chokepoint
+
+    Body of next beat...
+
+Do NOT use JSX tags like \`<beat>\`, \`<section>\`, or custom elements. Only \`##\` headings. Downstream renderers and the audio producer both split on \`## \` — any other syntax silently breaks beat navigation and audio generation.
+
 Return complete MDX with frontmatter. Start with --- delimiter.
 Frontmatter must include: title, date, newsSource, underlyingSubject, estimatedTime, beatCount, description`;
 

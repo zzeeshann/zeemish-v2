@@ -152,6 +152,15 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       const content = parts[i].slice(newline + 1).trim();
       if (name) beats.push({ name, content });
     }
+    // Fail loud. If Drafter ever drifts off the `##` convention again
+    // (e.g. emits `<beat>` tags), silent zero-beat success would leak
+    // through as "audio-producing ✓" with no rows in daily_piece_audio.
+    // Throwing here converts that into a visible escalation instead.
+    if (beats.length === 0) {
+      throw new Error(
+        'Audio producer found zero beats in MDX — Drafter likely emitted non-## section syntax. Check the MDX source.',
+      );
+    }
     return beats;
   }
 

@@ -606,3 +606,47 @@ async onStart() {
 **Why this slipped:** The cron path had never fired before. Yesterday was the first production day, and yesterday's piece was a manual trigger from the reset-today flow. Today's was meant to be the first true autonomous fire.
 
 **Verified:** SDK source confirms idempotency at `agents/node_modules/agents/dist/index.js:1474` — cron path checks `WHERE type='cron' AND callback AND cron AND payload LIMIT 1`, returns existing row if found.
+
+## 2026-04-19: First autonomous cron fire exposes three silent-failure bugs
+
+**Context:** 2am UTC cron fired autonomously for the first time (the cron fix deployed 2026-04-18 worked). Pipeline produced a Polished piece — Voice 95/100, 1 round, 0 revisions, 50 candidates, committed at 02:01. But the first real auto-run also exposed three regressions that manual-trigger runs had been masking:
+
+1. `/daily/2026-04-19/` rendered as one flowing prose block — no `<lesson-shell>`/`<lesson-beat>` slides, no Next/Previous, no pagination. 04-17 and 04-18 render correctly.
+2. Auditor escalated at 02:01:48: *"No audio rows found for 2026-04-19 — producer did not run or persist failed."* Admin timeline misleadingly showed `audio-producing ✓`. Reader: "Audio version coming soon" indefinitely.
+3. Dashboard "how it's holding up" surfaced *fact-check web: Offline — 5 checks this week used Claude-only*, meaning every Facts ✓ this week had silently degraded to first-pass Claude only.
+
+**Diagnosis — bugs 1 and 2 are the same bug:** `agents/src/drafter-prompt.ts` lists beat names in the brief but never specifies how to demarcate them in the MDX body. Claude free-styled: 04-17 and 04-18 happened to use `## beat-name` markdown headings; 04-19 used `<beat id="beat-name">` custom JSX tags. Both are valid MDX. Two downstream consumers hard-code `##`:
+- `src/lib/rehype-beats.ts:85` only wraps `h2` nodes into `<lesson-beat>`. Zero h2s → plugin no-ops at line 90 → flat prose.
+- `agents/src/audio-producer.ts:145` `extractBeats()` splits on `/\n## /`. Zero matches → empty array → producer loops over nothing → returns "success" with no ElevenLabs calls and no D1 writes. Pipeline log gets `audio-producing ✓` regardless.
+
+**Diagnosis — bug 3 is two bugs stacked:** The DDG Instant Answer API (`api.duckduckgo.com`) is a Wikipedia-topic oracle, not a general web search. Specific factual claims return HTTP 200 with empty `Abstract`/`RelatedTopics`. `fact-checker.ts:137-163` had a bare `catch { return null }` + `if (!response.ok) return null` that collapsed three distinct outcomes into a single nullable string. The "Web search unavailable" warn then fired for both actual network failures AND "DDG reached but had no answer" — conflating infrastructure health with question-specificity. No fetch timeout either.
+
+**Decisions:**
+
+1. **Drafter prompt mandates `##` syntax.** Added "Beat format (required)" section to `DRAFTER_PROMPT` with the `## beat-name` pattern, explicit forbiddance of JSX tags, and the *why* (downstream renderer + audio producer both split on `## `). One-line clarification at the root of both bugs 1 and 2.
+
+2. **`extractBeats()` throws on zero beats.** Converts silent zero-row "success" into a visible escalation via Director's existing try/catch. The audio pipeline `✓` becomes `✗` with a real reason; Auditor's "no rows found" check becomes a backstop instead of the primary alarm.
+
+3. **Fact-checker refactored to discriminated outcomes.** New `WebSearchOutcome` and `SearchPassOutcome` types encode `ok | empty | error`. `webSearch()` returns `{status: 'error', reason}` for unreachable/5xx/timeout, `{status: 'empty'}` for reachable-but-no-answer, `{status: 'ok', text}` otherwise. `check()` maps these to three honest combos of `FactCheckResult.{searchUsed, searchAvailable}`:
+   - `both true` → pass-3 reassessment ran on real content
+   - `searchAvailable: true, searchUsed: false` → DDG was reachable, had no relevant answer, first-pass Claude is the final word — **not** a quality regression, no Observer warn
+   - `both false` → DDG unreachable, real infrastructure problem
+   5-second `AbortSignal.timeout` added. The dashboard's *Fact-check web: Offline* signal is now truthful — it fires only on real network failure.
+
+4. **Reset 04-19 rather than patch the MDX.** The committed body had `<beat>` tags — the permanence rule forbids content edits. Reset (git rm + D1 wipe across 6 tables) preserves the rule and lets the fixed Drafter produce a clean replacement.
+
+**Alternatives considered:**
+
+- **Teach `rehype-beats.ts` to also accept `<beat>` tags.** Retroactively fixes 04-19 without MDX edit — tempting. Rejected: legitimising two valid syntaxes invites future Drafter drift and hides the real bug (prompt ambiguity). One syntax, enforced at source.
+- **Replace DDG Instant Answer with Brave/Serper/Claude-web-search.** Correct long-term fix — DDG IA realistically resolves ~5% of specific factual claims. Scoped out of tonight's patch; logged in CLAUDE.md "Remaining minor items". Tonight's refactor at least makes the signal honest about the narrow coverage.
+- **Enforce `beatCount` = actual `##` count via Structure-Editor gate.** Uncovered a data-integrity drift on 04-17 (declares 6, has 8 `##` headings). Reader UI counts actual headings so rendering is correct; only `daily_pieces.beat_count` is stale metadata. Also logged in minor items.
+
+**Reason — why a prompt fix over making both consumers accept multiple syntaxes:** The contract Drafter owes downstream is *"one section per `##` heading, kebab-case slug."* Two consumers already enforce it. Loosening them (adding `<beat>` tolerance to either) multiplies the surface area of valid inputs and invites the next drift — `<section>`, `###`, `<div data-beat=...>`. One source of truth at the producer, not defensive tolerance at every consumer.
+
+**Reason — why throw in `extractBeats()` rather than return an empty sentinel:** The 04-19 failure was invisible because the success signal (pipeline-log `✓`) was emitted from Director *after* a successful function return, regardless of whether that success had produced any rows. Throwing surfaces the real failure in Director's try/catch, which is already wired to Observer escalation. The old pattern meant the Auditor's "no rows found" check was the alarm — triggered ~60s downstream with a symptom ("no rows") instead of a root cause ("zero beats found in MDX"). The throw moves diagnosis upstream.
+
+**Recovery:** Reset 04-19 (git rm MDX + D1 wipe 6 tables: `daily_pieces`, `daily_candidates`, `pipeline_log`, `audit_results`, `observer_events`, `daily_piece_audio`). User triggers fresh pipeline from admin. Fixed Drafter emits `##` syntax → rehype-beats produces `<lesson-beat>` slides → extractBeats returns 6 beats → audio-producer writes 6 rows → Publisher's second commit splices `audioBeats` into frontmatter → reader sees paginated slides + working audio.
+
+**Verified:** `npx tsc --noEmit` on agents/ — zero errors in touched files. `server.ts` pre-existing Durable Object stub type errors are unrelated and pre-date this change.
+
+**References:** [agents/src/drafter-prompt.ts](../agents/src/drafter-prompt.ts), [agents/src/audio-producer.ts](../agents/src/audio-producer.ts), [agents/src/fact-checker.ts](../agents/src/fact-checker.ts), [src/lib/rehype-beats.ts](../src/lib/rehype-beats.ts). CLAUDE.md "Remaining minor items" now lists the DDG IA narrow-coverage limitation and the `beatCount` declared-vs-actual drift.
