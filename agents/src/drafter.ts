@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Env, DrafterState, DrafterResult, DailyPieceBrief } from './types';
 import { DRAFTER_PROMPT, buildDrafterPrompt } from './drafter-prompt';
 import { VOICE_CONTRACT } from './shared/voice-contract';
+import { getRecentLearnings, type Learning } from './shared/learnings';
 
 /**
  * DrafterAgent — writes the MDX for a daily piece from a brief.
@@ -31,11 +32,20 @@ export class DrafterAgent extends Agent<Env, DrafterState> {
     try {
       const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
 
+      // Pull recent learnings so the Drafter writes in light of what prior
+      // pieces taught us. Fail-open: a DB hiccup must not block a draft.
+      let learnings: Learning[] = [];
+      try {
+        learnings = await getRecentLearnings(this.env.DB, 10);
+      } catch {
+        learnings = [];
+      }
+
       const response = await client.messages.create({
         model: 'claude-sonnet-4-5-20250929',
         max_tokens: 8000,
         system: DRAFTER_PROMPT,
-        messages: [{ role: 'user', content: buildDrafterPrompt(brief, VOICE_CONTRACT) }],
+        messages: [{ role: 'user', content: buildDrafterPrompt(brief, VOICE_CONTRACT, learnings) }],
       });
 
       let mdx = response.content[0].type === 'text' ? response.content[0].text : '';

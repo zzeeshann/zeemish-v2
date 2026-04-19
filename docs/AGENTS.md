@@ -66,6 +66,7 @@ Learner: runs off-pipeline on reader engagement data
 - **Input:** `DailyPieceBrief`
 - **Output:** `{ mdx, wordCount }`
 - **Method:** `draft(brief)`
+- **Runtime context:** Before building its prompt, Drafter queries `getRecentLearnings(DB, 10)` and includes the results in a "Lessons from prior pieces" block positioned between the Voice Contract and the Brief (contract binds → lessons guide → brief specifies). Fail-open: if the DB read throws, the block is omitted and the draft proceeds. The block is also omitted when the `learnings` table is empty (day 1 of the closed loop) — no placeholder. See DECISIONS 2026-04-19 "Drafter reads learnings at runtime".
 - **File:** `agents/src/drafter.ts`
 - **Prompt:** `agents/src/drafter-prompt.ts`
 

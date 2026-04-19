@@ -6,6 +6,7 @@
  */
 
 import type { DailyPieceBrief } from './types';
+import type { Learning } from './shared/learnings';
 
 export const DRAFTER_PROMPT = `You are the Drafter for Zeemish daily pieces. You write short teaching pieces anchored in today's news.
 
@@ -38,11 +39,29 @@ Frontmatter must include: title, date, newsSource, underlyingSubject, estimatedT
 export function buildDrafterPrompt(
   brief: DailyPieceBrief,
   voiceContract: string,
+  learnings: Learning[] = [],
 ): string {
+  // Lessons block — included only when there are learnings to show.
+  // Empty on day 1 of the closed loop; the block silently absents itself
+  // rather than inserting a placeholder ("No learnings yet") that would
+  // dilute the prompt. Once P1.3 ships producer-side learnings, this
+  // block populates automatically on every subsequent run.
+  const lessonsBlock =
+    learnings.length === 0
+      ? ''
+      : `## Lessons from prior pieces
+These are patterns observed across recent Zeemish pieces — producer-side quality signals, self-reflection notes, and (once readers arrive) reader-behaviour signal. Let them shape what you write today.
+
+${learnings.map((l) => `- [${l.category}] ${l.observation}`).join('\n')}
+
+These lessons guide. The voice contract binds. If they conflict, the contract wins.
+
+`;
+
   return `## Voice Contract
 ${voiceContract}
 
-## Today's Brief
+${lessonsBlock}## Today's Brief
 Date: ${brief.date}
 News: "${brief.headline}" (${brief.newsSource})
 Underlying subject: ${brief.underlyingSubject}

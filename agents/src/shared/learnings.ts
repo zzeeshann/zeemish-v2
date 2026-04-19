@@ -32,19 +32,25 @@ export async function writeLearning(
 }
 
 /**
- * Read recent learnings for a category.
- * Used by Drafter to include "what has worked lately" in prompts.
+ * Read recent learnings across all categories.
+ *
+ * Drafter calls this at runtime to include recent learnings in its
+ * prompt — closing the loop that was previously write-only. No
+ * category filter: producer-side, self-reflection, reader-behaviour,
+ * and Zita learnings all compound into the same feed the Drafter sees.
+ *
+ * Recency-only for v1 — relevance scoring, tag-matching, and
+ * category-specific queries are intentionally deferred. If a caller
+ * ever needs to slice by category again, add a separate function
+ * rather than re-introducing the optional-param overload.
  */
 export async function getRecentLearnings(
   db: D1Database,
-  category: string,
   limit = 10,
 ): Promise<Learning[]> {
   const result = await db
-    .prepare(
-      'SELECT * FROM learnings WHERE category = ? ORDER BY created_at DESC LIMIT ?',
-    )
-    .bind(category, limit)
+    .prepare('SELECT * FROM learnings ORDER BY created_at DESC LIMIT ?')
+    .bind(limit)
     .all<Learning>();
   return result.results;
 }

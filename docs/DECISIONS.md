@@ -2,6 +2,34 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-19: Drafter reads learnings at runtime (P1.1 — closing the self-improvement loop)
+**Context:** Twelve of thirteen agents have been running identical prompts every day since launch. The `learnings` table was effectively write-only — StructureEditor and Learner wrote into it, but no agent's runtime prompt read from it. That meant every day started from scratch regardless of what prior pieces taught us. The self-improvement loop existed in principle only.
+
+**Decision:** Drafter now reads the 10 most recent rows from `learnings` at runtime and includes them in its user-message prompt as a "Lessons from prior pieces" block, positioned between the Voice Contract and the Brief. This is the first closing of the loop — from here, every subsequent Drafter run sees what the system has learned.
+
+**Design choices — explicit:**
+- **Recency-only, no relevance scoring.** `getRecentLearnings(DB, 10)` orders by `created_at DESC` across all categories (structure, voice, engagement, fact — and forthcoming producer / self-reflection / zita). Recency is a cheap, defensible v1. Relevance scoring (tag match against the brief's underlying subject, confidence-weighted) is a later refinement if the recency-only feed proves noisy.
+- **No source filter.** Deliberate. When P1.3 adds a `source` column (reader / producer / self-reflection / zita), the default Drafter query still pulls all origins — we want the producer-side signal to compound with reader signal, not be quarantined. Category-filtered reads remain available by adding a separate function; the bare `getRecentLearnings` intentionally widens.
+- **Block is semantically named.** "Lessons from prior pieces" — not "Additional context" or "Notes". Block names shape how Claude weights the content; a vague name invites the model to treat the block as decorative.
+- **Voice contract still wins on conflict.** Explicit line in the block: "These lessons guide. The voice contract binds. If they conflict, the contract wins." A learning that says "try hedging more" cannot override the voice contract's "no hedging" rule.
+- **Empty-state omits the block entirely.** No "No learnings yet" placeholder. On day 1 of the closed loop, the Drafter prompt is identical to its pre-P1.1 shape. The block only appears once something has been written.
+- **Fail-open on DB read.** A D1 hiccup must not block a draft. `getRecentLearnings` is wrapped in try/catch; on failure, learnings = [] and the block silently absents itself.
+
+**Alternatives considered:**
+- **System-prompt inclusion.** Rejected. System prompts are static cache-friendly artifacts; runtime learnings belong in the user message alongside the brief, where they're contextual to the specific task.
+- **Per-category rotation.** Rejected. A reader of the prompt should see the full current-truth, not a curated slice.
+- **Confidence filtering (only learnings with confidence ≥ N).** Rejected for v1. Low-confidence learnings are still information; Claude can weight them by the `[category]` prefix and the observation text itself.
+
+**Loop status after P1.1:**
+- Producer signal → Drafter: **wired** (pending P1.3 to start writing producer-side rows — until then the feed is mostly StructureEditor's existing writes).
+- Self-reflection → Drafter: not yet (P1.4).
+- Reader signal → Drafter: not yet (P1.5 + no readers yet).
+- Zita signal → Drafter: not yet (P1.5 + no Zita traffic yet).
+
+**Verification:** Unit-tested `buildDrafterPrompt` with (a) empty learnings — block absent, no "contract wins" sentinel, (b) 3 learnings across 3 categories — block present, all 3 observations included, ordering `Voice Contract` → `Lessons` → `Today's Brief`. Type-check on the agents workspace shows zero new errors (33 pre-existing, 33 post — all unrelated Agents SDK inference issues in server.ts).
+
+**References:** [agents/src/drafter.ts](../agents/src/drafter.ts), [agents/src/drafter-prompt.ts](../agents/src/drafter-prompt.ts), [agents/src/shared/learnings.ts](../agents/src/shared/learnings.ts), [docs/AGENTS.md](AGENTS.md) Drafter section.
+
 ## 2026-04-19: Frontmatter edits permitted for display-layer fixes (`beatTitles` map)
 **Context:** Drafter authors beat headings in kebab-case (`## qvcs-original-advantage`). `rehype-beats.ts` humanises these for display at build time (`qvcs-original-advantage` → "Qvcs Original Advantage"). That round-trip is lossy: apostrophes, colons, and acronym casing the kebab form can't express are gone by the time the display string is generated, so pieces render headings like "Qvcs Original Advantage" instead of "QVC's Original Advantage" and "Teaching 1 The Fuel Equation" instead of "Teaching 1: The Fuel Equation". The display-layer plugin alone can't recover punctuation that was never in the MDX.
 
