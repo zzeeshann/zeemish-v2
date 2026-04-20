@@ -28,6 +28,21 @@ Format per entry:
 
 ---
 
+## 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
+
+**Surfaced:** 2026-04-20 during Build 1 of the dashboard Memory panel. Treated `today.ts` as the canonical convention example for the new `memory.ts` endpoint. Grep for `/api/dashboard/today` across the repo turns up matches only in docs (`docs/DECISIONS.md`, `docs/RUNBOOK.md`, `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md`) — no TypeScript / Astro / HTML consumer. The public dashboard page queries D1 directly in its Astro frontmatter; admin uses its own client-side fetches against different endpoints.
+
+**Hypothesis:** The endpoint is a leftover from an earlier dashboard design where the public view was client-rendered. After the 2026-04-18 dashboard refocus (server-rendered via frontmatter queries), it was never removed. Safe to delete — no runtime caller.
+
+**Investigation hints:**
+- Confirm by grepping the built worker bundle (`dist/_worker.js/`) and the admin dashboard's client-side JS for any late-binding reference.
+- Check `src/pages/api/dashboard/*.ts` for other similar zombies (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) — the same 2026-04-18 refocus may have orphaned others.
+- Before deletion, decide whether to keep a minimal public JSON surface for future external consumers (a "public API" posture) or commit to server-rendered-only and remove all orphans.
+
+**Priority:** Low. Dead code adds surface area but doesn't break anything. Fold into a future API-layer cleanup sweep.
+
+---
+
 ## 2026-04-19: Audio pipeline silent stall between alarm chunks on longer pieces
 
 **Surfaced:** 2026-04-19 during retro audio for 2026-04-17. First retry attempt stopped at 4 of 8 beats. No `audio-failed` event in observer_events. No error logged. Alarm chain simply stopped firing. User clicked Continue and the pipeline resumed and finished cleanly.
