@@ -188,7 +188,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## [open] 2026-04-19: Book chapter 10 reconstructed commit message, not actual
+## [resolved] 2026-04-19: Book chapter 10 reconstructed commit message, not actual
 
 **Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/10-a-day-in-the-life.md](../book/10-a-day-in-the-life.md) line 71 says Publisher committed the 2026-04-19 piece with the message `feat(daily): publish 2026-04-19 piece on airline fuel shocks`. Actual commit was `feat(daily): 2026-04-19 — Airline industry faces a shakeup as jet fuel hits hard`.
 
@@ -199,6 +199,8 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - The Publisher's actual commit-message template lives in [agents/src/director.ts](../agents/src/director.ts) near the publishing step (grep `commitMsg`) — worth a cross-reference if the book ever tries to show the actual string.
 
 **Priority:** Low. No bug, just a divergence between narrative prose and the literal git log that's worth being honest about if the book grows into a forensic record.
+
+**Resolved:** 2026-04-20 — book line replaced with the literal commit subject verified against `git log` (four matching commits across the 2026-04-19 reset/retry cycle, all carrying the same `feat(daily): 2026-04-19 — Airline industry faces a shakeup as jet fuel hits hard` subject). Chose literal over narrative because the book is now a forensic record of what actually happened, not an illustrative guide. Scope held to the single named line — no sibling chapters read.
 
 ---
 

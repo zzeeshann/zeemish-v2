@@ -68,7 +68,7 @@ All three pass. No revision needed. This piece was a "one-round" piece, which th
 
 **02:01:17.** Director calls Publisher. Publisher writes the MDX file to `content/daily-pieces/2026-04-19-airline-industry-faces-a-shakeup-as-jet-fuel-hits-hard.mdx`, then commits it to GitHub with the message:
 
-> `feat(daily): publish 2026-04-19 piece on airline fuel shocks`
+> `feat(daily): 2026-04-19 — Airline industry faces a shakeup as jet fuel hits hard`
 
 **02:01:19.** GitHub Actions fires. It rebuilds the site. About two minutes later, the piece is live at `zeemish.io/daily/2026-04-19/`. At this point, the text side of the day is done.
 
