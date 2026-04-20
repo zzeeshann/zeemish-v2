@@ -171,7 +171,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## [open] 2026-04-19: Book chapter 9 vs Structure Editor — "4–6 beats" vs "3–6 beats"
+## [resolved] 2026-04-19: Book chapter 9 vs Structure Editor — "4–6 beats" vs "3–6 beats"
 
 **Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/09-the-thirteen-roles.md](../book/09-the-thirteen-roles.md) line 73 describes Structure Editor as checking "there are 4–6 beats." Actual code ([agents/src/structure-editor-prompt.ts:10](../agents/src/structure-editor-prompt.ts:10)) says "Has 3-6 beats (hook, 2-3 teaching, optional practice, close)."
 
@@ -183,6 +183,8 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - Related to P2.2 (Watch beat enforcement) still queued from the 2026-04-19 plan — any Structure Editor update should likely land in the same pass as that one.
 
 **Priority:** Low. Nobody's blocked; both documents-and-code read the same to ordinary readers. Worth fixing next time Structure Editor is touched for any reason.
+
+**Resolved:** 2026-04-20 — book line aligned to code. Code is authoritative (the enforcer wins when book and code drift); tightening `STRUCTURE_EDITOR_PROMPT` to 4–6 would make legitimate 3-beat pieces suddenly fail structural audit — real consequence for a one-line doc fix. Project brief's "4–6 beats" claim left untouched (handoff material, frozen historical spec). Scope held to the single named line — no sibling chapters read, no consistency sweep.
 
 ---
 

@@ -70,7 +70,7 @@ Here they are, in the order they run.
 
 **Job:** Check the shape of the piece.
 
-**What it does:** Reads the draft. Checks that the hook is one screen, the close is one sentence, there are 4–6 beats, the piece has frontmatter, the word count is in range, the flow makes sense. Flags specific structural issues.
+**What it does:** Reads the draft. Checks that the hook is one screen, the close is one sentence, there are 3–6 beats, the piece has frontmatter, the word count is in range, the flow makes sense. Flags specific structural issues.
 
 **Claude call?** Yes. Another judgment call, focused on shape rather than voice or facts.
 
