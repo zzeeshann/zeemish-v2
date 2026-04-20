@@ -33,6 +33,15 @@ export interface Learning {
  * Both matter: source tells you whether the system learned this from
  * itself or from readers; category tells you which prompt the learning
  * should inform.
+ *
+ * Defensive: rejects null/empty/non-string source at runtime. TS strict
+ * catches this at compile time in the current callers, but a future
+ * regression (new caller forgetting the arg, a dropped `source`
+ * column, a refactor that widens the type) could let a null leak in.
+ * Rather than silently writing an unsourced row that would then show
+ * up as "unspecified (pre-P1.3)" in every subsequent read, log a warn
+ * to observer_events and skip the write. Loud schema regression is
+ * easier to notice than a quiet null row polluting the feed.
  */
 export async function writeLearning(
   db: D1Database,
@@ -42,6 +51,13 @@ export async function writeLearning(
   confidence: number,
   source: LearningSource,
 ): Promise<void> {
+  if (typeof source !== 'string' || source.length === 0) {
+    await logSourceRegression(db, { category, observation, receivedType: source === null ? 'null' : typeof source }).catch(() => {
+      /* if observer write fails, there's no layer below to fall through to — caller already got a silent skip, which is the best we can do */
+    });
+    return;
+  }
+
   const id = crypto.randomUUID();
   await db
     .prepare(
@@ -49,6 +65,34 @@ export async function writeLearning(
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(id, category, observation, JSON.stringify(evidence), confidence, source, Date.now())
+    .run();
+}
+
+/**
+ * Write directly to observer_events — mirrors ObserverAgent.writeEvent's
+ * INSERT so this module stays dependency-free (no sub-agent hop,
+ * which would be a circular pull back through Env typings). Only fires
+ * when writeLearning's defensive check trips. Severity is `warn`, not
+ * `escalation` — the pipeline is still running, we just lost one row.
+ */
+async function logSourceRegression(
+  db: D1Database,
+  ctx: { category: string; observation: string; receivedType: string },
+): Promise<void> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO observer_events (id, severity, title, body, context, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      id,
+      'warn',
+      'learnings.source missing at write time',
+      `writeLearning refused a row because source was ${ctx.receivedType}. Row skipped to avoid null-source regression. Category: ${ctx.category}. Observation (truncated): ${ctx.observation.slice(0, 200)}`,
+      JSON.stringify(ctx),
+      Date.now(),
+    )
     .run();
 }
 

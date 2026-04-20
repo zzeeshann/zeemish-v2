@@ -108,7 +108,7 @@ Cross-agent learnings database — patterns that work or don't. Drafter reads th
 | evidence | TEXT | JSON: what supports this |
 | confidence | INTEGER | 0-100 |
 | applied_to_prompts | INTEGER | 0 or 1 |
-| source | TEXT | `reader` \| `producer` \| `self-reflection` \| `zita`. Where the signal came from. Loose TEXT, nullable — no CHECK constraint because a future fifth origin is cheap to add at the write site. NULL means "unspecified (pre-P1.3)". Indexed via `idx_learnings_source`. |
+| source | TEXT | `reader` \| `producer` \| `self-reflection` \| `zita`. Where the signal came from. Loose TEXT, nullable — no CHECK constraint because a future fifth origin is cheap to add at the write site. NULL means "unspecified (pre-P1.3)". Indexed via `idx_learnings_source`. **Application layer is stricter than the schema:** `writeLearning` refuses to insert a row whose `source` is null, empty, or non-string — logs a warn to `observer_events` and skips. Column nullability remains so historical pre-P1.3 rows stay readable; new rows must always carry a source. |
 | created_at | INTEGER | |
 | last_validated_at | INTEGER | |
 
