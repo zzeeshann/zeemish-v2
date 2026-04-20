@@ -95,6 +95,19 @@ export interface MadeAudio {
   generatedAt: number | null;
 }
 
+/**
+ * A single learning row pinned to this piece via `learnings.piece_date`.
+ * Shape matches Build 1's dashboard Memory panel — two surfaces, one
+ * schema. Source is nullable to preserve pre-P1.3 orphan rows; the
+ * drawer renders those under a defensive "Learning pattern" fallback
+ * group (same fallback the dashboard Memory panel uses).
+ */
+export interface MadeLearning {
+  observation: string;
+  source: string | null;
+  createdAt: number;
+}
+
 export interface MadeEnvelope {
   date: string;
   piece: MadePiece | null;
@@ -102,6 +115,7 @@ export interface MadeEnvelope {
   rounds: MadeRound[];
   candidates: MadeCandidates;
   audio: MadeAudio;
+  learnings: MadeLearning[];
 }
 
 /**

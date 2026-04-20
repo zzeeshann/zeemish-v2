@@ -610,6 +610,41 @@ made-drawer[data-open] .made-panel {
   font-family: 'SF Mono', 'Menlo', monospace;
 }
 
+/* --- What the system learned from this piece --------------------- */
+
+.made-learning-group {
+  margin-top: 1rem;
+}
+
+.made-learning-group:first-child {
+  margin-top: 0.5rem;
+}
+
+.made-learning-group-title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #1A1A1A;
+  margin: 0 0 0.5rem;
+}
+
+/* Override the default .made-list li dash-bullet for learning rows —
+ * the italic quote + gold left-border carries more per-row weight than
+ * a shared bullet line would. */
+.made-learning {
+  font-style: italic;
+  border-left: 2px solid #C49A1A;
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.made-learning::before {
+  display: none;
+}
+
+.made-learning:last-child {
+  margin-bottom: 0;
+}
+
 /* --- Lock body scroll when drawer is open -------------------------- */
 
 body.made-locked {

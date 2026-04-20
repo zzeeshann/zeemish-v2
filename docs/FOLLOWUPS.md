@@ -28,6 +28,22 @@ Format per entry:
 
 ---
 
+## 2026-04-20: StructureEditor writes violation-shaped observations into learnings, not forward-going lessons
+
+**Surfaced:** 2026-04-20 during Commit 2 of Build 2. The per-piece drawer's "What the system learned from this piece" section surfaces `learnings.observation` verbatim. For pieces written before P1.3/P1.4 (pre-2026-04-19), the only producer-origin writer was StructureEditor, whose rows read as raw audit violations ("Hook exceeds one screen - it's two full paragraphs with ~120 words") — the rule-break itself, not a forward-going pattern the Drafter should apply. Reads starkly in the drawer next to Learner/Drafter-reflect writes that phrase observations as applicable lessons.
+
+**Hypothesis:** `agents/src/structure-editor.ts:47` passes `result.issues[i]` / `result.suggestions[i]` directly as the `observation` argument. The StructureEditor prompt produces audit-time diagnostic language, not forward-going lesson language. Two possible fixes:
+1. Prompt-level retune: teach StructureEditor to rewrite each issue/suggestion into lesson-shaped prose before writing (e.g. "Keep the hook within one screen — two-paragraph hooks exceed the budget" instead of "Hook exceeds one screen…").
+2. Drop StructureEditor's writeLearning calls entirely. `Learner.analysePiecePostPublish` (P1.3) already reads `audit_results` and synthesises producer-origin learnings from them post-publish, and it writes lesson-shaped prose. If the sets substantially overlap, StructureEditor's writes are redundant; dropping them removes the tone mismatch without a prompt retune.
+
+**Investigation hints:**
+- Diff the set of learnings Learner.analysePiecePostPublish writes against what StructureEditor writes for the same piece. If Learner already covers the ground, option 2 is cleaner.
+- 2026-04-17's drawer shows 4 StructureEditor learnings, all violation-shaped. No Learner rows for that piece (predates P1.3). Good test case once the next pipeline run has fresh data from both writers on the same piece.
+
+**Priority:** Low. The drawer faithfully surfaces what the system wrote — honesty beats prettiness. Retune when next retuning StructureEditor.
+
+---
+
 ## 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
 
 **Surfaced:** 2026-04-20 while applying migration 0012. First run of `wrangler d1 migrations apply zeemish --remote` tried to replay ALL 12 migrations from scratch — the `d1_migrations` tracker table was empty, so wrangler thought nothing had been applied. 0001–0008 (CREATE TABLE IF NOT EXISTS) succeeded idempotently, 0009 (`ALTER TABLE ADD COLUMN quality_flag`) failed with `duplicate column name` because the column already existed from an earlier ad-hoc apply. Recovered manually by `INSERT INTO d1_migrations (name) VALUES ('0009_*'), ('0010_*'), ('0011_*');` then re-running `migrations apply`, which then only applied 0012.

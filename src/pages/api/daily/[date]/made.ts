@@ -10,6 +10,7 @@ import type {
   MadeFactClaim,
   MadeAudio,
   MadeAudioBeat,
+  MadeLearning,
 } from '../../../../lib/made-by';
 
 export const prerender = false;
@@ -53,6 +54,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
       voiceId: null,
       generatedAt: null,
     },
+    learnings: [],
   };
 
   // --- Piece metadata --------------------------------------------------
@@ -233,6 +235,25 @@ export const GET: APIRoute = async ({ params, locals }) => {
       envelope.audio = audio;
     }
   } catch { /* leave audio empty */ }
+
+  // --- Learnings pinned to this piece ---------------------------------
+  // Written post-publish by Learner.analysePiecePostPublish (P1.3) and
+  // Drafter.reflect (P1.4), plus any StructureEditor writes from that
+  // day's audit rounds. Empty until 0012's piece_date column + backfill
+  // landed (2026-04-20). Ordered by write time within each source.
+  try {
+    const rows = await db
+      .prepare(
+        'SELECT observation, source, created_at FROM learnings WHERE piece_date = ? ORDER BY created_at ASC',
+      )
+      .bind(date)
+      .all<{ observation: string; source: string | null; created_at: number }>();
+    envelope.learnings = rows.results.map<MadeLearning>((r) => ({
+      observation: r.observation,
+      source: r.source,
+      createdAt: r.created_at,
+    }));
+  } catch { /* leave learnings empty */ }
 
   return new Response(JSON.stringify(envelope), {
     headers: {

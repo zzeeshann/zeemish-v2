@@ -320,6 +320,20 @@ class MadeDrawer extends HTMLElement {
       `);
     }
 
+    // --- What the system learned from this piece -----------------------
+    // Grouped by source in a fixed order: Drafter's voice first
+    // (narrative first-person), then Learner (terser system-level),
+    // then reader/zita (post-traffic). Absent entirely when no
+    // learnings are pinned to this piece.
+    if (env.learnings.length > 0) {
+      html.push(`
+        <section class="made-section">
+          <h3 class="made-section-header">What the system learned from this piece</h3>
+          ${renderLearningGroups(env.learnings)}
+        </section>
+      `);
+    }
+
     this.bodyEl.innerHTML = html.join('');
 
     // Wire up candidates toggle
@@ -469,6 +483,58 @@ function renderClaims(claims: MadeFactClaim[]): string {
       </li>
     `;
   }).join('')}</ul>`;
+}
+
+/**
+ * Group learnings by source in a fixed render order, drop empty groups,
+ * return the HTML. Fixed order (not alphabetical, not data-driven):
+ *   1. self-reflection — Drafter's narrative first-person critique
+ *   2. producer        — Learner's (+ StructureEditor's) terse patterns
+ *   3. reader          — post-traffic engagement signals
+ *   4. zita            — question-pattern signals
+ * Unknown / null source falls into a defensive "Learning pattern"
+ * bucket at the end (same fallback Build 1's Memory panel uses).
+ */
+const LEARNING_SOURCE_ORDER = ['self-reflection', 'producer', 'reader', 'zita'] as const;
+const LEARNING_SOURCE_LABEL: Record<string, string> = {
+  'self-reflection': 'Drafter self-reflection',
+  'producer': 'Learner, producer-side pattern',
+  'reader': 'Reader signal',
+  'zita': 'Zita question pattern',
+};
+const LEARNING_FALLBACK_LABEL = 'Learning pattern';
+
+function renderLearningGroups(learnings: MadeEnvelope['learnings']): string {
+  const bySource = new Map<string, string[]>();
+  for (const l of learnings) {
+    const key = l.source && LEARNING_SOURCE_LABEL[l.source] ? l.source : '__fallback__';
+    if (!bySource.has(key)) bySource.set(key, []);
+    bySource.get(key)!.push(l.observation);
+  }
+
+  const groups: string[] = [];
+  for (const src of LEARNING_SOURCE_ORDER) {
+    const items = bySource.get(src);
+    if (items && items.length > 0) {
+      groups.push(renderLearningGroup(LEARNING_SOURCE_LABEL[src], items));
+    }
+  }
+  const fallback = bySource.get('__fallback__');
+  if (fallback && fallback.length > 0) {
+    groups.push(renderLearningGroup(LEARNING_FALLBACK_LABEL, fallback));
+  }
+  return groups.join('');
+}
+
+function renderLearningGroup(title: string, observations: string[]): string {
+  return `
+    <div class="made-learning-group">
+      <p class="made-learning-group-title">${escapeHtml(title)}</p>
+      <ul class="made-list">
+        ${observations.map((obs) => `<li class="made-learning">${escapeHtml(obs)}</li>`).join('')}
+      </ul>
+    </div>
+  `;
 }
 
 function renderCandidate(c: MadeEnvelope['candidates']['alsoConsidered'][number]): string {
