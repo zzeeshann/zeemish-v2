@@ -81,16 +81,15 @@ wrangler secret put SCANNER_RSS_FEEDS_JSON
 ## D1 Database
 
 ### Run migrations
-There are 10 migrations (`0001_init.sql` … `0010_audio_pipeline.sql`).
-Run them in order on a fresh database:
+There are 12 migrations (`0001_init.sql` … `0012_learnings_piece_date.sql`).
+Apply them (idempotent — skips any already recorded in `d1_migrations`):
 ```bash
-for f in migrations/*.sql; do
-  wrangler d1 execute zeemish --remote --file="$f"
-done
+wrangler d1 migrations apply zeemish --remote
 
 # Check what's in the database
 wrangler d1 execute zeemish --remote --command="SELECT name FROM sqlite_master WHERE type='table'"
 ```
+See `### Migration tracker hygiene` below before applying on a live DB — the tracker must be in sync or `migrations apply` will try to replay everything.
 
 ### Query the database
 ```bash
@@ -108,8 +107,6 @@ Migrations are tracked in the `d1_migrations` table. As of 2026-04-20 the tracke
   ```
   The result should list every `.sql` file in `migrations/` except the pending one. If rows are missing, the tracker is drifted and `migrations apply` will try to replay everything — likely hitting `duplicate column name` on an `ALTER TABLE ADD COLUMN` that's already live.
 - **If drift is detected:** recovery is to manually `INSERT INTO d1_migrations (name) VALUES ('NNNN_…')` for the already-applied rows the tracker is missing, then re-run `migrations apply`. Full procedure and the specific rows inserted on 2026-04-20 are documented in [DECISIONS.md](DECISIONS.md) 2026-04-20 "Surfacing the learning loop" (operational-notes bullet on the migration-apply snag).
-
-The `### Run migrations` block above describes the historical `execute --file` loop used to seed 0001–0010 on a fresh DB — that path is what left the tracker empty in the first place. Use it for fresh-DB bootstrap only; for incremental migrations on the live DB, use the guidance in this section.
 
 ## Trigger a daily piece
 
