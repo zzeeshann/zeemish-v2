@@ -139,6 +139,7 @@ Learner: runs off-pipeline on reader engagement data
   - **Zita (P1.5 pending traffic):** patterns in reader Zita questions, `source='zita'`.
 - **Output:** Producer post-publish result (`{date, written, overflowCount, considered}`) returned to Director for overflow logging; learning rows written to `learnings` with `source` populated.
 - **Does NOT touch published content.** Published pieces are permanent. All improvements feed forward.
+- **Reader surface:** The `/dashboard/` "What we've learned so far" panel is the first public view into what the loop produces — counts by source plus the latest observation. Fed by `/api/dashboard/memory` (and a parallel server-rendered query in the dashboard page).
 - **File:** `agents/src/learner.ts`
 - **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side)
 

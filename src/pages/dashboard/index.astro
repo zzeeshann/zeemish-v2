@@ -47,6 +47,8 @@ let avgCandidatesPerDay: number | null = null;
 let runningSince: string | null = null;
 let lastPipelineStep: { step: string; status: string; tMs: number; runId: string } | null = null;
 let isRunningNow = false;
+let learningCounts = { producer: 0, selfReflection: 0, total: 0 };
+let latestLearning: { observation: string; source: string | null; created_at: number } | null = null;
 
 try {
   todaysPiece = await db
@@ -168,6 +170,25 @@ try {
     const terminal = ['done', 'error', 'skipped'].includes(lastStep.step);
     isRunningNow = lastStep.run_id === today && !terminal;
   }
+
+  // Self-improvement loop — counts by source + latest observation.
+  const producerCount = await db
+    .prepare("SELECT COUNT(*) as n FROM learnings WHERE source = 'producer'")
+    .first<{ n: number }>();
+  const selfReflectionCount = await db
+    .prepare("SELECT COUNT(*) as n FROM learnings WHERE source = 'self-reflection'")
+    .first<{ n: number }>();
+  const totalLearnings = await db
+    .prepare('SELECT COUNT(*) as n FROM learnings')
+    .first<{ n: number }>();
+  learningCounts = {
+    producer: producerCount?.n ?? 0,
+    selfReflection: selfReflectionCount?.n ?? 0,
+    total: totalLearnings?.n ?? 0,
+  };
+  latestLearning = await db
+    .prepare('SELECT observation, source, created_at FROM learnings ORDER BY created_at DESC LIMIT 1')
+    .first<{ observation: string; source: string | null; created_at: number }>();
 } catch { /* D1 may be empty in dev — everything above stays at defaults */ }
 
 // --- Derived display strings ---
@@ -257,6 +278,22 @@ function shortDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
+
+// Source → human label for the self-improvement panel's attribution line.
+// Fallback covers pre-P1.3 orphan rows where source is null.
+function learningSourceLabel(source: string | null): string {
+  switch (source) {
+    case 'producer': return 'Learner, producer-side pattern';
+    case 'self-reflection': return 'Drafter self-reflection';
+    case 'reader': return 'Reader signal';
+    case 'zita': return 'Zita question pattern';
+    default: return 'Learning pattern';
+  }
+}
+
+const latestLearningDate = latestLearning
+  ? new Date(latestLearning.created_at).toISOString().slice(0, 10)
+  : null;
 ---
 
 <BaseLayout title="Dashboard — Zeemish" description="How the Zeemish factory is running.">
@@ -438,6 +475,43 @@ function shortDate(iso: string): string {
           </div>
         )}
       </dl>
+    </section>
+  )}
+
+  <!-- What we've learned so far -->
+  {learningCounts.total > 0 && (
+    <section class="mb-10">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">What we've learned so far</h2>
+
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.producer}</div>
+          <div class="text-sm text-zee-muted">Producer patterns</div>
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.selfReflection}</div>
+          <div class="text-sm text-zee-muted">Self-reflections</div>
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center col-span-2 md:col-span-1">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.total}</div>
+          <div class="text-sm text-zee-muted">Total observations</div>
+        </div>
+      </div>
+
+      {latestLearning && latestLearningDate && (
+        <figure class="mb-6">
+          <blockquote class="border-l-2 border-zee-gold pl-4 text-sm italic text-zee-text leading-relaxed">
+            {latestLearning.observation}
+          </blockquote>
+          <figcaption class="mt-2 pl-4 text-xs text-zee-muted">
+            — {learningSourceLabel(latestLearning.source)}, after the {latestLearningDate} piece.
+          </figcaption>
+        </figure>
+      )}
+
+      <p class="text-sm text-zee-muted leading-relaxed">
+        After every piece, two passes run: the Learner writes patterns from the quality record; the Drafter reflects on its own work. Both feed the next piece's prompt.
+      </p>
     </section>
   )}
 
