@@ -90,7 +90,7 @@ Learner: runs off-pipeline on reader engagement data
 ### 7. StructureEditorAgent
 - **Role:** Reviews beat structure, pacing, length. Checks hook, teaching, close rules.
 - **Checks:** 3–6 beats, one idea per beat, valid frontmatter, no filler
-- **Learnings:** Writes to the learnings DB for both passing drafts (suggestions, confidence 60) and failing drafts (issues, confidence 40). The learnings DB feeds Drafter's future prompts, so neutral sampling matters.
+- **Learnings:** Does not write to the learnings DB. Post-publish, `LearnerAgent.analysePiecePostPublish` reads `audit_results` (which includes this auditor's findings) and synthesises producer-origin learnings from the full quality record — that subsumes the signal this gate produces. See DECISIONS 2026-04-20 "Drop StructureEditor's writeLearning calls".
 - **Method:** `review(mdx)`
 - **File:** `agents/src/structure-editor.ts`
 - **Prompt:** `agents/src/structure-editor-prompt.ts`

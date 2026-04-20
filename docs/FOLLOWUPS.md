@@ -30,7 +30,7 @@ Format per entry:
 
 ---
 
-## [open] 2026-04-20: StructureEditor writes violation-shaped observations into learnings, not forward-going lessons
+## [resolved] 2026-04-20: StructureEditor writes violation-shaped observations into learnings, not forward-going lessons
 
 **Surfaced:** 2026-04-20 during Commit 2 of Build 2. The per-piece drawer's "What the system learned from this piece" section surfaces `learnings.observation` verbatim. For pieces written before P1.3/P1.4 (pre-2026-04-19), the only producer-origin writer was StructureEditor, whose rows read as raw audit violations ("Hook exceeds one screen - it's two full paragraphs with ~120 words") — the rule-break itself, not a forward-going pattern the Drafter should apply. Reads starkly in the drawer next to Learner/Drafter-reflect writes that phrase observations as applicable lessons.
 
@@ -43,6 +43,8 @@ Format per entry:
 - 2026-04-17's drawer shows 4 StructureEditor learnings, all violation-shaped. No Learner rows for that piece (predates P1.3). Good test case once the next pipeline run has fresh data from both writers on the same piece.
 
 **Priority:** Low. The drawer faithfully surfaces what the system wrote — honesty beats prettiness. Retune when next retuning StructureEditor.
+
+**Resolved:** 2026-04-20 — chose Option 2. Investigation compared SE's 4 rows for 2026-04-17 QVC vs Learner's 5 producer rows for 2026-04-20 Hormuz: Learner reads `audit_results` so SE's findings are *input* to the synthesis, SE emits duplicates within a single audit (2 of 4 QVC rows repeated "hook exceeds one screen"), and SE's rows teach Drafter rules the Structure Editor prompt already enforces. Dropped the writeLearning call + issues/suggestions loop from `agents/src/structure-editor.ts`; unused `writeLearning` import and `pieceDate` parameter on `review()` removed alongside; Director's call site updated. Historical rows stay in D1 and age out of Drafter's `getRecentLearnings(10)` as new Learner / Drafter-reflection writes accumulate. See DECISIONS 2026-04-20 "Drop StructureEditor's writeLearning calls".
 
 ---
 

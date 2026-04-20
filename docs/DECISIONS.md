@@ -2,6 +2,40 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-20: Drop StructureEditor's writeLearning calls
+
+**Context:** FOLLOWUPS 2026-04-20 "StructureEditor writes violation-shaped observations into learnings, not forward-going lessons" flagged that the 2026-04-17 per-piece drawer surfaces raw audit diagnostics ("Hook exceeds one screen - it's two full paragraphs with ~120 words") next to lesson-shaped prose from Learner and Drafter-reflection. The FOLLOWUPS framed two options — (1) retune SE's prompt to emit lesson-shaped prose, or (2) drop SE's writeLearning calls entirely since Learner.analysePiecePostPublish covers the ground from the same source data.
+
+**Investigation (2026-04-20):** Pulled the 4 StructureEditor rows written for 2026-04-17 QVC and the 5 Learner producer rows written for 2026-04-20 Hormuz and compared qualitatively. Three findings:
+
+1. **Learner reads `audit_results` in its post-publish synthesis.** SE's findings are *input* to Learner's generalisation pass — nothing SE sees is invisible to Learner.
+2. **SE emits duplicates within a single audit.** 2 of 4 QVC rows said "hook exceeds one screen" — the auditor legitimately flags the same rule break multiple ways, but every flag becomes a separate learnings row. Learner post-publish compresses these into one generalised lesson.
+3. **SE's rows teach Drafter rules Drafter already has.** "Lesson has 7 beats instead of the required 3-6 beats" is information the Structure Editor prompt already enforces as a gate. Surfacing it to Drafter via `getRecentLearnings(10)` adds zero signal over the existing voice contract + structure prompt.
+
+Every piece published (including `qualityFlag='low'` ones under the "daily cadence > perfect catalogue" rule) reaches `analysePiecePostPublish`, so the hypothetical "SE catches things for pieces that don't publish" does not translate to any unique coverage in practice.
+
+**Decision:** Option 2. Delete SE's writeLearning calls and the `result.issues`/`result.suggestions` loop. Keep `review()`'s return shape intact — Director and Integrator still use `{passed, issues, suggestions}` to gate publication and drive revision. The `pieceDate` parameter on `review()` (added for the writes on 2026-04-20 via the "Surfacing the learning loop" entry) is removed alongside, since it existed only for the writes we're removing. Director's single call site updated accordingly.
+
+**Historical rows stay in D1.** The 4 QVC rows and any other SE writes on earlier pieces remain in the learnings table as honest historical record. Drafter's `getRecentLearnings(10)` reads newest-first, so they age out naturally as Learner + Drafter-reflection writes accumulate; no cleanup needed.
+
+**Why not Option 1 (prompt retune):**
+- Double-duty prompt (audit + lesson-writer) increases cognitive load per call and adds tokens.
+- Models synthesise lessons better from the full quality record (post-publish) than from per-violation judgements (audit-time).
+- Doesn't solve the within-audit duplicate problem.
+- Still wouldn't add signal beyond what Learner already produces.
+
+**What didn't change:**
+- SE's audit behaviour — gate scores, issues, suggestions, return shape, Director's consumption. No behavioural change to the pipeline's publication decisions.
+- The Structure Editor prompt (`structure-editor-prompt.ts`) — untouched.
+- Learner, Drafter-reflect, or any other writer — untouched.
+- `writeLearning` helper — still used by Learner.analysePiecePostPublish, Drafter.reflect, and the reader-side Learner path.
+
+**FOLLOWUPS resolved:** 2026-04-20 "StructureEditor writes violation-shaped observations into learnings, not forward-going lessons".
+
+**References:** [agents/src/structure-editor.ts](../agents/src/structure-editor.ts), [agents/src/director.ts](../agents/src/director.ts) (line 181 call site), [docs/AGENTS.md](AGENTS.md) (section 7).
+
+---
+
 ## 2026-04-20: Remove /api/dashboard/today — unused since 2026-04-17
 
 **Context:** FOLLOWUPS 2026-04-20 flagged `src/pages/api/dashboard/today.ts` as likely dead. Verification confirmed: zero runtime callers across `src/`, `scripts/`, `agents/`. The public dashboard (`src/pages/dashboard/index.astro`) queries D1 directly in Astro frontmatter; the admin dashboard uses its own client-side fetches against different endpoints; the built worker's `inlinedScripts` contain no reference. The endpoint's last commit (`b84de9e`, 2026-04-17) was itself a comment-only update whose message already named the consumer as gone: *"That path went away when the reader-facing tier moved to voiceScore + src/lib/audit-tier.ts."*
