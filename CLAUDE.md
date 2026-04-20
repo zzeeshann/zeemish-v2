@@ -22,6 +22,20 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Hygiene + correctness pass (2026-04-20, afternoon session)
+Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback point for the whole session is [`f87a520`](https://github.com/zzeeshann/zeemish-v2/commit/f87a520). Each commit deployed green on both workers with a post-deploy smoke check on `/`, `/daily/`, `/library/`, `/dashboard/`. FOLLOWUPS is visibly shorter.
+
+1. [`81f6964`](https://github.com/zzeeshann/zeemish-v2/commit/81f6964) — removed unused `/api/dashboard/today` endpoint. Zero runtime callers; the endpoint's last commit (`b84de9e`, 2026-04-17) was itself a comment-only update noting the consumer was gone. Sibling-endpoint audit (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) logged as its own new FOLLOWUP rather than piggybacked.
+2. [`c3cd104`](https://github.com/zzeeshann/zeemish-v2/commit/c3cd104) — book ch 9 "4–6 beats" → "3–6 beats". Code is authoritative; tightening `STRUCTURE_EDITOR_PROMPT` would have broken legitimate 3-beat pieces for a one-line doc fix.
+3. [`e005f4a`](https://github.com/zzeeshann/zeemish-v2/commit/e005f4a) — book ch 10 reconstructed commit subject replaced with the literal one, verified against git log (four matching commits across the 2026-04-19 reset/retry cycle). Book is a forensic record, not an illustrative guide.
+4. [`4a6a004`](https://github.com/zzeeshann/zeemish-v2/commit/4a6a004) — added `### Migration tracker hygiene` section to RUNBOOK covering pre-flight `SELECT name FROM d1_migrations`, the "always use `migrations apply`" rule, and a link to DECISIONS for the 2026-04-20 drift-recovery procedure.
+5. [`b06ad60`](https://github.com/zzeeshann/zeemish-v2/commit/b06ad60) — aligned the stale `### Run migrations` block with the new hygiene section. Count 10→12, `execute --file` loop → `migrations apply`, contradictory pointer paragraph removed.
+6. [`fae8e21`](https://github.com/zzeeshann/zeemish-v2/commit/fae8e21) — dropped StructureEditor's `writeLearning` calls. Investigation (compare QVC 2026-04-17 SE rows vs Hormuz 2026-04-20 Learner rows) showed SE's writes were a noisier pre-synthesis copy of a signal Learner already processes post-publish via `audit_results`: 2 of 4 QVC rows duplicated internally, and every row taught Drafter a rule the SE prompt already enforces. Return shape unchanged (Director + Integrator still gate on `{passed, issues, suggestions}`), unused `pieceDate` parameter removed alongside. Historical rows stay in D1 and age out of `getRecentLearnings(10)`.
+
+**Tomorrow's verification checkpoint for #6 (StructureEditor drop):** on 2026-04-21 after the 2am UTC cron, check the learnings table for that date's piece. Expected shape: Learner rows (post-publish synthesis) + Drafter self-reflection rows, zero StructureEditor-shape rows. If SE-shape rows appear, #6 regressed and we investigate. If they're absent, the behavioural change is confirmed.
+
+**Next session primary work:** the audio retry trio in FOLLOWUPS — Publisher.publishAudio double-fires on Continue retry, Continue re-runs full pipeline, silent stall between alarm chunks. These bugs compound (they're what corrupted 2026-04-17's frontmatter) and share code paths, so they want a fresh session with a proper P0 scan rather than tacking onto tonight's hygiene pass.
+
 ## What was built
 
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
