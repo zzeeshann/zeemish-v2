@@ -151,7 +151,7 @@ Runs in under a minute including the push wait. See
 ### Verify
 - Pipeline monitor on `/dashboard/admin/` shows step-by-step progress
 - Public pipeline data: `curl /api/dashboard/pipeline` (no auth)
-- Single piece in D1 after completion: `curl /api/dashboard/today` (no auth)
+- Single piece in D1 after completion: `wrangler d1 execute zeemish --remote --command="SELECT date, headline, voice_score FROM daily_pieces WHERE date = date('now')"`
 - Live URL: `/daily/YYYY-MM-DD/` should return 200 after the post-publish deploy completes (~30s)
 
 ### Manual fallback (if the script misbehaves)
@@ -214,7 +214,6 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
 ## Dashboard API endpoints (site worker)
 ```bash
 # Public (no auth):
-GET /api/dashboard/today      # Today's pipeline status + scores
 GET /api/dashboard/recent     # Last 7 pieces
 GET /api/dashboard/stats      # Library counters
 

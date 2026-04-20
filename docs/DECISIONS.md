@@ -2,6 +2,23 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-20: Remove /api/dashboard/today — unused since 2026-04-17
+
+**Context:** FOLLOWUPS 2026-04-20 flagged `src/pages/api/dashboard/today.ts` as likely dead. Verification confirmed: zero runtime callers across `src/`, `scripts/`, `agents/`. The public dashboard (`src/pages/dashboard/index.astro`) queries D1 directly in Astro frontmatter; the admin dashboard uses its own client-side fetches against different endpoints; the built worker's `inlinedScripts` contain no reference. The endpoint's last commit (`b84de9e`, 2026-04-17) was itself a comment-only update whose message already named the consumer as gone: *"That path went away when the reader-facing tier moved to voiceScore + src/lib/audit-tier.ts."*
+
+**Decision:** Delete the endpoint. Update RUNBOOK's verify step (line 154) to use a `wrangler d1 execute` query instead of `curl /api/dashboard/today`. Remove the line from RUNBOOK's public API list (line 217). Leave `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md:200` intact — handoff is frozen historical spec. Leave `docs/DECISIONS.md:556` intact — append-only convention; this new entry records the removal without editing the original 2026-04-17 "Soften quality surfacing" reference.
+
+**Chose deletion over keeping for future external consumers.** The FOLLOWUPS investigation hints named the choice explicitly. Speculative API surface rots — three days of zero callers is already long enough that any hypothetical future consumer would be reading stale shape. Better to remove and rebuild against actual demand than maintain a ghost endpoint whose response contract drifts from whatever the dashboard now considers canonical.
+
+**Scope held.** Sibling endpoints (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) were not audited in this commit — logged as its own FOLLOWUP instead so the sweep can happen deliberately rather than piggybacking on a single-endpoint removal.
+
+**FOLLOWUPS resolved:** 2026-04-20 "/api/dashboard/today.ts appears to be uncalled dead code".
+**FOLLOWUPS added:** 2026-04-20 "Audit sibling dashboard API endpoints for the same dead-code pattern".
+
+**References:** [docs/FOLLOWUPS.md](FOLLOWUPS.md), [docs/RUNBOOK.md](RUNBOOK.md).
+
+---
+
 ## 2026-04-20: Surfacing the learning loop (Builds 1 + 2)
 
 **Context:** P1.3 + P1.4 closed the write side of the self-improvement loop on 2026-04-19 — Learner and Drafter now write post-publish learnings. Nothing in the reader-facing UI exposed what was being learned. FOLLOWUPS 2026-04-19 "Surface producer-side learnings + self-reflection in the UI" queued the work pending enough real data to design against. The first real cron run at 2am UTC 2026-04-20 wrote 9 rows on the Hormuz piece (5 producer + 4 self-reflection) — enough density to ship.

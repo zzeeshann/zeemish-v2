@@ -83,7 +83,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## [open] 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
+## [resolved] 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
 
 **Surfaced:** 2026-04-20 during Build 1 of the dashboard Memory panel. Treated `today.ts` as the canonical convention example for the new `memory.ts` endpoint. Grep for `/api/dashboard/today` across the repo turns up matches only in docs (`docs/DECISIONS.md`, `docs/RUNBOOK.md`, `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md`) — no TypeScript / Astro / HTML consumer. The public dashboard page queries D1 directly in its Astro frontmatter; admin uses its own client-side fetches against different endpoints.
 
@@ -95,6 +95,8 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 - Before deletion, decide whether to keep a minimal public JSON surface for future external consumers (a "public API" posture) or commit to server-rendered-only and remove all orphans.
 
 **Priority:** Low. Dead code adds surface area but doesn't break anything. Fold into a future API-layer cleanup sweep.
+
+**Resolved:** 2026-04-20 — endpoint file deleted; RUNBOOK verify step rewritten to use a `wrangler d1 execute` query; RUNBOOK's public API list pruned. `docs/DECISIONS.md:556` and `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md:200` left intact (append-only convention + frozen handoff spec). Sibling endpoints (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) not audited in this pass — logged as its own followup. See DECISIONS 2026-04-20 "Remove /api/dashboard/today".
 
 ---
 
@@ -216,3 +218,19 @@ Option 1 is what the external plan recommends. Not a hard constraint — Curator
 **Priority:** Low in blast radius, visibly important in editorial quality. No system depends on it.
 
 **Unblock after:** one week of pieces (by 2026-04-26) — check if the closed loop has shifted Curator's clustering on its own, or if hard-coded concept-distance is still needed. If clustering has organically diversified, close as `[resolved]` with a DECISIONS entry naming the organic resolution. If clustering persists, promote to `[open]` and ship option 1.
+
+---
+
+## [open] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern
+
+**Surfaced:** 2026-04-20 during the `today.ts` removal (resolved this session). The resolution raised the question of whether `analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts` were similarly orphaned by the 2026-04-18 dashboard refocus. Not investigated in today's commit to hold scope.
+
+**Hypothesis:** Some of them are likely dead too. The 2026-04-18 refocus moved the public dashboard to server-rendered frontmatter queries, and the admin page has its own client-side fetches — the same conditions that left `today.ts` uncalled apply to its siblings.
+
+**Investigation hints:**
+- Same grep pattern used on `today.ts`: zero runtime callers across `src/`, `scripts/`, `agents/` means dead.
+- Check the admin dashboard's client-side scripts (`dist/_worker.js/manifest_*.mjs` `inlinedScripts` array) for late-binding fetches before deleting any endpoint that might still be referenced from the admin UI.
+- `/api/dashboard/observer` has a POST handler for acknowledging events — that one is almost certainly live. Don't delete it; verify first.
+- For any endpoint that survives the audit, decide (like we did for `today.ts`) whether to keep it for future external consumers or remove. Err toward removing — speculative API surface rots.
+
+**Priority:** Low. Dead code adds surface area but doesn't break anything.
