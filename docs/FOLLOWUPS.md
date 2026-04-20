@@ -28,6 +28,43 @@ Format per entry:
 
 ---
 
+## 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
+
+**Surfaced:** 2026-04-20 while applying migration 0012. First run of `wrangler d1 migrations apply zeemish --remote` tried to replay ALL 12 migrations from scratch — the `d1_migrations` tracker table was empty, so wrangler thought nothing had been applied. 0001–0008 (CREATE TABLE IF NOT EXISTS) succeeded idempotently, 0009 (`ALTER TABLE ADD COLUMN quality_flag`) failed with `duplicate column name` because the column already existed from an earlier ad-hoc apply. Recovered manually by `INSERT INTO d1_migrations (name) VALUES ('0009_*'), ('0010_*'), ('0011_*');` then re-running `migrations apply`, which then only applied 0012.
+
+**Hypothesis:** All prior migrations were applied ad-hoc via `wrangler d1 execute --file migrations/NNNN_*.sql` (or via the Cloudflare dashboard's query console) rather than through `wrangler d1 migrations apply`. Those bypass paths run the SQL but don't write to `d1_migrations`. Migration 0012 was the first to go through `migrations apply`, so it triggered the full replay.
+
+**Investigation hints:**
+- Check git history / project chat logs for how 0001–0011 were originally applied. If ad-hoc, document the expected path going forward (always `migrations apply`) in `docs/RUNBOOK.md`.
+- Consider adding a pre-migration hygiene check to a future deploy script: `SELECT COUNT(*) FROM d1_migrations` — if the count doesn't match the number of `.sql` files in `migrations/` minus any pending, warn before running `apply`.
+- Alternatively, future migrations could start with a defensive comment block explaining how to verify the tracker state before applying, so the next person doesn't hit the same surprise.
+
+**Priority:** Low. One-time recovery is done; the tracker is now in sync (12 rows, 0001–0012). But the next contributor who adds migration 0013 will avoid a same-shape failure only if they run `apply` on a DB whose tracker is already correct — which from now on it will be.
+
+---
+
+## 2026-04-20: D1 rejects correlated subqueries referencing the outer table in SELECT projection / UPDATE SET
+
+**Surfaced:** 2026-04-20 running migration 0012's one-time backfill. The commented backfill in the migration file used the standard SQLite pattern for a nearest-timestamp join:
+```sql
+UPDATE learnings SET piece_date = (
+  SELECT dp.date FROM daily_pieces dp WHERE dp.published_at IS NOT NULL
+  ORDER BY ABS(dp.published_at - learnings.created_at) ASC LIMIT 1
+) WHERE ...;
+```
+D1 rejected this with `no such column: learnings.created_at` — the inner subquery can't resolve the outer table. Same error on the SELECT preview variant using `l.created_at` alias. Rewrote the backfill as two date-equality UPDATEs (same outcome for this 13-row case, because every `created_at` landed on the same calendar day as its corresponding piece's `published_at`) and shipped. Migration file's comment block was updated post-hoc to match what actually ran.
+
+**Hypothesis:** D1's query planner (libSQL fork) may not support the full SQLite correlated-subquery semantics that stock SQLite does. Plain SQLite 3.33+ supports this pattern natively. Needs a minimal reproducer filed at [workers-sdk#new-issue](https://github.com/cloudflare/workers-sdk/issues/new/choose) to confirm it's a D1 limitation vs. a wrangler shell-quoting quirk (reasonably confident it's the former based on the error text and two failed attempts with different aliasing).
+
+**Investigation hints:**
+- Build a minimal repro on a scratch D1: two tables, correlated subquery in SELECT projection, see if it fails on real D1 vs. local `miniflare`. If consistent, file the issue.
+- For future UPDATEs that need nearest-timestamp joins, use either: (a) `UPDATE … FROM (subquery) WHERE learnings.id = mapping.id` if D1 supports the PostgreSQL-style syntax, (b) `UPDATE … SET col = (SELECT …)` where the inner subquery avoids touching the outer table, or (c) direct explicit updates per value cluster (what we did here).
+- If this turns out to be a real D1 limitation, add a note to `docs/DECISIONS.md` so future migrations avoid the pattern upfront.
+
+**Priority:** Low. Unblocks nothing today; the 0012 backfill shipped via the rewrite. Only matters again when a future migration wants a similar nearest-X backfill against existing rows.
+
+---
+
 ## 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
 
 **Surfaced:** 2026-04-20 during Build 1 of the dashboard Memory panel. Treated `today.ts` as the canonical convention example for the new `memory.ts` endpoint. Grep for `/api/dashboard/today` across the repo turns up matches only in docs (`docs/DECISIONS.md`, `docs/RUNBOOK.md`, `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md`) — no TypeScript / Astro / HTML consumer. The public dashboard page queries D1 directly in its Astro frontmatter; admin uses its own client-side fetches against different endpoints.
