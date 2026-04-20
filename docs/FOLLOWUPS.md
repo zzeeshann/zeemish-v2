@@ -46,7 +46,7 @@ Format per entry:
 
 ---
 
-## [open] 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
+## [resolved] 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
 
 **Surfaced:** 2026-04-20 while applying migration 0012. First run of `wrangler d1 migrations apply zeemish --remote` tried to replay ALL 12 migrations from scratch — the `d1_migrations` tracker table was empty, so wrangler thought nothing had been applied. 0001–0008 (CREATE TABLE IF NOT EXISTS) succeeded idempotently, 0009 (`ALTER TABLE ADD COLUMN quality_flag`) failed with `duplicate column name` because the column already existed from an earlier ad-hoc apply. Recovered manually by `INSERT INTO d1_migrations (name) VALUES ('0009_*'), ('0010_*'), ('0011_*');` then re-running `migrations apply`, which then only applied 0012.
 
@@ -58,6 +58,8 @@ Format per entry:
 - Alternatively, future migrations could start with a defensive comment block explaining how to verify the tracker state before applying, so the next person doesn't hit the same surprise.
 
 **Priority:** Low. One-time recovery is done; the tracker is now in sync (12 rows, 0001–0012). But the next contributor who adds migration 0013 will avoid a same-shape failure only if they run `apply` on a DB whose tracker is already correct — which from now on it will be.
+
+**Resolved:** 2026-04-20 — added a `### Migration tracker hygiene` subsection to [docs/RUNBOOK.md](RUNBOOK.md) covering (a) use `migrations apply`, not `execute --file` or `execute --command`, (b) the pre-flight `SELECT name FROM d1_migrations ORDER BY id` check, and (c) a link to the 2026-04-20 DECISIONS recovery steps rather than re-documenting the procedure. Existing `### Run migrations` block left intact as fresh-DB bootstrap documentation with a pointer from the new section.
 
 ---
 

@@ -98,6 +98,19 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM users LIMIT 5"
 wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 10"
 ```
 
+### Migration tracker hygiene
+Migrations are tracked in the `d1_migrations` table. As of 2026-04-20 the tracker is in sync (12 rows, 0001–0012). Keep it that way:
+
+- **Use `wrangler d1 migrations apply zeemish --remote`** for any new migration on a live DB — not `wrangler d1 execute --file=...` and not `wrangler d1 execute --command=...`. Only `migrations apply` writes to `d1_migrations`; the other paths run the SQL but leave the tracker blind, which is how we got into the 2026-04-20 mess.
+- **Pre-flight check** before applying:
+  ```bash
+  wrangler d1 execute zeemish --remote --command="SELECT name FROM d1_migrations ORDER BY id"
+  ```
+  The result should list every `.sql` file in `migrations/` except the pending one. If rows are missing, the tracker is drifted and `migrations apply` will try to replay everything — likely hitting `duplicate column name` on an `ALTER TABLE ADD COLUMN` that's already live.
+- **If drift is detected:** recovery is to manually `INSERT INTO d1_migrations (name) VALUES ('NNNN_…')` for the already-applied rows the tracker is missing, then re-run `migrations apply`. Full procedure and the specific rows inserted on 2026-04-20 are documented in [DECISIONS.md](DECISIONS.md) 2026-04-20 "Surfacing the learning loop" (operational-notes bullet on the migration-apply snag).
+
+The `### Run migrations` block above describes the historical `execute --file` loop used to seed 0001–0010 on a fresh DB — that path is what left the tracker empty in the first place. Use it for fresh-DB bootstrap only; for incremental migrations on the live DB, use the guidance in this section.
+
 ## Trigger a daily piece
 
 Daily pieces are the only content type. The manual trigger and the
