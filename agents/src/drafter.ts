@@ -171,6 +171,7 @@ export class DrafterAgent extends Agent<Env, DrafterState> {
           { date, phase: 'self-reflection' },
           60,
           'self-reflection',
+          date,
         );
         written += 1;
       } catch {

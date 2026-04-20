@@ -206,21 +206,33 @@ Extract learnings for future pieces. What should the Drafter do differently next
       parsed = { learnings: [] };
     }
 
-    for (const learning of parsed.learnings) {
-      try {
-        await writeLearning(
-          this.env.DB,
-          'engagement',
-          learning,
-          {
-            lessonId: lessonData.lessonId,
-            completionRate: lessonData.completionRate,
-            dropOffBeat: lessonData.dropOffBeat,
-          },
-          70,
-          'reader',
-        );
-      } catch { /* learning write shouldn't break */ }
+    // Daily-piece lessonIds follow the system-wide `YYYY-MM-DD-<kebab-slug>`
+    // invariant (MDX filename, /daily/[date]/ routing, library sort). If a
+    // non-conforming lessonId somehow reaches this path, skip the write
+    // rather than inventing a date — writeLearning's non-null pieceDate
+    // invariant exists specifically to keep garbage out of the column.
+    const pieceDate = /^\d{4}-\d{2}-\d{2}-/.test(lessonData.lessonId)
+      ? lessonData.lessonId.slice(0, 10)
+      : null;
+
+    if (pieceDate) {
+      for (const learning of parsed.learnings) {
+        try {
+          await writeLearning(
+            this.env.DB,
+            'engagement',
+            learning,
+            {
+              lessonId: lessonData.lessonId,
+              completionRate: lessonData.completionRate,
+              dropOffBeat: lessonData.dropOffBeat,
+            },
+            70,
+            'reader',
+            pieceDate,
+          );
+        } catch { /* learning write shouldn't break */ }
+      }
     }
 
     this.setState({ ...this.state, learningsWritten: this.state.learningsWritten + parsed.learnings.length });
@@ -370,6 +382,7 @@ ${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
           { date, phase: 'post-publish', voiceScore: piece.voice_score, rounds: Math.max(0, roundsCount - 1) },
           60,
           'producer',
+          date,
         );
         written += 1;
       } catch {

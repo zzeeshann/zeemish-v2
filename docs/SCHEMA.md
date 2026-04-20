@@ -109,12 +109,13 @@ Cross-agent learnings database — patterns that work or don't. Drafter reads th
 | confidence | INTEGER | 0-100 |
 | applied_to_prompts | INTEGER | 0 or 1 |
 | source | TEXT | `reader` \| `producer` \| `self-reflection` \| `zita`. Where the signal came from. Loose TEXT, nullable — no CHECK constraint because a future fifth origin is cheap to add at the write site. NULL means "unspecified (pre-P1.3)". Indexed via `idx_learnings_source`. **Application layer is stricter than the schema:** `writeLearning` refuses to insert a row whose `source` is null, empty, or non-string — logs a warn to `observer_events` and skips. Column nullability remains so historical pre-P1.3 rows stay readable; new rows must always carry a source. |
+| piece_date | TEXT | YYYY-MM-DD of the `daily_pieces` row this learning is about. Nullable at schema level so migration 0012 could apply non-destructively to pre-existing rows, which were then filled via a one-time manual UPDATE matching `learnings.created_at` to `daily_pieces.published_at`. **Application layer enforces non-null going forward:** `writeLearning` refuses rows missing `piece_date`, same defensive pattern as `source` (both checks route through the shared `logMissingField` helper). Indexed via `idx_learnings_piece_date`. Primary read path: the per-piece "What the system learned" section of the How-this-was-made drawer. |
 | created_at | INTEGER | |
 | last_validated_at | INTEGER | |
 
 `category` and `source` are orthogonal: `category` is *what* kind of learning (voice/structure/…); `source` is *who* produced the signal (reader/producer/…).
 
-Migrations: `0003_engagement_learnings.sql` (initial), `0011_learnings_source.sql` (added `source`).
+Migrations: `0003_engagement_learnings.sql` (initial), `0011_learnings_source.sql` (added `source`), `0012_learnings_piece_date.sql` (added `piece_date`).
 
 ### audit_results
 One row per audit pass per draft — durable audit trail. Written by DirectorAgent after each audit round.
@@ -237,3 +238,4 @@ Migration: `0007_pipeline_log.sql`
 - `0009_quality_flag.sql` — added `daily_pieces.quality_flag` so Director can publish-anyway on max-revision audit failure and mark the piece for archive-view filtering
 - `0010_audio_pipeline.sql` — created `daily_piece_audio` (per-beat audio rows) + added `daily_pieces.has_audio` boolean. Un-paused the audio pipeline.
 - `0011_learnings_source.sql` — added `learnings.source` (reader/producer/self-reflection/zita, nullable TEXT, no CHECK) + `idx_learnings_source`. Plumbing for P1.3 — widens the Learner from reader-only to all-signal.
+- `0012_learnings_piece_date.sql` — added `learnings.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer) + `idx_learnings_piece_date`. Enables the per-piece "What the system learned" section of the How-this-was-made drawer. Backfill for pre-migration rows is included as a commented one-time UPDATE inside the migration file (not auto-applied); mapping works via nearest-timestamp join of `learnings.created_at` to `daily_pieces.published_at`, restricted to producer/self-reflection sources.

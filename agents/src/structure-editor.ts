@@ -22,7 +22,7 @@ interface StructureEditorState {
 export class StructureEditorAgent extends Agent<Env, StructureEditorState> {
   initialState: StructureEditorState = { lastResult: null };
 
-  async review(mdx: string): Promise<StructureAuditResult> {
+  async review(mdx: string, pieceDate: string): Promise<StructureAuditResult> {
     const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
 
     const response = await client.messages.create({
@@ -51,6 +51,7 @@ export class StructureEditorAgent extends Agent<Env, StructureEditorState> {
             { origin: 'structure-editor', passed: result.passed },
             confidence,
             'producer',
+            pieceDate,
           );
         } catch { /* learning write shouldn't break audit */ }
       }

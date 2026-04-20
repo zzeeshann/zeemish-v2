@@ -34,14 +34,19 @@ export interface Learning {
  * itself or from readers; category tells you which prompt the learning
  * should inform.
  *
- * Defensive: rejects null/empty/non-string source at runtime. TS strict
- * catches this at compile time in the current callers, but a future
- * regression (new caller forgetting the arg, a dropped `source`
- * column, a refactor that widens the type) could let a null leak in.
- * Rather than silently writing an unsourced row that would then show
- * up as "unspecified (pre-P1.3)" in every subsequent read, log a warn
- * to observer_events and skip the write. Loud schema regression is
- * easier to notice than a quiet null row polluting the feed.
+ * `pieceDate` pins the row to a specific daily_piece (YYYY-MM-DD).
+ * Required going forward so the per-piece drawer can query
+ * `WHERE piece_date = ?`. Column is nullable in the DB to preserve
+ * pre-migration rows (backfilled via migration 0012's manual UPDATE);
+ * the application layer enforces non-null here.
+ *
+ * Defensive: rejects null/empty/non-string `source` OR `pieceDate` at
+ * runtime. TS strict catches these at compile time in current callers,
+ * but a future regression (new caller forgetting an arg, a refactor
+ * that widens types) could let a null leak in. Rather than silently
+ * writing a broken row, log a warn to observer_events and skip.
+ * Loud schema regression is easier to notice than a quiet null row
+ * polluting the feed.
  */
 export async function writeLearning(
   db: D1Database,
@@ -50,10 +55,17 @@ export async function writeLearning(
   evidence: Record<string, unknown>,
   confidence: number,
   source: LearningSource,
+  pieceDate: string,
 ): Promise<void> {
   if (typeof source !== 'string' || source.length === 0) {
-    await logSourceRegression(db, { category, observation, receivedType: source === null ? 'null' : typeof source }).catch(() => {
+    await logMissingField(db, { field: 'source', category, observation, receivedType: source === null ? 'null' : typeof source }).catch(() => {
       /* if observer write fails, there's no layer below to fall through to — caller already got a silent skip, which is the best we can do */
+    });
+    return;
+  }
+  if (typeof pieceDate !== 'string' || pieceDate.length === 0) {
+    await logMissingField(db, { field: 'piece_date', category, observation, receivedType: pieceDate === null ? 'null' : typeof pieceDate }).catch(() => {
+      /* same rationale as above */
     });
     return;
   }
@@ -61,10 +73,10 @@ export async function writeLearning(
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO learnings (id, category, observation, evidence, confidence, source, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO learnings (id, category, observation, evidence, confidence, source, piece_date, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, category, observation, JSON.stringify(evidence), confidence, source, Date.now())
+    .bind(id, category, observation, JSON.stringify(evidence), confidence, source, pieceDate, Date.now())
     .run();
 }
 
@@ -72,12 +84,13 @@ export async function writeLearning(
  * Write directly to observer_events — mirrors ObserverAgent.writeEvent's
  * INSERT so this module stays dependency-free (no sub-agent hop,
  * which would be a circular pull back through Env typings). Only fires
- * when writeLearning's defensive check trips. Severity is `warn`, not
- * `escalation` — the pipeline is still running, we just lost one row.
+ * when writeLearning's defensive check trips on `source` or
+ * `piece_date`. Severity is `warn`, not `escalation` — the pipeline is
+ * still running, we just lost one row.
  */
-async function logSourceRegression(
+async function logMissingField(
   db: D1Database,
-  ctx: { category: string; observation: string; receivedType: string },
+  ctx: { field: 'source' | 'piece_date'; category: string; observation: string; receivedType: string },
 ): Promise<void> {
   const id = crypto.randomUUID();
   await db
@@ -88,8 +101,8 @@ async function logSourceRegression(
     .bind(
       id,
       'warn',
-      'learnings.source missing at write time',
-      `writeLearning refused a row because source was ${ctx.receivedType}. Row skipped to avoid null-source regression. Category: ${ctx.category}. Observation (truncated): ${ctx.observation.slice(0, 200)}`,
+      `learnings.${ctx.field} missing at write time`,
+      `writeLearning refused a row because ${ctx.field} was ${ctx.receivedType}. Row skipped to avoid null-${ctx.field} regression. Category: ${ctx.category}. Observation (truncated): ${ctx.observation.slice(0, 200)}`,
       JSON.stringify(ctx),
       Date.now(),
     )
