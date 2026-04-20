@@ -2,6 +2,8 @@
 
 Append-only. One entry per known issue worth fixing later. Close via DECISIONS entry (note the FOLLOWUPS line that's now resolved). Never delete entries.
 
+**Status markers** (start of each entry title): `[open]` — ready to pick up · `[observing]` — paused pending data, with an unblock note · `[resolved]` — shipped, commit SHA in a **Resolved:** line at the end of the entry.
+
 Format per entry:
 - **Title** — one-line summary
 - **Surfaced:** date + how it came up
@@ -11,7 +13,7 @@ Format per entry:
 
 ---
 
-## 2026-04-19: Publisher.publishAudio double-fires on Continue retry path
+## [open] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path
 
 **Surfaced:** 2026-04-19 during retro audio generation for 2026-04-17. Admin "Continue" retry button (after a mid-pipeline silent stall at 4/8 beats) produced two `audio-publishing done` events in observer_events: 543651b (first, correct) and 02882fd (second, corrupted). The second commit deleted the audioBeats map and collapsed `qualityFlag: "low"\n---\n` onto a single line `qualityFlag: "low"---`.
 
@@ -28,7 +30,7 @@ Format per entry:
 
 ---
 
-## 2026-04-20: StructureEditor writes violation-shaped observations into learnings, not forward-going lessons
+## [open] 2026-04-20: StructureEditor writes violation-shaped observations into learnings, not forward-going lessons
 
 **Surfaced:** 2026-04-20 during Commit 2 of Build 2. The per-piece drawer's "What the system learned from this piece" section surfaces `learnings.observation` verbatim. For pieces written before P1.3/P1.4 (pre-2026-04-19), the only producer-origin writer was StructureEditor, whose rows read as raw audit violations ("Hook exceeds one screen - it's two full paragraphs with ~120 words") — the rule-break itself, not a forward-going pattern the Drafter should apply. Reads starkly in the drawer next to Learner/Drafter-reflect writes that phrase observations as applicable lessons.
 
@@ -44,7 +46,7 @@ Format per entry:
 
 ---
 
-## 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
+## [open] 2026-04-20: D1 migration tracker out of sync on first `wrangler d1 migrations apply`
 
 **Surfaced:** 2026-04-20 while applying migration 0012. First run of `wrangler d1 migrations apply zeemish --remote` tried to replay ALL 12 migrations from scratch — the `d1_migrations` tracker table was empty, so wrangler thought nothing had been applied. 0001–0008 (CREATE TABLE IF NOT EXISTS) succeeded idempotently, 0009 (`ALTER TABLE ADD COLUMN quality_flag`) failed with `duplicate column name` because the column already existed from an earlier ad-hoc apply. Recovered manually by `INSERT INTO d1_migrations (name) VALUES ('0009_*'), ('0010_*'), ('0011_*');` then re-running `migrations apply`, which then only applied 0012.
 
@@ -59,7 +61,7 @@ Format per entry:
 
 ---
 
-## 2026-04-20: D1 rejects correlated subqueries referencing the outer table in SELECT projection / UPDATE SET
+## [open] 2026-04-20: D1 rejects correlated subqueries referencing the outer table in SELECT projection / UPDATE SET
 
 **Surfaced:** 2026-04-20 running migration 0012's one-time backfill. The commented backfill in the migration file used the standard SQLite pattern for a nearest-timestamp join:
 ```sql
@@ -81,7 +83,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
+## [open] 2026-04-20: `/api/dashboard/today.ts` appears to be uncalled dead code
 
 **Surfaced:** 2026-04-20 during Build 1 of the dashboard Memory panel. Treated `today.ts` as the canonical convention example for the new `memory.ts` endpoint. Grep for `/api/dashboard/today` across the repo turns up matches only in docs (`docs/DECISIONS.md`, `docs/RUNBOOK.md`, `docs/handoff/ZEEMISH-DASHBOARD-SPEC.md`) — no TypeScript / Astro / HTML consumer. The public dashboard page queries D1 directly in its Astro frontmatter; admin uses its own client-side fetches against different endpoints.
 
@@ -96,7 +98,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## 2026-04-19: Audio pipeline silent stall between alarm chunks on longer pieces
+## [open] 2026-04-19: Audio pipeline silent stall between alarm chunks on longer pieces
 
 **Surfaced:** 2026-04-19 during retro audio for 2026-04-17. First retry attempt stopped at 4 of 8 beats. No `audio-failed` event in observer_events. No error logged. Alarm chain simply stopped firing. User clicked Continue and the pipeline resumed and finished cleanly.
 
@@ -111,7 +113,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## 2026-04-19: Title-case articles/conjunctions in humanize() or at the Drafter
+## [open] 2026-04-19: Title-case articles/conjunctions in humanize() or at the Drafter
 
 **Surfaced:** 2026-04-19 during P2.1 retrofit. `humanize("what-is-a-chokepoint")` produces "What Is A Chokepoint" — the capital "A" is technically correct letter-by-letter but stylistically wrong for English title case, which lowercases articles, conjunctions, and short prepositions (under 4 letters) except when they're the first word.
 
@@ -129,7 +131,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## 2026-04-19: Surface producer-side learnings + self-reflection in the UI
+## [resolved] 2026-04-19: Surface producer-side learnings + self-reflection in the UI
 
 **Surfaced:** 2026-04-19 as P1.3+P1.4 landed. The learning loop is now writing `source='producer'` and `source='self-reflection'` rows into `learnings` after every publish, and the Drafter reads them on the next run — but nothing in the reader-facing UI exposes what the system is learning about itself. The per-piece transparency drawer ("How this was made") already shows audit rounds and candidates; the public dashboard shows quality signals and recent runs. Neither currently shows the learnings that drove the *next* piece's prompt.
 
@@ -150,7 +152,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## 2026-04-19: Continue retry path may trigger full re-run instead of resuming
+## [open] 2026-04-19: Continue retry path may trigger full re-run instead of resuming
 
 **Surfaced:** 2026-04-19. When combined with the Publisher double-fire bug above, the Continue button corrupted 2026-04-17's frontmatter. Observer events show producer ran twice (chunks: 4, then chunks: 1) — second run should have been a true no-op (skip producer entirely) but instead walked the full pipeline again.
 
@@ -165,7 +167,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## 2026-04-19: Book chapter 9 vs Structure Editor — "4–6 beats" vs "3–6 beats"
+## [open] 2026-04-19: Book chapter 9 vs Structure Editor — "4–6 beats" vs "3–6 beats"
 
 **Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/09-the-thirteen-roles.md](../book/09-the-thirteen-roles.md) line 73 describes Structure Editor as checking "there are 4–6 beats." Actual code ([agents/src/structure-editor-prompt.ts:10](../agents/src/structure-editor-prompt.ts:10)) says "Has 3-6 beats (hook, 2-3 teaching, optional practice, close)."
 
@@ -180,7 +182,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## 2026-04-19: Book chapter 10 reconstructed commit message, not actual
+## [open] 2026-04-19: Book chapter 10 reconstructed commit message, not actual
 
 **Surfaced:** 2026-04-19 during pre-commit review of the book import. [book/10-a-day-in-the-life.md](../book/10-a-day-in-the-life.md) line 71 says Publisher committed the 2026-04-19 piece with the message `feat(daily): publish 2026-04-19 piece on airline fuel shocks`. Actual commit was `feat(daily): 2026-04-19 — Airline industry faces a shakeup as jet fuel hits hard`.
 
@@ -191,3 +193,24 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - The Publisher's actual commit-message template lives in [agents/src/director.ts](../agents/src/director.ts) near the publishing step (grep `commitMsg`) — worth a cross-reference if the book ever tries to show the actual string.
 
 **Priority:** Low. No bug, just a divergence between narrative prose and the literal git log that's worth being honest about if the book grows into a forensic record.
+
+---
+
+## [observing] 2026-04-19: Curator conceptual diversity (P1.2)
+
+**Surfaced:** 2026-04-19 in the external system-improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, never committed to the repo). After the first three published pieces — QVC 2026-04-17, Hormuz 2026-04-18, airlines 2026-04-19 — all three landed on the same meta-concept: systems built for efficiency fail at their narrowest point, and incumbents can't adapt. Visible after three days. A reader arriving on day three and reading all three pieces would think Zeemish is the systems-fragility blog — not what the brief says it is. As of 2026-04-20 a fourth piece (Hormuz shipping) reinforces the pattern.
+
+**Hypothesis:** Curator has no context about what recent pieces have already taught. Two paths, recommended in order:
+1. Add an `underlying_concept` column to `daily_pieces`. Curator backfills it as it runs. At curate time, show Curator a summary of the last 5–7 pieces (title + `underlying_concept`) and instruct it to prefer candidates whose concept is distant from the recent set.
+2. Derive the concept tag on the fly via a small Claude call at curate time — cheaper to ship, pays a Claude call every day.
+
+Option 1 is what the external plan recommends. Not a hard constraint — Curator should still be allowed to pick a related concept if news genuinely demands it; prefer distance, all else equal, and record the reasoning.
+
+**Investigation hints:**
+- Check `daily_pieces` current state. As of 2026-04-20 there are four pieces; two are literally about Hormuz chokepoints; thematic overlap across all four.
+- Before building this, observe whether the closed loop (P1.1 + P1.3 + P1.4, all shipped 2026-04-19) has shifted Curator's clustering on its own via the learnings feed the Drafter now reads. If the self-reflections written post-Hormuz mention topic sameness, and the next Curator run sees those via its brief or the Drafter's prompt, organic correction may remove the need for this entry entirely.
+- If after a week of pieces (by 2026-04-26) clustering persists, ship option 1. See `docs/AGENTS.md` Curator section, `docs/SCHEMA.md` for the new column, `docs/DECISIONS.md` for a "Curator now enforces conceptual diversity" entry.
+
+**Priority:** Low in blast radius, visibly important in editorial quality. No system depends on it.
+
+**Unblock after:** one week of pieces (by 2026-04-26) — check if the closed loop has shifted Curator's clustering on its own, or if hard-coded concept-distance is still needed. If clustering has organically diversified, close as `[resolved]` with a DECISIONS entry naming the organic resolution. If clustering persists, promote to `[open]` and ship option 1.
