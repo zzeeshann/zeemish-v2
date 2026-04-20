@@ -2,6 +2,48 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-20: Surfacing the learning loop (Builds 1 + 2)
+
+**Context:** P1.3 + P1.4 closed the write side of the self-improvement loop on 2026-04-19 — Learner and Drafter now write post-publish learnings. Nothing in the reader-facing UI exposed what was being learned. FOLLOWUPS 2026-04-19 "Surface producer-side learnings + self-reflection in the UI" queued the work pending enough real data to design against. The first real cron run at 2am UTC 2026-04-20 wrote 9 rows on the Hormuz piece (5 producer + 4 self-reflection) — enough density to ship.
+
+**Decision:** Two surfaces, one commit each, sequenced:
+- **Build 1 ([b96c8d6](https://github.com/zzeeshann/zeemish-v2/commit/b96c8d6)) — dashboard "What we've learned so far" panel** on `/dashboard/`. Three counts (producer / self-reflection / total) plus the most recent observation as a blockquote with source attribution. New endpoint `/api/dashboard/memory`. Inserted between "How it's holding up" and "The agent team". Quiet visual register matching the rest of the dashboard — no animations, no toggles, no charts.
+- **Build 2 ([a0a9b22](https://github.com/zzeeshann/zeemish-v2/commit/a0a9b22)) — per-piece "What the system learned from this piece" section** in the How-this-was-made drawer on `/daily/[date]/`. Grouped by source in fixed order (Drafter self-reflection → Learner producer-side pattern → reader → zita). Hide-when-empty — absent entirely when the piece has no learnings, not just visually hidden. Required migration 0012 adding `learnings.piece_date TEXT`, plus a one-time backfill of 13 pre-migration rows (4 → 2026-04-17 QVC, 9 → 2026-04-20 Hormuz).
+
+Source labels are shared across both surfaces — "Learner, producer-side pattern", "Drafter self-reflection", "Reader signal", "Zita question pattern" — so the vocabulary is stable across dashboard cross-piece view and per-piece drawer view.
+
+**Operational notes:**
+- `writeLearning` widened to require `pieceDate` going forward; same defensive non-null pattern as `source` from migration 0011. Both checks route through a shared `logMissingField` helper (renamed from `logSourceRegression` to cover both field warnings).
+- Four writer call sites updated: `Learner.analysePiecePostPublish`, `Drafter.reflect`, `StructureEditor.review` (date threaded via one-line Director update since `review()` is stateless over mdx), `Learner.analyseAndLearn` (reader path — pieceDate derived from the daily-piece slug's YYYY-MM-DD prefix with a regex guard; malformed slug skips the write rather than inventing a date).
+- Migration 0012's originally-prescribed correlated-subquery backfill (`SET piece_date = (SELECT … ORDER BY ABS(dp.published_at - learnings.created_at) …)`) failed on D1 with "no such column". Rewrote as two date-equality UPDATEs, one per affected piece_date. Same outcome for this data (every learning's `created_at` landed on the same calendar day as its piece's `published_at`) but not the same SQL. Migration file's comment block preserves both shapes for the historical record. See FOLLOWUPS 2026-04-20 "D1 correlated-subquery limitation".
+- Migration apply hit a second, unrelated snag: `d1_migrations` was empty (prior migrations applied ad-hoc, bypassing the tracker), so wrangler tried to replay all 12 migrations and failed on 0009's `duplicate column name`. Recovered by manually inserting tracker rows for 0009–0011 and re-running apply — it then applied only 0012. Tracker is now in sync (12 rows, 0001–0012). See FOLLOWUPS 2026-04-20 "D1 migration tracker out of sync".
+
+**Styling register — drawer vs dashboard:**
+The drawer runs its own CSS namespace (`src/styles/made.css`, `made-*` prefix, not Tailwind-processed) while the dashboard Memory panel uses Tailwind utility classes. Decision: match each surface's existing register rather than unify. Three new classes added to `made.css` (`.made-learning-group`, `.made-learning-group-title`, `.made-learning`) recreate the italic-quote + gold-left-border visual rhythm inside the drawer's standalone CSS, without pulling Tailwind into the drawer.
+
+**Grouping order within the drawer section:**
+Fixed (not data-driven): Drafter self-reflection first, Learner producer-side pattern second, reader third, zita fourth. Rationale: self-reflection reads as narrative first-person critique — more reader-interesting; producer/reader/zita are progressively terser and more system-y. Readers clicking "What the system learned" find the most human-voiced material first.
+
+**Alternatives considered:**
+- **Flat list with per-row source attribution** (instead of grouping). Rejected per the Build 2 handoff which explicitly called for grouping; also the 2026-04-20 piece has 9 rows across two sources and grouping makes the tonal shift between Drafter reflection and Learner pattern visually obvious.
+- **Pull the drawer into Tailwind.** Rejected — bigger change than this commit warranted, and the drawer's `made.css` standalone convention matches `beats.css` / `zita.css` deliberately.
+- **Inline explanatory copy under the drawer's section heading** (mentioning the dashboard Memory panel as a pointer). Drafted, then struck per Zishan's feedback: the section heading + group labels + observations do the work silently; adding "Zeemish explaining Zeemish to Zeemish" is the kind of self-reference the voice contract avoids. If a later session discovers confusion, can be added then.
+
+**Data observation worth naming:**
+The 2026-04-17 drawer shows 4 StructureEditor-origin producer learnings, all of which read as audit violations ("Hook exceeds one screen…") rather than forward-going lessons. That's faithful to what StructureEditor actually writes — logged as its own followup ("StructureEditor writes violation-shaped observations into learnings"). Honesty over prettiness; retune when next retuning StructureEditor.
+
+**Loop status after the two builds:**
+- Producer signal → Drafter: wired end-to-end (P1.3), now reader-visible.
+- Self-reflection → Drafter: wired end-to-end (P1.4), now reader-visible.
+- Reader signal → Drafter: scaffolded but dormant (no readers yet); surface ready to render when rows land.
+- Zita signal → Drafter: not yet (P1.5); surface ready.
+
+**FOLLOWUPS resolved:** 2026-04-19 "Surface producer-side learnings + self-reflection in the UI".
+
+**References:** [src/pages/api/dashboard/memory.ts](../src/pages/api/dashboard/memory.ts), [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro), [src/pages/api/daily/[date]/made.ts](../src/pages/api/daily/[date]/made.ts), [src/interactive/made-drawer.ts](../src/interactive/made-drawer.ts), [src/styles/made.css](../src/styles/made.css), [migrations/0012_learnings_piece_date.sql](../migrations/0012_learnings_piece_date.sql), [agents/src/shared/learnings.ts](../agents/src/shared/learnings.ts), [docs/AGENTS.md](AGENTS.md), [docs/SCHEMA.md](SCHEMA.md).
+
+---
+
 ## 2026-04-19: Drafter self-reflects post-publish (P1.4)
 **Context:** Writers generate qualitative signal in their heads while they work — what felt thin, where the research was thinner than the writing made it sound, which beat took the most rewrites, what they'd do differently next time. Publication-time audits (voice/structure/fact) capture the *gated* signal; the honest post-hoc judgment is separate and valuable. Reader-side engagement data doesn't exist yet (no readers), and producer-side pipeline metrics (P1.3) don't capture this flavour of signal. A one-shot Sonnet call asking the Drafter role to review its own output gives the Learner a qualitative feed from day 1.
 

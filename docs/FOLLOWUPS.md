@@ -146,6 +146,8 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 **Priority:** Low. Nice-to-have transparency; no system depends on it. Revisit when ~20+ learnings exist across sources so the UI has enough density to be worth designing.
 
+**Resolved:** 2026-04-20 — shipped as Build 1 (dashboard Memory panel, [b96c8d6](https://github.com/zzeeshann/zeemish-v2/commit/b96c8d6)) and Build 2 (per-piece drawer section + `piece_date` migration/backfill, [a0a9b22](https://github.com/zzeeshann/zeemish-v2/commit/a0a9b22)). Both surfaces live on prod. See DECISIONS 2026-04-20 "Surfacing the learning loop".
+
 ---
 
 ## 2026-04-19: Continue retry path may trigger full re-run instead of resuming
