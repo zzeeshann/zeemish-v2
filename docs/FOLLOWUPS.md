@@ -2,7 +2,7 @@
 
 Append-only. One entry per known issue worth fixing later. Close via DECISIONS entry (note the FOLLOWUPS line that's now resolved). Never delete entries.
 
-**Status markers** (start of each entry title): `[open]` — ready to pick up · `[observing]` — paused pending data, with an unblock note · `[resolved]` — shipped, commit SHA in a **Resolved:** line at the end of the entry.
+**Status markers** (start of each entry title): `[open]` — ready to pick up · `[observing]` — paused pending data, with an unblock note · `[resolved]` — shipped, commit SHA in a **Resolved:** line at the end of the entry · `[wontfix]` — deliberately scoped out, with a **Won't fix:** line explaining the call.
 
 Format per entry:
 - **Title** — one-line summary
@@ -113,7 +113,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## [open] 2026-04-19: Title-case articles/conjunctions in humanize() or at the Drafter
+## [wontfix] 2026-04-19: Title-case articles/conjunctions in humanize() or at the Drafter
 
 **Surfaced:** 2026-04-19 during P2.1 retrofit. `humanize("what-is-a-chokepoint")` produces "What Is A Chokepoint" — the capital "A" is technically correct letter-by-letter but stylistically wrong for English title case, which lowercases articles, conjunctions, and short prepositions (under 4 letters) except when they're the first word.
 
@@ -128,6 +128,8 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - Option 2: update `DRAFTER_PROMPT` in `agents/src/drafter-prompt.ts` to demand display-formatted `##` headings. Requires rehype-beats to keep handling non-kebab headings (it already does via `isKebabOnly` branch). Confirm downstream agents (AudioProducer, FactChecker) don't depend on kebab-case matching.
 
 **Priority:** Low. Aesthetic, not corrective. Only affects pieces where Drafter's kebab slug uses multiple words including articles/conjunctions.
+
+**Won't fix:** 2026-04-20 — scoped out as part of the broader P2.1 decision. The bigger punctuation-stripping bug the improvement plan named (QVC's / "Teaching 1:") was addressed by the `beatTitles` frontmatter override ([b204dbd](https://github.com/zzeeshann/zeemish-v2/commit/b204dbd)); this narrower title-case-of-articles remainder isn't worth the prompt retune or stopword list. If the Drafter is ever retuned for a different reason, option 2 (display-formatted `##` headings in the prompt) is the cheap way to pick it up as a side effect — until then, no action.
 
 ---
 
