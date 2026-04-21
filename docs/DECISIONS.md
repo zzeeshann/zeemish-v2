@@ -2,6 +2,75 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 3 hourly cron + runtime gate (minimal)
+
+**Context:** Phase 3 of the cadence plan. The behavioural phase — changes the cron from `'0 2 * * *'` to `'0 * * * *'` and teaches `dailyRun` to gate on `admin_settings.interval_hours` (Phase 2's plumbing) so only the right hour slots fire the pipeline. With `interval_hours=24` (the default seeded value) only the 02:00 UTC slot fires, reproducing today's 1-piece/day behaviour exactly. Flipping to `4` (testing) or `1` (production) becomes a `wrangler d1 execute --remote` one-liner that takes effect on the next hour boundary, no redeploy.
+
+**Decision: minimal Phase 3.** No new migration. No new column on `pipeline_log`. No changes to per-piece filter semantics anywhere. Three focused edits:
+
+1. **Cron switch.** `onStart` creates a cron at `'0 * * * *'` instead of `'0 2 * * *'`. The old row persists in SQLite until we cancel it — see point 3.
+
+2. **Runtime gate inside `dailyRun`.** At the top of the handler, read `interval_hours` via [`getAdminSetting`](../agents/src/shared/admin-settings.ts) (Phase 2), compute `currentHour = new Date().getUTCHours()`, and bail out when `(currentHour - 2 + 24) % intervalHours !== 0`. The `-2` anchors the fire slot to hour 2 UTC so the current 02:00 ritual is preserved at every allowed interval (1/2/3/4/6/8/12/24 — all divisors of 24). The bail is silent — no observer log, no pipeline_log row, no work. The DO wakes, runs the gate in ~1ms, returns.
+
+3. **One-time cancel of legacy `'0 2 * * *'` row.** Also at the top of `dailyRun`, after the gate (so it doesn't waste time on skipped hours): call `getSchedules({ callback: 'dailyRun' })`, iterate, and `cancelSchedule(id)` any row whose cron is `'0 2 * * *'`. Idempotent — once deleted, subsequent calls return `false` from cancelSchedule. Runs on every un-gated handler invocation; cleans up automatically on the first post-deploy hourly firing.
+
+**Why cancel from `dailyRun`, not from `onStart`.** The documented hazard at [director.ts:46-55](../agents/src/director.ts#L46-L55) is that `super.alarm()` triggers `onStart` BEFORE the SDK scans the schedule table for due rows. If `onStart` cancels the currently-firing schedule row, the SDK loses track of the alarm and silently swallows the run. Cancelling from inside the callback itself (`dailyRun`) is safe: by then the alarm has already been dispatched and the cron row has already been re-scheduled by the SDK. Verified against the SDK source at `agents/node_modules/agents/dist/index.js:1658-1669` — `cancelSchedule(id)` is idempotent (returns `false` when the row is already gone) so the cleanup loop is safe to run on every invocation.
+
+**Order of operations matters, and it's naturally correct:**
+1. DO spins up after deploy. `onStart` runs → creates the new `'0 * * * *'` row (SDK is idempotent on `(callback, cron, payload)` so it's a single row, not a duplicate).
+2. Old `'0 2 * * *'` row still exists. Both schedules are live.
+3. Whichever fires first — hourly or daily — triggers `dailyRun`.
+4. `dailyRun` top: gate check (skip if wrong hour), then cancel the legacy row.
+5. After step 4 has run once, only the hourly cron exists. Future runs skip the cancel loop (idempotent no-op).
+
+No window where the new cron is missing. No race against an in-flight alarm.
+
+**`pipeline_log.run_id` stays as `YYYY-MM-DD` permanently.** This is the second time in this session a Phase tried to shift run_id to piece_id; both walked back. The reasoning for this final position — stable going forward — is:
+
+(a) **Regression on 2026-04-21 showed the consequence of changing it.** Earlier today the backfill broke the "How this was made" drawer on every daily-piece page plus the admin per-piece deep-dive timeline + the admin live-pipeline poller + the dashboard's isRunningNow indicator. Four consumer sites had embedded `run_id = YYYY-MM-DD` assumption. The snapshot (`pipeline_log_backup_20260421`) restored the column. See DECISIONS 2026-04-21 "Roll back `pipeline_log.run_id` backfill" for the full post-mortem and the guardrail.
+
+(b) **Day-grouping is a legitimate view at multi-per-day.** "Today's pipeline activity" is a real and likely-wanted admin surface — `WHERE run_id = today` returning ALL of today's runs' steps is a feature, not a bug. The admin dashboard already expects this shape (lifetime-runs counter, last-step-per-run-id grid). Forcing run_id to be piece-scoped would require a second column anyway for the day view, so having them separate is not a loss — it's a clean separation of "calendar day" from "piece identity."
+
+(c) **No concrete consumer needs per-piece pipeline_log filtering yet.** Phase 4 will move URLs to `/daily/YYYY-MM-DD/slug/` — the URL carries piece context via slug, and per-piece surfaces (made drawer, admin deep-dive) can look up the piece's own id via `daily_pieces WHERE date=? AND slug=?` when they eventually need a finer filter. Adding a `pipeline_log.piece_id` column today would be speculative API for an unbuilt consumer. Phase 4 or Phase 6 can add it when a real need emerges, with site-worker query updates in the same atomic commit (the guardrail from the rollback).
+
+**Audit of all `pipeline_log` consumers (confirmation that each tolerates `run_id = YYYY-MM-DD` through Phase 3 with `interval_hours=24`):**
+
+| File | Query shape | 1/day (today) | Multi/day verdict |
+|---|---|---|---|
+| `src/pages/api/daily/[date]/made.ts:87` | `WHERE run_id = ? bind(date)` | ✓ | Pools all pieces' steps for date — acceptable "day view", revisit at flip |
+| `src/pages/dashboard/admin/piece/[date].astro:120` | `WHERE run_id = ? bind(date)` | ✓ | Same — admin sees day-grouped timeline |
+| `src/pages/api/dashboard/pipeline.ts:16` | `WHERE run_id = ? bind(today)` | ✓ | Correct — "today's pipeline activity" is the right semantic |
+| `src/pages/dashboard/index.astro:165-171` | Last row globally, `isRunningNow = run_id === today` | ✓ | Still string-equal at today's date |
+| `src/pages/dashboard/admin.astro:116-141` | `COUNT(DISTINCT run_id)`, last-step-per-run-id | ✓ | Counts days-run not runs-run at multi/day — cosmetic undercount, not broken |
+| `agents/src/director.ts:109` | `DELETE WHERE run_id = ? bind(today)` | ✓ clears stale intra-day | ⚠ at multi/day wipes earlier runs' logs — follow-up for flip |
+| `agents/src/director.ts:715-717` | `WHERE run_id = ? AND step='publishing' ORDER BY created_at DESC LIMIT 1 bind(date)` | ✓ | Picks latest piece's publishing row — acceptable "retry latest" |
+| `agents/src/director.ts:783` | `DELETE WHERE run_id = ? AND step LIKE 'audio%' bind(date)` | ✓ | At multi/day wipes audio logs across day's pieces — retry-fresh semantic |
+| `agents/src/director.ts:872` | `INSERT (…, run_id=today, …)` | ✓ writes date | ✓ correct per revised arch |
+| `agents/src/learner.ts:338` | `WHERE run_id = ? bind(date)` | ✓ | Synthesis input pools day's pipeline steps — noisy at multi/day, Phase 6 problem |
+| `scripts/reset-today.sh:68` | `DELETE WHERE run_id = '$DATE'` | ✓ | "Reset today" = wipe day. Correct at every cadence |
+
+Phase 3 ships with `interval_hours=24` (default) so zero consumer is exercised at multi-per-day. Flipping the interval exposes two real issues flagged above (`director.ts:109` pre-run DELETE, `director.ts:783` audio DELETE, `learner.ts:338` synthesis input scope) — listed as a FOLLOWUP "Unblock multi-per-day: pre-run DELETEs + Learner input scoping" with the flip blocked until it's resolved.
+
+**Non-goals for Phase 3:**
+- No new migration.
+- No new column on `pipeline_log`.
+- No changes to any site-worker or agent query. Consumers stay as-is.
+- No admin UI. Flipping the interval is a `wrangler` command.
+- No fix for the `director.ts:109` pre-run DELETE at multi-per-day — logged as a FOLLOWUP that blocks the flip.
+- No Zita-synthesis-timing shift (Phase 6). At `interval_hours=24` it's still scheduled at 01:45 UTC day+1 absolute-clock and works fine.
+- No renaming of `dailyRun` → `hourlyRun`. The method-name-is-callback-string coupling means renaming requires a schedule-table migration; not worth the complexity for a semantic rename. Comment in code explains the current semantics.
+
+**Verification contract for the next cron fire:**
+- At 02:00 UTC (the current ritual slot), the hourly cron fires → `dailyRun` runs → gate passes (`(2-2+24)%24 === 0`) → pipeline runs → piece publishes as usual → legacy `'0 2 * * *'` row canceled.
+- At 03:00 UTC → hourly cron fires → `dailyRun` runs → gate fails (`(3-2+24)%24 === 1`) → silent bail.
+- Repeat at 04:00, 05:00 … 01:00 — all silent bails.
+- `SELECT COUNT(*) FROM cf_agents_schedules WHERE callback = 'dailyRun'` returns 1 (not 2) after the first 02:00 fire.
+- `SELECT data FROM pipeline_log WHERE step = 'scanning' ORDER BY created_at DESC LIMIT 1` returns JSON with `intervalHours: 24` (Phase 2's read path still working).
+
+**References:** [agents/src/director.ts](../agents/src/director.ts) (onStart cron string + dailyRun top-of-handler gate + cancel loop), [agents/src/shared/admin-settings.ts](../agents/src/shared/admin-settings.ts) (existing helper), [agents/node_modules/agents/dist/index.js#L1658](../agents/node_modules/agents/dist/index.js) (cancelSchedule idempotency), plan file `~/.claude/plans/could-please-do-a-harmonic-waffle.md` §6 Phase 3.
+
+---
+
 ## 2026-04-21: Roll back `pipeline_log.run_id` backfill — revert decision #3 from cadence Phase 1
 
 **Context:** Phase 1's manual backfill (documented earlier in today's entry "Multi-piece cadence — Phase 1 identity foundations") rewrote all 111 historical `pipeline_log.run_id` values from `YYYY-MM-DD` date-strings to `daily_pieces.id` UUIDs, on the stated architectural principle that `run_id = piece_id` simplifies joins. The principle is correct in isolation; the mistake was not auditing site-worker consumers before landing the destructive UPDATE.

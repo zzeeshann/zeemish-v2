@@ -22,6 +22,22 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 3 hourly cron + runtime gate (2026-04-21)
+Behavioural phase. Cron changed from `'0 2 * * *'` to `'0 * * * *'` in `onStart`. [`dailyRun`](agents/src/director.ts) now reads `admin_settings.interval_hours` (Phase 2 helper), computes `(hour - 2 + 24) % intervalHours`, and bails silently when it's not this slot's turn. Anchored to hour 2 UTC so the 02:00 ritual is preserved at every allowed interval. With the default `interval_hours=24`, only the 02:00 slot fires — zero behavioural change until an admin flips the value.
+
+Legacy `'0 2 * * *'` row gets canceled from inside `dailyRun` (not `onStart` — cancel-from-onStart hazard documented at director.ts:46-60). Runs on every un-gated invocation; idempotent once the row is gone per the SDK's `cancelSchedule` contract at [`agents/dist/index.js:1658`](agents/node_modules/agents/dist/index.js). No race against in-flight alarms because the cancel happens INSIDE the handler, after the SDK has already dispatched and re-scheduled the firing cron.
+
+No migration. No new column. No query changes. Method name stays `dailyRun` (callback-name-is-method-name coupling means renaming requires schedule-table surgery; not worth it for a semantic rename).
+
+**`pipeline_log.run_id` stays as `YYYY-MM-DD` permanently.** Walk-back reasoning from decision #3 in DECISIONS 2026-04-21 "Multi-piece cadence — Phase 3 hourly cron":
+- (a) Regression on 2026-04-21 afternoon showed the consequence of changing it — four site-worker consumers broke.
+- (b) Day-grouping is a legitimate view at multi-per-day — "today's pipeline activity" is the right semantic for admin surfaces.
+- (c) No concrete consumer needs per-piece pipeline_log filtering yet — Phase 4's URL change gives per-piece context via slug, and a future phase can add `piece_id` column + site-worker query updates atomically when real demand emerges.
+
+**Verified:** agents typecheck clean on touched file (18 pre-existing SubAgent errors in `server.ts` unchanged). `interval_hours=24` still seeded. Gate math verified: `(2-2+24)%24=0` passes, `(3-2+24)%24=1` bails, `(2-2+24)%4=0` passes (the 4h slot fires at 02/06/10/14/18/22), `(3-2+24)%4=1` bails.
+
+**Flip is blocked on 3 follow-ups** (FOLLOWUPS.md "Unblock multi-per-day flip"): pre-run DELETE at [director.ts:109](agents/src/director.ts), audio DELETE at [director.ts:783](agents/src/director.ts), Learner input scope at [learner.ts:338](agents/src/learner.ts). All tolerate 1/day fine; all pool across pieces at multi/day. Must be fixed before flipping `interval_hours` below 24.
+
 ## Multi-piece cadence — Phase 2 admin_settings plumbing (2026-04-21)
 Second phase of the cadence plan. Pure plumbing — zero behavioural change. Adds the `admin_settings` key/value table, seeds `interval_hours=24` (preserving current 1-piece/day cadence), and teaches Director to read the value once per run. No gate yet; no UI; nothing uses the value. Phase 3 adds the hourly cron + runtime gate that actually consumes it.
 

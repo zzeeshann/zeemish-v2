@@ -13,6 +13,43 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-21: Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping
+
+**Surfaced:** 2026-04-21 during the Phase 3 pipeline_log consumer audit (see DECISIONS 2026-04-21 "Multi-piece cadence — Phase 3 hourly cron + runtime gate"). Three sites in the agents worker are scoped by `WHERE run_id = ? .bind(today)` or equivalent and behave correctly at 1 piece/day but pool across pieces at multi-per-day. `interval_hours` cannot be flipped below 24 until these are resolved.
+
+**Hypothesis / fix for each site:**
+
+1. **[`agents/src/director.ts:109`](../agents/src/director.ts) — pre-run DELETE.**
+   ```ts
+   await this.env.DB.prepare('DELETE FROM pipeline_log WHERE run_id = ?').bind(today).run()
+   ```
+   Clears stale intra-day rows before a fresh run starts. At 1/day this correctly wipes an earlier failed attempt. At multi/day this wipes earlier completed runs' history when run 2+ starts. Fix options:
+   - (a) Remove the DELETE entirely — pipeline_log accumulates forever, `scripts/reset-today.sh` remains the only wipe path.
+   - (b) Scope by `created_at > (start-of-this-hour)` — delete only rows from "this hour's attempt".
+   - (c) Scope by a new `piece_id` column filled from pre-allocated UUID — but that's a bigger schema + code change.
+   - Lean option (a): simplest, log grows ~19-31 rows/day, 200-700/month at multi-per-day cadences. Negligible storage.
+
+2. **[`agents/src/director.ts:783`](../agents/src/director.ts) — audio retry-fresh DELETE.**
+   ```ts
+   DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'
+   ```
+   Retry-fresh semantic: wipe a day's audio attempt history. At multi/day this wipes audio logs across ALL that day's pieces, not just the one being retried. The retry target is already known per-piece by date — needs a piece-scoped filter. Blocks until either a piece_id column lands on pipeline_log or the retry path shifts to using `daily_piece_audio` as the truth (which is already piece-scoped post-Phase-1).
+
+3. **[`agents/src/learner.ts:338`](../agents/src/learner.ts) — post-publish synthesis input.**
+   ```ts
+   SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? .bind(date)
+   ```
+   Learner's `analysePiecePostPublish(date)` reads the pipeline log for the date to synthesise producer-origin learnings. At multi/day the SELECT returns ALL that day's pieces' steps, noisifying the synthesis with other pieces' data. Needs either per-piece scoping (piece_id column) or time-window scoping (only rows between the piece's run start and publish time, via a piece-specific timestamp range).
+
+**Investigation hints:**
+- Lean fix for (1): remove the DELETE, add nothing. Verify `reset-today.sh` still works as the manual wipe.
+- For (2) and (3): adding `pipeline_log.piece_id` is the shared primitive. Requires Director to allocate piece_id at run start (not publish time) and pass through every `logStep` call. That's a Phase 3.5 / 4 concern.
+- Test both before flipping: `UPDATE admin_settings SET value='4' WHERE key='interval_hours'`, let two runs complete same day, verify neither wiped the other.
+
+**Priority:** Blocker for multi-per-day cadence. Not urgent otherwise — Phase 3 ships at `interval_hours=24` which exercises none of these paths.
+
+---
+
 ## [open] 2026-04-21: `daily_candidates.selected` never flipped on historical runs
 
 **Surfaced:** 2026-04-21 during multi-piece cadence Phase 1 sizing audit. Prod `daily_candidates` has 250 rows across 5 dates (50/day, consistent with Scanner's `MAX_CANDIDATES_PER_DAY` cap) but **zero rows have `selected = 1`** — meaning no historical daily_candidates row maps back to the piece it became. Director's post-curation UPDATE at [director.ts:150-156](../agents/src/director.ts) is wrapped in `.run().catch(() => {})` which silently swallows any error.

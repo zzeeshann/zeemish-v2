@@ -45,27 +45,67 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   };
 
   /**
-   * Set up the daily 2am UTC run. Cron schedules in the Agents SDK are
+   * Set up the hourly cron. Cron schedules in the Agents SDK are
    * idempotent on (callback, cron, payload), so calling this on every DO
    * start is safe — duplicates are deduped, not appended.
    *
-   * Do NOT cancel existing schedules first. The SDK's alarm() handler runs
-   * super.alarm() (which triggers onStart) BEFORE scanning the schedule
-   * table for due rows. Cancelling here on the 2am wake-up would delete the
-   * very row that just fired, and the re-created row's `time` would jump to
-   * tomorrow's 2am — silently swallowing today's run forever.
+   * Multi-piece cadence Phase 3: the cron fires every hour; the handler
+   * (`dailyRun`) gates on `admin_settings.interval_hours` and bails
+   * silently when it's not this slot's turn. At `interval_hours=24`
+   * (default) only the 02:00 UTC slot passes the gate, preserving the
+   * current 1-piece/day behaviour exactly. Flipping the interval via
+   * admin settings changes cadence without a redeploy.
+   *
+   * Do NOT cancel existing schedules from here. The SDK's alarm() handler
+   * runs super.alarm() (which triggers onStart) BEFORE scanning the
+   * schedule table for due rows. Cancelling here on an alarm wake-up
+   * would delete the very row that just fired, silently swallowing the
+   * run. Legacy `'0 2 * * *'` cleanup lives inside `dailyRun` instead —
+   * safe because by then the alarm has dispatched.
    */
   async onStart() {
-    await this.schedule('0 2 * * *', 'dailyRun', { type: 'daily-piece' });
+    await this.schedule('0 * * * *', 'dailyRun', { type: 'daily-piece' });
   }
 
   /**
-   * Daily run — scheduled at 2:00 AM UTC, every day including weekends.
-   * News-driven piece. If the news is thin, Curator's skip path logs
-   * "No teachable stories" via Observer and the day is left blank.
+   * Hourly run — scheduled every hour UTC. Method name stays `dailyRun`
+   * (the SDK callback-name-is-method-name coupling means renaming would
+   * require schedule-table surgery; the semantic drift is documented
+   * here instead). Reads `admin_settings.interval_hours`, computes the
+   * hour-2-anchored slot modulo, and bails silently when it's not this
+   * slot's turn. Then opportunistically cancels any legacy `'0 2 * * *'`
+   * row left behind by the Phase 3 cron migration (idempotent no-op
+   * once cleaned up).
    */
   async dailyRun() {
     try {
+      // ── Gate: is this slot's hour one we should fire on? ──────────
+      // Anchored to hour 2 UTC so the current 02:00 ritual is preserved
+      // at any interval. Non-divisors of 24 fall back to 24 inside
+      // parseIntervalHours, so `(h-2+24) % 24 === 0` at h=2 only.
+      const intervalHours = await getAdminSetting(
+        this.env.DB, 'interval_hours', parseIntervalHours, 24
+      );
+      const hour = new Date().getUTCHours();
+      if (((hour - 2 + 24) % intervalHours) !== 0) return;
+
+      // ── One-time migration: cancel legacy '0 2 * * *' cron row. ───
+      // Runs inside the handler (not onStart) so the in-flight alarm
+      // has already dispatched and re-scheduled. cancelSchedule is
+      // idempotent — returns false when the row is already gone.
+      // After the first un-gated firing post-deploy this is a no-op.
+      // SDK's getSchedules only filters by id/type/timeRange, so we
+      // pull all cron rows and match callback+cron client-side.
+      try {
+        const schedules = this.getSchedules({ type: 'cron' });
+        for (const s of schedules) {
+          if ((s as { callback?: string; cron?: string }).callback === 'dailyRun'
+              && (s as { callback?: string; cron?: string }).cron === '0 2 * * *') {
+            await this.cancelSchedule(s.id);
+          }
+        }
+      } catch { /* best-effort cleanup */ }
+
       await this.triggerDailyPiece();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Daily run failed';
