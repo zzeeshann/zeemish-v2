@@ -48,7 +48,7 @@ let runningSince: string | null = null;
 let lastPipelineStep: { step: string; status: string; tMs: number; runId: string } | null = null;
 let isRunningNow = false;
 let learningCounts = { producer: 0, selfReflection: 0, total: 0 };
-let latestLearning: { observation: string; source: string | null; created_at: number } | null = null;
+let latestLearning: { observation: string; source: string | null; piece_date: string | null; created_at: number } | null = null;
 
 try {
   todaysPiece = await db
@@ -187,8 +187,8 @@ try {
     total: totalLearnings?.n ?? 0,
   };
   latestLearning = await db
-    .prepare('SELECT observation, source, created_at FROM learnings ORDER BY created_at DESC LIMIT 1')
-    .first<{ observation: string; source: string | null; created_at: number }>();
+    .prepare('SELECT observation, source, piece_date, created_at FROM learnings ORDER BY created_at DESC LIMIT 1')
+    .first<{ observation: string; source: string | null; piece_date: string | null; created_at: number }>();
 } catch { /* D1 may be empty in dev — everything above stays at defaults */ }
 
 // --- Derived display strings ---
@@ -291,8 +291,15 @@ function learningSourceLabel(source: string | null): string {
   }
 }
 
+// Prefer piece_date (the piece the learning is ABOUT) over created_at
+// (when the row was written). For producer + self-reflection learnings
+// these match — both fire seconds after publish. For Zita-source
+// learnings they diverge: synthesis runs at 01:45 UTC day+1, so
+// created_at is a day ahead of piece_date. We want the piece label,
+// not the writing label. Fall back to created_at for pre-0012 rows
+// that have NULL piece_date.
 const latestLearningDate = latestLearning
-  ? new Date(latestLearning.created_at).toISOString().slice(0, 10)
+  ? (latestLearning.piece_date ?? new Date(latestLearning.created_at).toISOString().slice(0, 10))
   : null;
 ---
 

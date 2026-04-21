@@ -2,6 +2,20 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Dashboard "latest observation" label uses piece_date, not created_at
+
+**Context:** Surfaced the moment the first real `source='zita'` learning landed on prod. The public dashboard ([`/dashboard/`](../src/pages/dashboard/index.astro)) shows the most recent observation under "What we've learned so far" with an attribution line: *"— {source label}, after the {date} piece."* The date was derived from `learnings.created_at.toISOString().slice(0, 10)`. For producer and self-reflection sources this is correct because those writers fire seconds after publish — `created_at` and `piece_date` match. For Zita-source rows they diverge: synthesis runs at 01:45 UTC on day+1, so the row is written a calendar day after the piece it's about. Right after the first real Zita synthesis, the dashboard attributed a learning about 2026-04-20's Hormuz piece to "the 2026-04-21 piece" — the date the row was written, not the piece it was about.
+
+**Decision:** Prefer `piece_date` (the piece the learning is ABOUT) over `created_at` (when the row was written), fall back to `created_at.slice(0, 10)` for pre-0012 rows where `piece_date` is NULL. One-line change in [`src/pages/dashboard/index.astro`](../src/pages/dashboard/index.astro): pull `piece_date` in the `latestLearning` SELECT; derive `latestLearningDate = latestLearning.piece_date ?? created_at-as-date`.
+
+**Why it matters.** The whole point of the public dashboard's memory panel is *"what did the system learn from the thing you're about to read"*. Tying the attribution to the writing timestamp instead of the piece timestamp breaks that compact — especially as more zita-source rows land (they always attribute wrong because synthesis always runs day+1).
+
+**Verified locally:** seeded a test learning with `piece_date='2026-04-20'` and `created_at=now()` (today = 2026-04-21). Before fix: dashboard showed "after the 2026-04-21 piece". After fix: "after the 2026-04-20 piece". Test row cleaned before commit.
+
+**References:** [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro) (lines 51, 189-191, 294-302).
+
+---
+
 ## 2026-04-21: P1.5 Learner skeleton — Zita-question synthesis scheduled 01:45 UTC day+1 (Phase 5)
 
 **Context:** Phase 5 of the Zita improvement plan and P1.5 from the 2026-04-19 improvement plan. Schema plumbing for `source='zita'` has been in place since migration 0011 (2026-04-20), labels in the made-drawer and public dashboard have referenced it since 2026-04-20 commit [a0a9b22](https://github.com/zzeeshann/zeemish-v2/commit/a0a9b22), but no code path wrote rows with that source. CLAUDE.md has flagged it as "blocked on reader + Zita traffic" — but waiting for real data to arrive before building the synthesis means we'd be writing the synthesis on the day the first real signal appeared, under time pressure. Better to build the skeleton now, guarded so it no-ops cleanly at current traffic levels, and let it start producing rows organically as reader traffic grows.
