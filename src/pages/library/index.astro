@@ -2,13 +2,17 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { formatTime } from '../../lib/format';
+import { deriveSlug, pieceUrl } from '../../lib/slug';
 
 const dailyPieces = await getCollection('dailyPieces');
 // Every published piece shows here. Tier (polished / solid / rough) is
 // surfaced on the piece page itself, not in this list view — see
 // docs/DECISIONS.md 2026-04-17 "Soften quality surfacing".
-const sorted = [...dailyPieces]
-  .sort((a, b) => b.data.date.localeCompare(a.data.date));
+// publishedAt DESC tiebreaker for multi-per-day cadence.
+const sorted = [...dailyPieces].sort((a, b) => {
+  if (a.data.date !== b.data.date) return b.data.date.localeCompare(a.data.date);
+  return b.data.publishedAt - a.data.publishedAt;
+});
 
 // Group by month — "April 2026" buckets. Preserves sort order within bucket.
 type Piece = typeof sorted[number];
@@ -74,7 +78,7 @@ const subjects = new Set(sorted.map((p) => p.data.underlyingSubject).filter(Bool
               {month.pieces.map((piece) => (
                 <li data-library-item>
                   <a
-                    href={`/daily/${piece.data.date}/`}
+                    href={pieceUrl(piece.data.date, deriveSlug(piece.id))}
                     class="block py-5 group relative pl-4 -ml-4 border-l-2 border-transparent hover:border-zee-primary transition-all"
                   >
                     <div class="flex items-baseline gap-3 mb-1">

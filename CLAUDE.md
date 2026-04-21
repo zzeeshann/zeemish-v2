@@ -22,6 +22,20 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 4 URL routing + `publishedAt` tiebreaker (2026-04-21)
+Reader-facing URL shape changed from `/daily/YYYY-MM-DD/` to `/daily/YYYY-MM-DD/slug/`. No 301 redirect layer — old URLs stop existing (dev-phase decision from Phase 1 DECISIONS). Slug derives from the existing filename convention (`YYYY-MM-DD-{slug}.mdx`) via [`src/lib/slug.ts`](src/lib/slug.ts): `deriveSlug(entryId)` strips the 11-char date prefix.
+
+Five files touched to land this:
+- [`src/pages/daily/[date]/[slug].astro`](src/pages/daily/[date]/[slug].astro) — new route, replaces the old flat `src/pages/daily/[date].astro` (deleted).
+- [`src/pages/index.astro`](src/pages/index.astro), [`src/pages/daily/index.astro`](src/pages/daily/index.astro), [`src/pages/library/index.astro`](src/pages/library/index.astro) — URL generation + sort switched to `publishedAt DESC` tiebreaker.
+- [`src/pages/dashboard/admin/piece/[date].astro`](src/pages/dashboard/admin/piece/[date].astro) — admin "View on site" link looks up the slug via `getCollection('dailyPieces')` at request time. Admin route itself stays date-keyed (single-piece-per-date admin UX works at `interval_hours=24`; a Phase 5/6 rework adds piece_id when admin flips the interval).
+
+`publishedAt: number` is now a required frontmatter field on the content-collection schema. The 5 existing MDX files got their `published_at` values from `daily_pieces` backfilled as single-line additions (metadata carve-out under the permanence rule). Going forward, Director splices `publishedAt: Date.now()` into frontmatter at publish time, alongside the existing `voiceScore` splice, and uses the same `publishedAtMs` value for the `daily_pieces` INSERT so the two sources of truth match.
+
+**Build verified:** `pnpm build` produces all 5 pages at the new URL shape. **Preview verified (localhost:4321):** homepage hero + recent list + library + per-piece page all render; hero title sorts correctly by `publishedAt DESC` with a same-date tiebreaker; old `/daily/2026-04-21/` URL returns 404 as designed; zero console errors.
+
+**Not yet shipped:** Drafter does not write `publishedAt` in the initial draft (it's spliced by Director at publish time). Admin deep-dive URL stays date-keyed — fine at `interval_hours=24`; Phase 5 rework needed before multi-per-day flip.
+
 ## Multi-piece cadence — Phase 3 hourly cron + runtime gate (2026-04-21)
 Behavioural phase. Cron changed from `'0 2 * * *'` to `'0 * * * *'` in `onStart`. [`dailyRun`](agents/src/director.ts) now reads `admin_settings.interval_hours` (Phase 2 helper), computes `(hour - 2 + 24) % intervalHours`, and bails silently when it's not this slot's turn. Anchored to hour 2 UTC so the 02:00 ritual is preserved at every allowed interval. With the default `interval_hours=24`, only the 02:00 slot fires — zero behavioural change until an admin flips the value.
 

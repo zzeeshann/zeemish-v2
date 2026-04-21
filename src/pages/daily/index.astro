@@ -2,12 +2,16 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { formatTime, formatDate } from '../../lib/format';
+import { deriveSlug, pieceUrl } from '../../lib/slug';
 
 const pieces = await getCollection('dailyPieces');
 // Every published piece shows here. Tier surfacing happens on the piece
 // page. See docs/DECISIONS.md 2026-04-17 "Soften quality surfacing".
-const sorted = [...pieces]
-  .sort((a, b) => b.data.date.localeCompare(a.data.date));
+// publishedAt DESC tiebreaker for multi-per-day cadence.
+const sorted = [...pieces].sort((a, b) => {
+  if (a.data.date !== b.data.date) return b.data.date.localeCompare(a.data.date);
+  return b.data.publishedAt - a.data.publishedAt;
+});
 ---
 
 <BaseLayout title="Daily — Zeemish" description="Today's news, explained.">
@@ -20,7 +24,7 @@ const sorted = [...pieces]
     <div class="space-y-4">
       {sorted.map((piece) => (
         <a
-          href={`/daily/${piece.data.date}/`}
+          href={pieceUrl(piece.data.date, deriveSlug(piece.id))}
           class="block p-5 rounded-xl border border-zee-border hover:border-zee-primary/30 hover:shadow-sm transition-all group"
         >
           <div class="flex items-baseline justify-between mb-1">

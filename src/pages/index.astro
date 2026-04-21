@@ -2,9 +2,15 @@
 import { getCollection } from 'astro:content';
 import BaseLayout from '../layouts/BaseLayout.astro';
 import { formatTime, formatDate } from '../lib/format';
+import { deriveSlug, pieceUrl } from '../lib/slug';
 
 const dailyPieces = await getCollection('dailyPieces');
-const sorted = [...dailyPieces].sort((a, b) => b.data.date.localeCompare(a.data.date));
+// Sort: date DESC then publishedAt DESC tiebreaker — at multi-per-day
+// cadence multiple pieces share `date`, so publishedAt settles order.
+const sorted = [...dailyPieces].sort((a, b) => {
+  if (a.data.date !== b.data.date) return b.data.date.localeCompare(a.data.date);
+  return b.data.publishedAt - a.data.publishedAt;
+});
 const todaysPiece = sorted[0];
 // "From the library" strip — shows every piece, same as /library/.
 // Tier (polished / solid / rough) is surfaced on the piece page itself,
@@ -36,7 +42,7 @@ if (todaysPiece) {
           Today <span class="text-zee-muted/60 font-normal normal-case tracking-normal ml-2">· {heroDate}</span>
         </p>
 
-        <a href={`/daily/${todaysPiece.data.date}/`} class="block group mt-4">
+        <a href={pieceUrl(todaysPiece.data.date, deriveSlug(todaysPiece.id))} class="block group mt-4">
           <h1 class="text-3xl md:text-5xl font-bold leading-[1.08] tracking-tight group-hover:text-zee-primary transition-colors">
             {todaysPiece.data.title}
           </h1>
@@ -102,7 +108,7 @@ if (todaysPiece) {
         {recentPieces.map((piece) => (
           <li>
             <a
-              href={`/daily/${piece.data.date}/`}
+              href={pieceUrl(piece.data.date, deriveSlug(piece.id))}
               class="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-6 py-4 group"
             >
               <div class="flex-1 min-w-0">

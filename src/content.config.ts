@@ -11,6 +11,12 @@ const dailyPieces = defineCollection({
   schema: z.object({
     title: z.string(),
     date: z.string().or(z.date().transform((d) => d.toISOString().slice(0, 10))),
+    // Unix-ms timestamp, spliced into frontmatter by Director at publish
+    // time (analogous to voiceScore). Primary role: homepage + library
+    // tiebreaker at multi-per-day cadence, where multiple pieces share
+    // `date` — sort by publishedAt DESC gives a deterministic newest-
+    // first order. Added in cadence Phase 4 (2026-04-21).
+    publishedAt: z.number(),
     newsSource: z.string().optional(),
     underlyingSubject: z.string().optional(),
     estimatedTime: z.coerce.string(),

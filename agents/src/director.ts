@@ -298,6 +298,17 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       `$1\nvoiceScore: ${lastVoiceScore}$2`,
     );
 
+    // Splice `publishedAt` (unix ms) into frontmatter. Required by the
+    // content collection schema (`src/content.config.ts`) for the
+    // homepage + library tiebreaker at multi-per-day cadence. Cadence
+    // Phase 4. Uses the same Date.now() value passed to the
+    // daily_pieces INSERT below so the two timestamps match.
+    const publishedAtMs = Date.now();
+    currentMdx = currentMdx.replace(
+      /^(---\n[\s\S]*?)(\n---\n)/,
+      `$1\npublishedAt: ${publishedAtMs}$2`,
+    );
+
     if (!passed) {
       // Splice `qualityFlag: "low"` into the frontmatter too. No longer
       // drives archive filtering (see 2026-04-17 soften-quality decision)
@@ -333,7 +344,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
-        currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, Date.now(), Date.now())
+        currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, publishedAtMs, publishedAtMs)
       .run().catch(() => {});
 
     await this.logStep(today, 'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath, qualityFlag });

@@ -2,6 +2,48 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 4 URL routing + `publishedAt` tiebreaker
+
+**Context:** Phase 4 of the cadence plan. Readers' daily-piece URLs shift from `/daily/YYYY-MM-DD/` to `/daily/YYYY-MM-DD/slug/` so multiple pieces can coexist on the same date. Phase 1 decision #1 (URL option B, nested) + refinement 1 (no 301 redirect layer — dev phase, 5 pieces, no bookmarks). The homepage hero and library lists pick up a `publishedAt DESC` tiebreaker so same-date pieces sort deterministically.
+
+**Decision:** four concrete changes, no new migration.
+
+1. **New nested route** [`src/pages/daily/[date]/[slug].astro`](../src/pages/daily/[date]/[slug].astro) replaces the old flat `[date].astro`. `getStaticPaths` emits `{date, slug}` tuples; slug derives from `entry.id` (Astro's filename-without-extension) via [`src/lib/slug.ts`](../src/lib/slug.ts) `deriveSlug(entryId)` which strips the 11-char `YYYY-MM-DD-` prefix. At 5 existing pieces this produces the same filename-encoded slug that Director has been generating at publish time since launch (`brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 60)`).
+
+2. **`publishedAt: z.number()`** added to the content-collection schema. 5 existing MDX frontmatters backfilled with their `daily_pieces.published_at` values from D1 — single-line `publishedAt: <ms>` additions under the metadata carve-out (same precedent as `voiceScore`, `audioBeats`, `beatTitles`, `qualityFlag`). Going forward, Director splices `publishedAt: Date.now()` into frontmatter at publish time alongside the existing `voiceScore` splice. The same `publishedAtMs` local variable feeds both the frontmatter splice AND the `daily_pieces` INSERT binding — the two sources of truth agree to the millisecond.
+
+3. **Homepage + library sort** switches from `b.data.date.localeCompare(a.data.date)` to a two-step comparator: date DESC, then `publishedAt` DESC tiebreaker. At 1 piece/day the tiebreaker never fires; at multi-per-day it gives deterministic newest-first ordering. Applied to [`src/pages/index.astro`](../src/pages/index.astro), [`src/pages/daily/index.astro`](../src/pages/daily/index.astro), [`src/pages/library/index.astro`](../src/pages/library/index.astro).
+
+4. **Admin "View on site" link** ([`src/pages/dashboard/admin/piece/[date].astro`](../src/pages/dashboard/admin/piece/[date].astro:346)) updated to use `pieceUrl(date, deriveSlug(entry.id))`. The admin page is server-rendered (`prerender = false`) so a fresh `getCollection('dailyPieces')` call at request time finds the matching entry by date. At multi-per-day cadence the current code picks the first match — admin surface itself still keyed by date, pending Phase 5 rework when the interval flips.
+
+**Why derive slug from `entry.id` instead of a frontmatter `slug` field.** The slug is already determined by the filename convention Director writes at publish time. Adding an explicit `slug` frontmatter field would be duplication with drift risk: if Drafter and the filename fall out of sync, which wins? Derivation from `entry.id` makes the filename authoritative. Future slug-refinement work (e.g., short-slug Phase 7 item) can add an override field without changing today's derivation.
+
+**Why no 301 redirect for the 5 legacy URLs.** Per Zishan, dev phase, 5 pieces, no bookmarks. Adding a redirect worker-route would be real infrastructure for a concern we don't have. The 5 legacy URLs (`/daily/2026-04-17/` through `/daily/2026-04-21/`) return 404 after this deploy.
+
+**Why add `publishedAt` to frontmatter instead of joining D1 at build time.** Astro static-site generation runs at build time, not request time. The site worker has a D1 binding but it's a request-time resource — build-time code can't reach it. Frontmatter is the only build-time source of truth for sort order. Cost: one line per MDX file, written automatically by Director going forward.
+
+**Build verification:** `pnpm build` produces all 5 pages at the new URL shape: `/daily/2026-04-21/trump-administration-begins-refunding-more-than-166bn-in-tar/index.html` and the other four. Homepage + library + /library/ + 404 all build. Server-entry bundle unchanged.
+
+**Preview verification (localhost:4321):**
+- Homepage loads, hero title is "Who Really Pays Tariffs? The $166 Billion Answer" (newest piece by `publishedAt`).
+- Recent list shows 4 other pieces, all linking to the new nested URL shape.
+- `/daily/2026-04-21/trump-administration-…/` renders the piece with 6 beats + audio player + Zita chat.
+- `/library/` returns 200.
+- Old-shape URL `/daily/2026-04-21/` returns 404 (no redirect, as designed).
+- Zero console errors.
+
+**Non-goals for Phase 4:**
+- No changes to `/api/daily/[date]/made` endpoint (still date-keyed — serves the made-drawer, which fetches by date and works fine at 1 piece/day). Phase 5 or 6 adds piece_id filtering if admin flips to multi-per-day.
+- No changes to the admin `/dashboard/admin/piece/[date]/` route shape — admin URL stays date-keyed. Phase 5 rework for multi-per-day.
+- No slug frontmatter field. Slug is derived from filename, authoritative source stays single.
+- No short-slug / seo-slug refinement. The existing truncation-at-60 output from Director (filename-encoded) carries forward verbatim. Phase 7 cleanup if we ever want prettier URLs for legacy pieces.
+- No Drafter prompt change to emit `publishedAt` — Director splices it at publish time, same pattern as `voiceScore`.
+- No reader-visible "multi-piece today" UI. Until admin flips `interval_hours` below 24, the reader experience is visually identical to before.
+
+**References:** [src/lib/slug.ts](../src/lib/slug.ts), [src/content.config.ts](../src/content.config.ts), [src/pages/daily/[date]/[slug].astro](../src/pages/daily/[date]/[slug].astro), [src/pages/index.astro](../src/pages/index.astro), [src/pages/daily/index.astro](../src/pages/daily/index.astro), [src/pages/library/index.astro](../src/pages/library/index.astro), [src/pages/dashboard/admin/piece/[date].astro](../src/pages/dashboard/admin/piece/[date].astro), [agents/src/director.ts](../agents/src/director.ts), and the 5 MDX frontmatter edits in `content/daily-pieces/`.
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 3 hourly cron + runtime gate (minimal)
 
 **Context:** Phase 3 of the cadence plan. The behavioural phase — changes the cron from `'0 2 * * *'` to `'0 * * * *'` and teaches `dailyRun` to gate on `admin_settings.interval_hours` (Phase 2's plumbing) so only the right hour slots fire the pipeline. With `interval_hours=24` (the default seeded value) only the 02:00 UTC slot fires, reproducing today's 1-piece/day behaviour exactly. Flipping to `4` (testing) or `1` (production) becomes a `wrangler d1 execute --remote` one-liner that takes effect on the next hour boundary, no redeploy.

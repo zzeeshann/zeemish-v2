@@ -1,13 +1,14 @@
 ---
 import { getCollection, render } from 'astro:content';
-import LessonLayout from '../../layouts/LessonLayout.astro';
-import MadeBy from '../../components/MadeBy.astro';
-import '../../styles/made.css';
+import LessonLayout from '../../../layouts/LessonLayout.astro';
+import MadeBy from '../../../components/MadeBy.astro';
+import { deriveSlug } from '../../../lib/slug';
+import '../../../styles/made.css';
 
 export async function getStaticPaths() {
   const pieces = await getCollection('dailyPieces');
   return pieces.map((piece) => ({
-    params: { date: piece.data.date },
+    params: { date: piece.data.date, slug: deriveSlug(piece.id) },
     props: { piece },
   }));
 }
@@ -32,5 +33,5 @@ const { Content } = await render(piece);
 </LessonLayout>
 
 <script>
-  import '../../interactive/register';
+  import '../../../interactive/register';
 </script>
