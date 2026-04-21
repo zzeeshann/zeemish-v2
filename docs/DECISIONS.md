@@ -2,6 +2,34 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Cap Zita history load at 40 + log truncation to observer_events
+
+**Context:** Phase 2 of the Zita improvement plan. Even with Phase 1's piece-scoped history (DECISIONS 2026-04-21 "Scope zita_messages by piece_date"), a single reader's long session on one piece still grows unbounded. In the 92-row audit on 2026-04-21, one user had 44 messages scoped to the 2026-04-21 tariffs piece alone; at current rate, a committed reader could reach 100+ turns on a single day's piece inside a week. Every new message would reload the full history into the Claude system prompt, growing input tokens linearly per turn.
+
+**Decision:** Cap the history load at **40 rows = 20 turns** (user + assistant pairs). Change:
+
+- `SELECT role, content FROM zita_messages WHERE … ORDER BY created_at DESC LIMIT 40` — newest first for correct truncation semantics. Reverse in-memory when building the Claude `messages` array to preserve chronological order.
+- Parallel `SELECT COUNT(*)` on the same scope, batched together via `db.batch` so it's one D1 round trip.
+- When `totalCount > 40`, fire a `logObserverEvent(db, { severity: 'info', title: 'Zita history truncated at 40 for <pieceDate>', body: 'Clipped N older messages…', context: { type: 'zita_history_truncated', userId, pieceDate, courseSlug, lessonNumber, totalCount, loadedCount: 40, clippedCount: totalCount - 40 } })`. Severity is `info` because this is expected long-session behaviour, not a failure — it surfaces the cap in the admin Observer feed instead of leaving it silent.
+- `ZITA_HISTORY_LIMIT` constant at the top of `chat.ts` so a future tweak is a single-line edit.
+
+**Data stays in D1.** The cap is purely about what we send to Claude per turn; `zita_messages` still receives every new INSERT, and the admin Zita view (Phase 3) will read the full history independent of the cap.
+
+**Why 40.** A Socratic exchange is typically short — Zita's prompt enforces 2-4 sentence replies, and reader messages trend short too. 40 rows covers ~20 back-and-forths, which is a long session. Beyond that, older context adds token cost without changing Zita's posture — she's already in-character from the system prompt, not from the conversation. The clippedCount in the observer_event gives us a real signal if 40 turns out to be too aggressive for any reader's flow.
+
+**New helper: `src/lib/observer-events.ts`** — site-worker → `observer_events` writer that mirrors the shape used by `agents/src/observer.ts:writeEvent` (id, severity, title, body, JSON-stringified context, created_at). Fire-and-forget with `try/catch {}` so observer logging never breaks the handler. This is the first site-origin writer of observer_events; Phase 4 will add `zita_claude_error` and `zita_rate_limited` events through the same helper.
+
+**Verified end-to-end locally:** seeded 45 dummy rows for `test-cap-user` on 2026-04-20. `COUNT(*)` returned 45, `LIMIT 40` returned exactly 40 rows. Synthetic `observer_events` INSERT with the same shape the handler produces queried back cleanly with all fields populated. Test data cleaned up before commit.
+
+**Non-goals:**
+- No summarisation of clipped messages — they're gone from Claude's view, not condensed into a "previously…" blurb. Add that in Phase 6's deep-Zita design doc if we decide cross-turn memory matters.
+- No server-side cursor / pagination UI. The cap is invisible to readers; only visible to admins via observer_events.
+- No reduction of the 40 for non-daily courses — lessons-course path keeps the same cap because 20 turns is a reasonable default regardless.
+
+**References:** [src/pages/api/zita/chat.ts](../src/pages/api/zita/chat.ts), [src/lib/observer-events.ts](../src/lib/observer-events.ts), [migrations/0002_observer_events.sql](../migrations/0002_observer_events.sql) (table shape).
+
+---
+
 ## 2026-04-21: Scope `zita_messages` by piece_date (migration 0013 Commit A)
 
 **Context:** Direct query of `zita_messages` on 2026-04-21 returned 92 rows from 3 users across 5 different daily pieces, all keyed under the same `(course_slug='daily', lesson_number=0)` — because [`LessonLayout.astro:74-78`](../src/layouts/LessonLayout.astro) hardcodes those attributes on `<zita-chat>` for every piece. One reader (User fb906615) had 80 messages spanning QVC → Hormuz → tariffs, all of which loaded into every new Claude call as conversation history. Zita coped verbally ("we've been wandering through the whole lesson") but couldn't prevent cross-piece history contamination or cost creep, and had no way to tell the reader which piece they were on.

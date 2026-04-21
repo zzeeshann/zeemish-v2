@@ -1,5 +1,13 @@
 import type { APIRoute } from 'astro';
 import { checkRateLimit } from '../../../lib/rate-limit';
+import { logObserverEvent } from '../../../lib/observer-events';
+
+// Soft cap on how many prior messages we load into each Claude call.
+// 40 rows = 20 turns (user + assistant pairs) — enough for a coherent
+// multi-turn session without unbounded cost growth. Data before the
+// cap stays in D1 (permanence-of-record); we just don't send it to
+// Claude. See DECISIONS 2026-04-21 "Cap Zita history load at 40".
+const ZITA_HISTORY_LIMIT = 40;
 
 export const prerender = false;
 
@@ -64,16 +72,47 @@ export const POST: APIRoute = async ({ locals, request }) => {
   // Scoped conversation history: for daily pieces, scope by piece_date so
   // one reader's history on piece X doesn't bleed into piece Y. For
   // legacy non-daily courses, piece_date is null and we match NULL.
-  const history = await db
-    .prepare(
-      'SELECT role, content FROM zita_messages WHERE user_id = ? AND course_slug = ? AND lesson_number = ? AND piece_date IS ? ORDER BY created_at',
-    )
-    .bind(userId, course_slug, lesson_number, piece_date ?? null)
-    .all<{ role: string; content: string }>();
+  //
+  // Soft cap: load most recent ZITA_HISTORY_LIMIT rows, reverse to
+  // chronological order when building the messages array. Also fetch
+  // the total so we can log a truncation observer_event when the cap
+  // clips. Batched so it's one D1 round trip.
+  const [countRes, history] = await db.batch<{ role?: string; content?: string; n?: number }>([
+    db.prepare(
+      'SELECT COUNT(*) as n FROM zita_messages WHERE user_id = ? AND course_slug = ? AND lesson_number = ? AND piece_date IS ?',
+    ).bind(userId, course_slug, lesson_number, piece_date ?? null),
+    db.prepare(
+      'SELECT role, content FROM zita_messages WHERE user_id = ? AND course_slug = ? AND lesson_number = ? AND piece_date IS ? ORDER BY created_at DESC LIMIT ?',
+    ).bind(userId, course_slug, lesson_number, piece_date ?? null, ZITA_HISTORY_LIMIT),
+  ]);
+  const totalCount = (countRes.results[0]?.n as number) ?? 0;
+  const historyRows = (history.results as Array<{ role: string; content: string }>).slice().reverse();
+
+  if (totalCount > ZITA_HISTORY_LIMIT) {
+    // Fire-and-forget — make the soft cap visible in the admin Observer
+    // feed instead of silent. Severity 'info' because this is expected
+    // long-session behaviour, not a failure. Loaded count is capped at
+    // the limit; clipped = total - limit.
+    await logObserverEvent(db, {
+      severity: 'info',
+      title: `Zita history truncated at ${ZITA_HISTORY_LIMIT} for ${piece_date ?? 'non-daily'}`,
+      body: `Clipped ${totalCount - ZITA_HISTORY_LIMIT} older messages from the Claude context for a ${totalCount}-message session. Full history remains in D1.`,
+      context: {
+        type: 'zita_history_truncated',
+        userId,
+        pieceDate: piece_date ?? null,
+        courseSlug: course_slug,
+        lessonNumber: lesson_number,
+        totalCount,
+        loadedCount: ZITA_HISTORY_LIMIT,
+        clippedCount: totalCount - ZITA_HISTORY_LIMIT,
+      },
+    });
+  }
 
   // Build messages array for Claude
   const messages = [
-    ...history.results.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    ...historyRows.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     { role: 'user' as const, content: message },
   ];
 

@@ -33,7 +33,18 @@ Two-commit split was deliberate: the 0012 rollout on 2026-04-20 hit d1_migration
 
 Verified end-to-end via `preview_start` + `preview_eval`: daily-piece page renders with `piece-date` attribute from frontmatter, POST body carries it, 400 fires on missing piece_date, valid requests pass validation. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date" for the full trade-offs.
 
-**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 2 — history soft cap at 40 messages with observer_event on truncation.
+**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 3 — admin Zita view (`/dashboard/admin/zita/` + per-piece section).
+
+## Zita history soft cap (2026-04-21)
+Phase 2 of the Zita improvement plan. Same-day sequel to the piece-scoping work above. Even scoped by piece_date, one reader's long session could still grow unbounded — in the 92-row audit, one user had 44 messages scoped to a single piece, and Zita reloads the full history into every new Claude call. Cost grows linearly with session length.
+
+Fix in one commit: cap the Claude-side history at 40 rows (20 turns), batched with a `COUNT(*)` in one D1 round trip, and fire a `zita_history_truncated` observer_event (severity `info`) when the cap clips. The event carries `{totalCount, loadedCount, clippedCount, userId, pieceDate}` so the admin feed shows exactly how much was trimmed. Full history stays in D1 — the cap is purely about what Claude sees per turn.
+
+Also introduced **`src/lib/observer-events.ts`** — first site-worker → observer_events writer. Mirrors the agents-side `observer.ts:writeEvent` shape. Fire-and-forget with swallowed errors. Phase 4 will reuse it for `zita_claude_error` and `zita_rate_limited` events.
+
+Verified end-to-end by seeding 45 rows for a test user on 2026-04-20 locally: `COUNT(*)` returned 45, `LIMIT 40` returned exactly 40, and the synthetic observer_events INSERT queried back with all fields populated. Test data cleaned before commit.
+
+See DECISIONS 2026-04-21 "Cap Zita history load at 40 + log truncation to observer_events".
 
 ## Hygiene + correctness pass (2026-04-20, afternoon session)
 Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback point for the whole session is [`f87a520`](https://github.com/zzeeshann/zeemish-v2/commit/f87a520). Each commit deployed green on both workers with a post-deploy smoke check on `/`, `/daily/`, `/library/`, `/dashboard/`. FOLLOWUPS is visibly shorter.
