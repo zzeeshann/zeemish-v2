@@ -2,6 +2,53 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Scope Learner synthesis input by time window (multi-per-day unblock, #3 — final)
+
+**Context:** Commit 3 of 3. Completes the multi-per-day unblock sequence from Phase 3's pipeline_log consumer audit. [`agents/src/learner.ts:338`](../agents/src/learner.ts) ran `SELECT … FROM pipeline_log WHERE run_id = ? .bind(date)` to feed Claude's producer-learning synthesis. At 1 piece/day, pipeline_log for a date = exactly one run. At multi-per-day it pooled all that day's pieces' steps → synthesis for piece A saw piece B/C/D's candidate picks, audit rounds, etc. Noise that corrupts the learning output.
+
+**Boundary question:** how to filter "just this piece's pipeline rows" without breaking the run_id walk-back (which keeps `run_id = YYYY-MM-DD` and rejects a piece_id column on pipeline_log for one consumer).
+
+**Options considered:**
+1. Add `pipeline_log.piece_id` column. Cleanest filter. Conflicts with the run_id walk-back (one consumer ≠ schema axis).
+2. Time-window filter via `daily_pieces.published_at`.
+3. Read `pipeline_log.data` JSON for identity markers. Not all rows identify which piece they belong to.
+4. Skip pipeline_log entirely, use piece's own MDX. Loses real signal (audit rounds, candidates skipped vs picked, revisions required).
+
+**Decision (implemented):** Option 2. Time-window filter.
+
+**Implementation:**
+
+1. **Signature change** — `analysePiecePostPublish(date)` → `analysePiecePostPublish(pieceId, date)`. piece_id primary; date carried only for the pipeline_log `run_id` match. Caller at Director (`analyseProducerSignalsScheduled`) payload gains `pieceId` — flowed from the `crypto.randomUUID()` captured at daily_pieces INSERT time (Commit 2 already did this capture).
+2. **daily_pieces SELECT** switches from `WHERE date = ? LIMIT 1` to `WHERE id = ? LIMIT 1`. At multi-per-day the date-keyed version would have picked an arbitrary piece; piece-id-keyed pulls the specific piece.
+3. **pipeline_log SELECT** gains `AND created_at BETWEEN ? AND ?` with `[piece.published_at - 600_000, piece.published_at + 600_000]`. 10min pre-publish + 10min post-publish = 20min total. Fallback to unbounded window when `published_at IS NULL` (legacy pre-Phase-4 rows).
+4. **Two constants** at top of [`agents/src/learner.ts`](../agents/src/learner.ts): `LEARNER_PIPELINE_LOOKBACK_MS = 600_000`, `LEARNER_PIPELINE_LOOKAHEAD_MS = 600_000`. Named so future adjustment is a single-edit change.
+
+**Why 20min total window (not 6min as originally drafted).** Zishan's stress-case pushback: pipelines are ~2min nominal but can exceed 5min under Anthropic API latency spikes, ElevenLabs retry storms, or DO alarm re-dispatch. A 6min window works at happy-path latency and silently truncates under stress — the exact silent-data-loss shape we were trying to prevent with this change. 20min is ~4x the observed-under-stress worst case. Gap between two runs at `interval_hours=1` is 60min, so 20min still leaves 40min safety margin on both sides. Generous wins over tight here.
+
+**Why not Option 1 (pipeline_log.piece_id column).** Same discipline as the run_id walk-back: adding a piece_id column for one consumer is exactly the pattern that caused the 2026-04-21 regression. If a second or third consumer emerges needing per-piece pipeline filtering, revisit.
+
+**Why keep the date argument on the signature.** pipeline_log is keyed by `run_id = date`. Filtering by piece_id on pipeline_log isn't possible (no column, by deliberate choice). The time-window filter needs both the date (to match run_id) and the piece's publishedAt (to bound created_at). Two values, two parameters.
+
+**Touched files:**
+- [`agents/src/learner.ts`](../agents/src/learner.ts) — constants, signature change, two SELECT updates.
+- [`agents/src/director.ts`](../agents/src/director.ts) — `analyseProducerSignalsScheduled` payload gains `pieceId`; the schedule call at publish time passes it; internal call to `learner.analysePiecePostPublish(pieceId, date)`.
+
+**Non-goals:**
+- No change to `analyseZitaPatternsDaily` (the Zita-source Learner path) or `reflect` (Drafter self-reflection). Those scope by piece_date (zita) or filePath (reflect) already. Revisit if they grow the same date-pooling bug at multi-per-day.
+- No retrospective re-run of Learner on historical pieces. The 5 existing pieces' synthesis ran under pre-fix semantics when only one piece existed per date.
+- No new schema.
+
+**Verification:**
+- Agents TypeScript check clean on both touched files. 18 pre-existing SubAgent DurableObjectStub errors in server.ts unchanged.
+- At 1 piece/day (tonight's cron): time-window filter returns same rows as the old run_id filter because pipeline starts + publishes fit well inside the 20-min window.
+- At multi-per-day (when admin flips): time-window filter returns only the target piece's rows, excluding neighbouring pieces on the same date.
+
+**Sequence closure:** blockers #1 (pre-run DELETE removed in `ecedb87`), #2 (audio pipeline piece_id scoping in `900905d`), and #3 (this commit) all land. FOLLOWUPS entry "Unblock multi-per-day flip" marked resolved. Phase 5 (admin UI for interval flip) can ship next with no restrictions on the dropdown.
+
+**References:** [agents/src/learner.ts](../agents/src/learner.ts), [agents/src/director.ts](../agents/src/director.ts) (`analyseProducerSignalsScheduled` + the schedule call in `triggerDailyPiece`), FOLLOWUPS 2026-04-21 "Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping" (item #3 and the entry overall now resolved).
+
+---
+
 ## 2026-04-21: Scope audio pipeline state per piece_id (multi-per-day unblock, #2 + R2 key fix)
 
 **Context:** Commit 2 of the 3-blocker sequence. Phase 3's audit flagged [`director.ts:783`](../agents/src/director.ts) — `retryAudioFresh(date)` issued `DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'` keyed by date. At 1 piece/day this correctly wipes "today's audio retry" state. At multi-per-day the same DELETE wipes across all pieces that share a date. Blocked the admin interval flip.

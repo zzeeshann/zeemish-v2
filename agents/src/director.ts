@@ -374,6 +374,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // the scheduled method logs to observer_events and moves on. Fires
     // before the audio schedule so alarm ordering is deterministic.
     await this.schedule(1, 'analyseProducerSignalsScheduled', {
+      pieceId,
       date: today,
       title: brief.headline,
     });
@@ -462,14 +463,15 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * multiple ways and the prompt needs tightening.
    */
   async analyseProducerSignalsScheduled(payload: {
+    pieceId: string;
     date: string;
     title: string;
   }): Promise<void> {
-    const { date, title } = payload;
+    const { pieceId, date, title } = payload;
     const observer = await this.subAgent(ObserverAgent, 'observer');
     try {
       const learner = await this.subAgent(LearnerAgent, 'learner');
-      const result = await learner.analysePiecePostPublish(date);
+      const result = await learner.analysePiecePostPublish(pieceId, date);
       if (result.overflowCount > 0) {
         await observer
           .logLearnerOverflow(date, title, result.written, result.overflowCount)

@@ -13,7 +13,7 @@ Format per entry:
 
 ---
 
-## [open] 2026-04-21: Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping
+## [resolved] 2026-04-21: Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping
 
 **Surfaced:** 2026-04-21 during the Phase 3 pipeline_log consumer audit (see DECISIONS 2026-04-21 "Multi-piece cadence — Phase 3 hourly cron + runtime gate"). Three sites in the agents worker are scoped by `WHERE run_id = ? .bind(today)` or equivalent and behave correctly at 1 piece/day but pool across pieces at multi-per-day. `interval_hours` cannot be flipped below 24 until these are resolved.
 
@@ -47,6 +47,13 @@ Format per entry:
 - Test both before flipping: `UPDATE admin_settings SET value='4' WHERE key='interval_hours'`, let two runs complete same day, verify neither wiped the other.
 
 **Priority:** Blocker for multi-per-day cadence. Not urgent otherwise — Phase 3 ships at `interval_hours=24` which exercises none of these paths.
+
+**Resolved:** 2026-04-21 via three atomic commits in sequence:
+- `ecedb87` — item #1 (pre-run `pipeline_log` DELETE removed). See DECISIONS "Remove pre-run pipeline_log DELETE."
+- `900905d` — item #2 (audio retry-fresh + R2 key shape), plus a latent persistBeatRow NOT NULL bug found during scoping. See DECISIONS "Scope audio pipeline state per piece_id."
+- `<pending>` — item #3 (Learner synthesis input scoped by time window). See DECISIONS "Scope Learner synthesis input by time window."
+
+All three deploy clean through CI. Admin UI for interval flip (Phase 5) unblocked.
 
 ---
 
