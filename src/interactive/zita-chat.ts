@@ -6,9 +6,12 @@
  * Displays Zita's short, question-driven responses.
  *
  * Attributes:
- *   course - course slug (e.g. "body")
- *   lesson - lesson number (e.g. "3")
- *   title  - lesson title (for context)
+ *   course     - course slug (e.g. "daily", "body")
+ *   lesson     - lesson number (e.g. "0", "3")
+ *   piece-date - YYYY-MM-DD for daily pieces; required so conversations
+ *                scope to the piece rather than pooling under
+ *                (course='daily', lesson=0). Absent for legacy lessons.
+ *   title      - piece / lesson title (for prompt context)
  */
 class ZitaChat extends HTMLElement {
   private isOpen = false;
@@ -16,6 +19,7 @@ class ZitaChat extends HTMLElement {
 
   get course(): string { return this.getAttribute('course') ?? ''; }
   get lesson(): string { return this.getAttribute('lesson') ?? ''; }
+  get pieceDate(): string { return this.getAttribute('piece-date') ?? ''; }
   get lessonTitle(): string { return this.getAttribute('title') ?? ''; }
 
   connectedCallback() {
@@ -96,6 +100,7 @@ class ZitaChat extends HTMLElement {
           message: text,
           course_slug: this.course,
           lesson_number: parseInt(this.lesson, 10),
+          piece_date: this.pieceDate || null,
           lesson_title: this.lessonTitle,
         }),
       });

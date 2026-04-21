@@ -44,10 +44,16 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try { body = await request.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
 
-  const { message, course_slug, lesson_number, lesson_title, lesson_context } = body;
+  const { message, course_slug, lesson_number, piece_date, lesson_title, lesson_context } = body;
 
   if (!message || !course_slug || lesson_number == null) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
+  }
+
+  // piece_date required for daily pieces — see DECISIONS 2026-04-21.
+  // Lessons-course path is still allowed with piece_date=null.
+  if (course_slug === 'daily' && (typeof piece_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(piece_date))) {
+    return new Response(JSON.stringify({ error: 'Missing or invalid piece_date' }), { status: 400 });
   }
 
   // Input validation: limit message length to prevent API cost abuse
@@ -55,12 +61,14 @@ export const POST: APIRoute = async ({ locals, request }) => {
     return new Response(JSON.stringify({ error: 'Message too long (max 2000 characters)' }), { status: 400 });
   }
 
-  // Load conversation history for this user + lesson
+  // Scoped conversation history: for daily pieces, scope by piece_date so
+  // one reader's history on piece X doesn't bleed into piece Y. For
+  // legacy non-daily courses, piece_date is null and we match NULL.
   const history = await db
     .prepare(
-      'SELECT role, content FROM zita_messages WHERE user_id = ? AND course_slug = ? AND lesson_number = ? ORDER BY created_at',
+      'SELECT role, content FROM zita_messages WHERE user_id = ? AND course_slug = ? AND lesson_number = ? AND piece_date IS ? ORDER BY created_at',
     )
-    .bind(userId, course_slug, lesson_number)
+    .bind(userId, course_slug, lesson_number, piece_date ?? null)
     .all<{ role: string; content: string }>();
 
   // Build messages array for Claude
@@ -69,8 +77,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
     { role: 'user' as const, content: message },
   ];
 
-  // Build system prompt with lesson context
-  const systemPrompt = `${ZITA_SYSTEM_PROMPT}
+  // Build system prompt with lesson context. Name the piece so Zita
+  // knows which one the reader is on — half the reason Phase 1 exists.
+  const pieceBanner = course_slug === 'daily' && piece_date
+    ? `You are discussing the piece titled "${lesson_title ?? 'Untitled'}", published ${piece_date}.\n\n`
+    : '';
+  const systemPrompt = `${pieceBanner}${ZITA_SYSTEM_PROMPT}
 
 ## Current lesson context
 Course: ${course_slug}
@@ -112,11 +124,11 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
     const now = Date.now();
     await db.batch([
       db.prepare(
-        'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, 'user', message, now),
+        'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, piece_date, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'user', message, now),
       db.prepare(
-        'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, 'assistant', reply, now + 1),
+        'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, piece_date, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'assistant', reply, now + 1),
     ]);
 
     return new Response(JSON.stringify({ reply }), {
