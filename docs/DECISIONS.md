@@ -2,6 +2,37 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Zita safety smallest-viable pass (Phase 4)
+
+**Context:** Phase 4 of the Zita improvement plan. With piece-scoping (Phase 1), a history cap (Phase 2), and admin visibility (Phase 3) in place, three operational blind spots remained:
+1. Claude API errors were silently swallowed — the reader saw a generic 503, ops never learned which piece / user / upstream status triggered it.
+2. Rate-limit 429s were silently returned — no way to see abuse patterns or runaway clients in the admin feed.
+3. The persisted assistant `content` had no ceiling. `max_tokens: 300` at the API level is the only bound, but a misconfigured model / cache weirdness could theoretically return longer output, and a single row could dominate future context loads.
+
+**Decision:** smallest-viable safety pass. No prompt-injection hardening (that's gated on Phase 6's design doc); just the three observable gaps.
+
+1. **`zita_claude_error` observer_event** fired when `!claudeResponse.ok`. Severity `warn` (not `escalation` — Claude is occasionally flaky). Context captures `{ type, httpStatus, userId, pieceDate, upstreamBody }` — the upstream body is capped at 500 chars via `claudeResponse.text().slice(0, 500)` to stop large error payloads from bloating `observer_events`. Reader still sees the generic "Zita is temporarily unavailable" — the event is for ops, not for disclosure.
+
+2. **`zita_rate_limited` observer_event** fired on the 429 path. Severity `warn`. Context `{ type, userId, limit: 20, windowSeconds: 900 }`. Helpful for catching runaway clients or abuse patterns — the current rate limit (20 msg / 15 min) is aggressive, so one spam-loop would produce a clear trail.
+
+3. **`zita_handler_error` observer_event** on the outer `catch` for unhandled exceptions. Same severity/shape posture.
+
+4. **`capStoredContent()` helper** — if `content.length > ZITA_STORED_CONTENT_CAP` (4000), truncate and append `\n\n[…truncated]`. Applied to both user message and assistant reply INSERTs. 4000 is generous relative to the ≈1200-char typical output from `max_tokens: 300` — it's a ceiling, not a target. The truncation marker is recognisable if it shows up in a transcript.
+
+**Why not a new writer helper.** `logObserverEvent` from Phase 2 already encapsulates the INSERT + swallow-errors shape. Four call sites now use it: truncation (Phase 2), rate limit, Claude error, handler error.
+
+**Verified end-to-end** via preview: fired 22 rapid POSTs at `/api/zita/chat`. First 20 returned 503 (local Claude key is invalid → 401 → zita_claude_error row each). Next 2 returned 429 → zita_rate_limited rows. Every row had correctly-shaped title, body, and JSON context. Upstream body (authentication_error / invalid x-api-key / request_id) was captured verbatim up to the 500-char cap. Test rows cleaned before commit.
+
+**Non-goals (all deferred to Phase 6 design doc):**
+- Prompt-injection detection or guardrails on reader input.
+- PII redaction on stored content.
+- Per-event alerting (escalation escalation vs. silent warn). Current posture: log everything, let the admin feed show operators what's happening.
+- Encryption at rest for `zita_messages` content.
+
+**References:** [src/pages/api/zita/chat.ts](../src/pages/api/zita/chat.ts) (all four observer call sites + capStoredContent), [src/lib/observer-events.ts](../src/lib/observer-events.ts) (shared writer).
+
+---
+
 ## 2026-04-21: Admin Zita view (Phase 3)
 
 **Context:** Phase 3 of the Zita improvement plan. With Phase 1 scoping `zita_messages` by piece_date and Phase 2 logging truncation events, the next gap was operator visibility: no dashboard surface for reading what readers actually ask Zita. Without this, validating P1.5 (Phase 5's Learner synthesis) is impossible — you can't evaluate whether the synthesised patterns are accurate against reader questions you can't see.

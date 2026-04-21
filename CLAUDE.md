@@ -33,7 +33,21 @@ Two-commit split was deliberate: the 0012 rollout on 2026-04-20 hit d1_migration
 
 Verified end-to-end via `preview_start` + `preview_eval`: daily-piece page renders with `piece-date` attribute from frontmatter, POST body carries it, 400 fires on missing piece_date, valid requests pass validation. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date" for the full trade-offs.
 
-**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 4 — safety smallest-viable pass (zita_claude_error + zita_rate_limited observer events, output-length cap).
+**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 5 — P1.5 Learner skeleton (guarded, 01:45 UTC day+1 schedule).
+
+## Zita safety smallest-viable pass (2026-04-21)
+Phase 4 of the Zita improvement plan. Four observer call sites added via the Phase 2 `logObserverEvent` helper, plus a `capStoredContent(content, 4000)` on both INSERTs:
+
+- **`zita_claude_error`** (severity `warn`) when the Claude API returns non-OK. Captures `{ httpStatus, userId, pieceDate, upstreamBody }` with the upstream body capped at 500 chars. Reader still sees the generic 503; the event is for ops.
+- **`zita_rate_limited`** (severity `warn`) on the 429 path. Captures `{ userId, limit, windowSeconds }`. Makes the 20-msg-per-15-min limit visible instead of silent.
+- **`zita_handler_error`** (severity `warn`) on the outer try/catch for unhandled exceptions.
+- **Output cap** at 4000 chars on both user message and assistant reply INSERTs with a `\n\n[…truncated]` marker. 4000 is a ceiling above the typical 1200-char output from `max_tokens: 300`, not a target. Recognisable marker means operators can spot the rare case if it ever fires.
+
+Verified with 22 rapid POSTs: 20 × Claude 401 → 20 × `zita_claude_error` rows with upstream authentication_error captured; 2 × 429 → 2 × `zita_rate_limited` rows. All rows correctly shaped. Test data cleaned before commit.
+
+Deferred to Phase 6 design doc: prompt-injection hardening, PII redaction, escalation tuning, encryption at rest.
+
+See DECISIONS 2026-04-21 "Zita safety smallest-viable pass (Phase 4)".
 
 ## Zita admin view (2026-04-21)
 Phase 3 of the Zita improvement plan. Three surfaces went live, same-day sequel to Phase 2:

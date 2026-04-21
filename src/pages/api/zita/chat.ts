@@ -9,6 +9,20 @@ import { logObserverEvent } from '../../../lib/observer-events';
 // Claude. See DECISIONS 2026-04-21 "Cap Zita history load at 40".
 const ZITA_HISTORY_LIMIT = 40;
 
+// Max_tokens on the Claude call is 300, but a misconfigured model or
+// cache weirdness could theoretically return longer output. Cap what
+// we persist so a single row can't ever dominate the context budget
+// or balloon D1 storage. 4000 is generous relative to the 300-token
+// enforcement at the API level (≈1200 chars typical English).
+// See DECISIONS 2026-04-21 "Zita safety smallest-viable pass".
+const ZITA_STORED_CONTENT_CAP = 4000;
+const ZITA_TRUNCATE_SUFFIX = '\n\n[…truncated]';
+
+function capStoredContent(content: string): string {
+  if (content.length <= ZITA_STORED_CONTENT_CAP) return content;
+  return content.slice(0, ZITA_STORED_CONTENT_CAP - ZITA_TRUNCATE_SUFFIX.length) + ZITA_TRUNCATE_SUFFIX;
+}
+
 export const prerender = false;
 
 const ZITA_SYSTEM_PROMPT = `You are Zita, a learning guide inside Zeemish. You help readers think through what they're learning — you don't lecture.
@@ -45,6 +59,12 @@ export const POST: APIRoute = async ({ locals, request }) => {
   // Rate limit: 20 messages per 15 min per user (Claude API costs money)
   const limit = await checkRateLimit(locals.runtime.env.RATE_LIMIT_KV, `zita:${userId}`, 20, 900);
   if (!limit.allowed) {
+    await logObserverEvent(db, {
+      severity: 'warn',
+      title: 'Zita rate limit hit',
+      body: `User ${userId} exceeded 20 messages / 15 minutes. This surfaces in the admin feed so abuse patterns or runaway clients become visible instead of silent.`,
+      context: { type: 'zita_rate_limited', userId, limit: 20, windowSeconds: 900 },
+    });
     return new Response(JSON.stringify({ error: 'Slow down — try again in a few minutes.' }), { status: 429 });
   }
 
@@ -151,6 +171,23 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
     });
 
     if (!claudeResponse.ok) {
+      // Read the error body for the observer context, but don't leak
+      // it to the reader. Cap at 500 chars to avoid logging long
+      // upstream payloads.
+      let upstreamBody = '';
+      try { upstreamBody = (await claudeResponse.text()).slice(0, 500); } catch { /* ignore */ }
+      await logObserverEvent(db, {
+        severity: 'warn',
+        title: `Zita Claude call failed (HTTP ${claudeResponse.status})`,
+        body: `Claude API returned a non-OK status for a Zita chat request. Reader saw a generic 503; this event captures the upstream status + body snippet for debugging.`,
+        context: {
+          type: 'zita_claude_error',
+          httpStatus: claudeResponse.status,
+          userId,
+          pieceDate: piece_date ?? null,
+          upstreamBody,
+        },
+      });
       return new Response(JSON.stringify({ error: 'Zita is temporarily unavailable. Try again later.' }), { status: 503 });
     }
 
@@ -159,15 +196,21 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
     };
     const reply = data.content[0]?.type === 'text' ? data.content[0].text : '';
 
+    // Cap what we persist so a single row can't dominate future context
+    // or bloat D1. Input was already capped at 2000 above; assistant
+    // side is normally ≈1200 chars but cap defensively at 4000.
+    const storedUserMessage = capStoredContent(message);
+    const storedReply = capStoredContent(reply);
+
     // Save both messages to history
     const now = Date.now();
     await db.batch([
       db.prepare(
         'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, piece_date, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'user', message, now),
+      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'user', storedUserMessage, now),
       db.prepare(
         'INSERT INTO zita_messages (id, user_id, course_slug, lesson_number, piece_date, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'assistant', reply, now + 1),
+      ).bind(crypto.randomUUID(), userId, course_slug, lesson_number, piece_date ?? null, 'assistant', storedReply, now + 1),
     ]);
 
     return new Response(JSON.stringify({ reply }), {
@@ -176,6 +219,17 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
+    await logObserverEvent(db, {
+      severity: 'warn',
+      title: 'Zita handler threw unexpectedly',
+      body: `Unhandled exception in the /api/zita/chat handler. Reader saw a generic 500; this event captures the error message for debugging.`,
+      context: {
+        type: 'zita_handler_error',
+        userId,
+        pieceDate: piece_date ?? null,
+        errorMessage: msg,
+      },
+    });
     return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
 };
