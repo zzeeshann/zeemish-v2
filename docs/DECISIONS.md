@@ -2,6 +2,34 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Admin Zita view (Phase 3)
+
+**Context:** Phase 3 of the Zita improvement plan. With Phase 1 scoping `zita_messages` by piece_date and Phase 2 logging truncation events, the next gap was operator visibility: no dashboard surface for reading what readers actually ask Zita. Without this, validating P1.5 (Phase 5's Learner synthesis) is impossible — you can't evaluate whether the synthesised patterns are accurate against reader questions you can't see.
+
+**Decision:** Two surfaces, both admin-gated, matching the existing design system (eyebrow + title header, stat grid, rounded-xl cards with `border-zee-border`, `text-xs font-semibold uppercase tracking-widest text-zee-muted` section headers):
+
+1. **`/dashboard/admin/zita/`** — standalone view. Stats grid (conversations / messages / unique readers / truncation count, all 30-day window). Conversation list grouped by `(user_id, piece_date)`, 100 most recent, each as a `<details>` with collapsed summary (message count, short user id, relative time, piece headline) + expanded transcript (reader/zita labelled messages). Deep-link to per-piece admin route when piece_date is set. Piece headlines joined from `daily_pieces` via a single `WHERE date IN (?, ?, …)` query.
+
+2. **Per-piece deep-dive** (`/dashboard/admin/piece/[date]/`) — new "Questions from readers" section, inserted between Audio and Observer events. Shows distinct readers who chatted about this piece, sorted by most-recent message. Each reader's full transcript expandable via `<details>`. Header includes an "All Zita activity →" link to the standalone view for cross-piece context.
+
+3. **Main admin page entry point** (`/dashboard/admin/`) — new "Zita activity →" link in the top-right corner alongside the existing "← Public dashboard" link.
+
+**Defensive refactor caught during verification:** the per-piece page originally ran audio + zita queries inside the same try/catch. When local D1 was missing `daily_piece_audio` (migration 0010 tracker drift), the audio query threw, the shared catch swallowed it, and the Zita section silently disappeared. Split Zita into its own `try { ... } catch {}` so a failure in an unrelated section can't hide the Questions block. Same defensive shape as the site-worker `logObserverEvent` helper — observability writes never break the handler that's calling them.
+
+**No new data flows.** All three surfaces read from existing tables (`zita_messages`, `daily_pieces`, `observer_events`) — no schema changes, no writer changes. The piece title join uses a fresh `daily_pieces` lookup rather than denormalising into `zita_messages`; 100 conversations × 5 distinct piece_dates in the 30-day window means the `IN (…)` lookup is cheap.
+
+**Verified end-to-end** in local preview with a minimal seeded conversation (4 messages from `demo-reader-1` about the 2026-04-20 piece): stats rendered correctly (1 conv / 4 msgs / 1 reader / 0 truncations), conversation card showed message count + short user id + piece headline, transcript expanded cleanly with READER / ZITA labels and alternating styling. Per-piece deep-dive showed the matching "Questions from readers" block. Test data cleaned before commit.
+
+**Non-goals:**
+- No pagination beyond the 100-conversation cap. If the dataset grows, revisit then — not now.
+- No filtering UI (search, date-range, reader-id lookup). The deep-links + piece deep-dive give piece-scoped views already; freeform search is Phase 6 territory.
+- No PII redaction of content. Messages display verbatim for honest operator review. When the design doc in Phase 6 decides on PII posture, apply it here.
+- No real-time refresh. A reload picks up new conversations; the admin surface isn't a live monitoring tool.
+
+**References:** [src/pages/dashboard/admin/zita.astro](../src/pages/dashboard/admin/zita.astro), [src/pages/dashboard/admin/piece/[date].astro](../src/pages/dashboard/admin/piece/[date].astro) ("Questions from readers" section + independent zita try/catch), [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro) (top-right link).
+
+---
+
 ## 2026-04-21: Cap Zita history load at 40 + log truncation to observer_events
 
 **Context:** Phase 2 of the Zita improvement plan. Even with Phase 1's piece-scoped history (DECISIONS 2026-04-21 "Scope zita_messages by piece_date"), a single reader's long session on one piece still grows unbounded. In the 92-row audit on 2026-04-21, one user had 44 messages scoped to the 2026-04-21 tariffs piece alone; at current rate, a committed reader could reach 100+ turns on a single day's piece inside a week. Every new message would reload the full history into the Claude system prompt, growing input tokens linearly per turn.

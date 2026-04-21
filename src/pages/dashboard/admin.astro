@@ -190,9 +190,10 @@ function shortDate(iso: string): string {
       <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">Admin</h1>
       <p class="text-lg text-zee-muted">Trigger runs, watch the pipeline, review escalations.</p>
     </div>
-    <a href="/dashboard/" class="text-sm text-zee-muted hover:text-zee-primary whitespace-nowrap mt-2">
-      ← Public dashboard
-    </a>
+    <div class="flex flex-col items-end gap-1 mt-2 text-sm whitespace-nowrap">
+      <a href="/dashboard/admin/zita/" class="text-zee-muted hover:text-zee-primary">Zita activity →</a>
+      <a href="/dashboard/" class="text-zee-muted hover:text-zee-primary">← Public dashboard</a>
+    </div>
   </div>
 
   <!-- Today's run -->

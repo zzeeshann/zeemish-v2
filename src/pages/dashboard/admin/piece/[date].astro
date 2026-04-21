@@ -89,12 +89,20 @@ type AudioRow = {
   generated_at: number;
 };
 
+type ZitaMessage = {
+  user_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: number;
+};
+
 let piece: Piece | null = null;
 let audits: AuditRow[] = [];
 let pipeline: PipelineRow[] = [];
 let candidates: CandidateRow[] = [];
 let observerEvents: ObserverRow[] = [];
 let audioRows: AudioRow[] = [];
+let zitaMessages: ZitaMessage[] = [];
 
 try {
   piece = await db
@@ -145,6 +153,39 @@ try {
     .all<AudioRow>();
   audioRows = audioRes.results;
 } catch { /* leave empty */ }
+
+// Zita query is in its own try so a failure in the audio section
+// above doesn't silently remove the "Questions from readers" block.
+try {
+  const zitaRes = await db
+    .prepare(
+      `SELECT user_id, role, content, created_at
+       FROM zita_messages WHERE piece_date = ? ORDER BY created_at ASC`,
+    )
+    .bind(date)
+    .all<ZitaMessage>();
+  zitaMessages = zitaRes.results;
+} catch { /* leave empty */ }
+
+type ZitaConversation = { user_id: string; msgs: ZitaMessage[] };
+const zitaConvos: ZitaConversation[] = (() => {
+  const byUser = new Map<string, ZitaMessage[]>();
+  for (const m of zitaMessages) {
+    if (!byUser.has(m.user_id)) byUser.set(m.user_id, []);
+    byUser.get(m.user_id)!.push(m);
+  }
+  return Array.from(byUser.entries())
+    .map(([user_id, msgs]) => ({ user_id, msgs }))
+    .sort((a, b) => {
+      const aLast = a.msgs[a.msgs.length - 1]?.created_at ?? 0;
+      const bLast = b.msgs[b.msgs.length - 1]?.created_at ?? 0;
+      return bLast - aLast;
+    });
+})();
+
+function shortZitaUser(id: string): string {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
 
 // --- Derive groupings + display values ---------------------------------
 
@@ -582,6 +623,42 @@ function publishedDisplay(): string {
               );
             })}
           </ul>
+        </section>
+      )}
+
+      <!-- Zita conversations for this piece -->
+      {zitaConvos.length > 0 && (
+        <section class="mb-10">
+          <div class="flex items-baseline justify-between gap-4 mb-4">
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Questions from readers</h2>
+            <a href="/dashboard/admin/zita/" class="text-xs text-zee-primary hover:underline">All Zita activity →</a>
+          </div>
+          <div class="space-y-3">
+            {zitaConvos.map((c) => (
+              <details class="p-4 rounded-xl border border-zee-border group">
+                <summary class="cursor-pointer list-none">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-3">
+                      <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-zee-primary/10 text-zee-primary tabular-nums">{c.msgs.length}&nbsp;msgs</span>
+                      <span class="text-xs text-zee-muted tabular-nums">{shortZitaUser(c.user_id)}</span>
+                    </div>
+                    <span class="text-xs text-zee-muted group-open:hidden">Expand</span>
+                    <span class="text-xs text-zee-muted hidden group-open:inline">Collapse</span>
+                  </div>
+                </summary>
+                <div class="mt-4 pt-4 border-t border-zee-border/60 space-y-2">
+                  {c.msgs.map((m) => (
+                    <div class={m.role === 'user' ? 'text-sm' : 'text-sm text-zee-muted'}>
+                      <span class="text-[10px] font-semibold uppercase tracking-wider mr-2">
+                        {m.role === 'user' ? 'reader' : 'zita'}
+                      </span>
+                      <span class="whitespace-pre-wrap">{m.content}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </div>
         </section>
       )}
 

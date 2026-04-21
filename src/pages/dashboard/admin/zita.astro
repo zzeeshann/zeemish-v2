@@ -1,0 +1,239 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { getUser } from '../../../lib/db';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+
+if (!user?.email || user.email !== ADMIN_EMAIL) {
+  return Astro.redirect('/login/?redirect=/dashboard/admin/zita/');
+}
+
+// Window: last 30 days of activity. Adjust if this becomes noisy —
+// the stats + list both respect the same window.
+const WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const windowStart = Date.now() - WINDOW_MS;
+
+type Conversation = {
+  user_id: string;
+  piece_date: string | null;
+  msgs: number;
+  first_ms: number;
+  last_ms: number;
+};
+
+type Message = {
+  user_id: string;
+  piece_date: string | null;
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: number;
+};
+
+type PieceRow = { date: string; headline: string };
+
+type TruncationEvent = { created_at: number; context: string };
+
+let conversations: Conversation[] = [];
+let messages: Message[] = [];
+let pieceTitles = new Map<string, string>();
+let totalMessages = 0;
+let uniqueReaders = 0;
+let truncationCount = 0;
+let latestTruncation: TruncationEvent | null = null;
+
+try {
+  const convRes = await db
+    .prepare(
+      `SELECT user_id, piece_date, COUNT(*) as msgs,
+              MIN(created_at) as first_ms, MAX(created_at) as last_ms
+       FROM zita_messages
+       WHERE created_at > ?
+       GROUP BY user_id, piece_date
+       ORDER BY last_ms DESC
+       LIMIT 100`,
+    )
+    .bind(windowStart)
+    .all<Conversation>();
+  conversations = convRes.results;
+
+  // Pull every message from the returned conversations in one query.
+  // Bounded by the 100-conversation cap, rarely exceeds ~2000 rows.
+  if (conversations.length > 0) {
+    const msgRes = await db
+      .prepare(
+        `SELECT user_id, piece_date, role, content, created_at
+         FROM zita_messages
+         WHERE created_at > ?
+         ORDER BY created_at ASC`,
+      )
+      .bind(windowStart)
+      .all<Message>();
+    messages = msgRes.results;
+  }
+
+  const dates = Array.from(new Set(conversations.map((c) => c.piece_date).filter(Boolean))) as string[];
+  if (dates.length > 0) {
+    const placeholders = dates.map(() => '?').join(', ');
+    const titlesRes = await db
+      .prepare(`SELECT date, headline FROM daily_pieces WHERE date IN (${placeholders})`)
+      .bind(...dates)
+      .all<PieceRow>();
+    for (const row of titlesRes.results) pieceTitles.set(row.date, row.headline);
+  }
+
+  const totalsRes = await db
+    .prepare(
+      `SELECT COUNT(*) as total_msgs, COUNT(DISTINCT user_id) as readers
+       FROM zita_messages WHERE created_at > ?`,
+    )
+    .bind(windowStart)
+    .first<{ total_msgs: number; readers: number }>();
+  totalMessages = totalsRes?.total_msgs ?? 0;
+  uniqueReaders = totalsRes?.readers ?? 0;
+
+  const truncRes = await db
+    .prepare(
+      `SELECT created_at, context FROM observer_events
+       WHERE created_at > ? AND context LIKE '%"type":"zita_history_truncated"%'
+       ORDER BY created_at DESC`,
+    )
+    .bind(windowStart)
+    .all<TruncationEvent>();
+  truncationCount = truncRes.results.length;
+  latestTruncation = truncRes.results[0] ?? null;
+} catch {
+  // Leave defaults; page still renders.
+}
+
+// Group messages by (user_id, piece_date) for per-conversation render.
+const messagesByKey = new Map<string, Message[]>();
+for (const m of messages) {
+  const key = `${m.user_id}|${m.piece_date ?? ''}`;
+  if (!messagesByKey.has(key)) messagesByKey.set(key, []);
+  messagesByKey.get(key)!.push(m);
+}
+
+function shortUser(id: string): string {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
+}
+
+function relTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+---
+
+<BaseLayout title="Zita activity — Admin · Zeemish">
+
+  <nav class="text-sm text-zee-muted mb-6 pt-6" aria-label="Breadcrumb">
+    <a href="/dashboard/admin/" class="hover:text-zee-primary transition-colors">Admin</a>
+    <span class="mx-2 opacity-50">/</span>
+    <span class="text-zee-text">Zita activity</span>
+  </nav>
+
+  <div class="pb-8">
+    <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">ZITA ACTIVITY</p>
+    <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">What readers are asking</h1>
+    <p class="text-lg text-zee-muted">Socratic chat conversations from the last 30 days, grouped by reader × piece. Full transcripts live in D1 — this view shows the most recent 100 conversations.</p>
+  </div>
+
+  <!-- Stats -->
+  <section class="mb-10">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Last 30 days</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{conversations.length}</div>
+        <div class="text-sm text-zee-muted">Conversations</div>
+        <div class="text-xs text-zee-muted/70 mt-1">reader × piece</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{totalMessages}</div>
+        <div class="text-sm text-zee-muted">Messages</div>
+        <div class="text-xs text-zee-muted/70 mt-1">user + assistant</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class="text-2xl font-bold text-zee-primary">{uniqueReaders}</div>
+        <div class="text-sm text-zee-muted">Readers</div>
+        <div class="text-xs text-zee-muted/70 mt-1">unique</div>
+      </div>
+      <div class="p-4 rounded-xl border border-zee-border text-center">
+        <div class={`text-2xl font-bold ${truncationCount > 0 ? 'text-zee-gold' : 'text-zee-primary'}`}>{truncationCount}</div>
+        <div class="text-sm text-zee-muted">Truncations</div>
+        <div class="text-xs text-zee-muted/70 mt-1">
+          {latestTruncation ? `latest ${relTime(latestTruncation.created_at)}` : 'cap unexercised'}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Conversations -->
+  <section class="mb-10">
+    <div class="flex items-baseline justify-between gap-4 mb-4">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Conversations</h2>
+      <span class="text-xs text-zee-muted">{conversations.length} shown · most recent first</span>
+    </div>
+
+    {conversations.length === 0 ? (
+      <p class="text-zee-muted italic text-sm">No Zita activity in the last 30 days.</p>
+    ) : (
+      <div class="space-y-3">
+        {conversations.map((c) => {
+          const key = `${c.user_id}|${c.piece_date ?? ''}`;
+          const convMsgs = messagesByKey.get(key) ?? [];
+          const pieceTitle = c.piece_date ? pieceTitles.get(c.piece_date) ?? null : null;
+          const pieceLabel = c.piece_date ? (pieceTitle ?? c.piece_date) : 'Non-daily (lessons)';
+          const pieceHref = c.piece_date ? `/dashboard/admin/piece/${c.piece_date}/` : null;
+          return (
+            <details class="p-4 rounded-xl border border-zee-border group">
+              <summary class="cursor-pointer list-none">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1">
+                      <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-zee-primary/10 text-zee-primary tabular-nums">{c.msgs}&nbsp;msgs</span>
+                      <span class="text-xs text-zee-muted tabular-nums">{shortUser(c.user_id)}</span>
+                      <span class="text-xs text-zee-muted">·</span>
+                      <span class="text-xs text-zee-muted tabular-nums">{relTime(c.last_ms)}</span>
+                    </div>
+                    <p class="font-medium text-sm truncate">{pieceLabel}</p>
+                    {c.piece_date && (
+                      <p class="text-xs text-zee-muted mt-0.5">
+                        {pieceHref && <a href={pieceHref} class="text-zee-primary hover:underline">{c.piece_date} · piece deep-dive →</a>}
+                      </p>
+                    )}
+                  </div>
+                  <span class="text-xs text-zee-muted group-open:hidden">Expand</span>
+                  <span class="text-xs text-zee-muted hidden group-open:inline">Collapse</span>
+                </div>
+              </summary>
+              <div class="mt-4 pt-4 border-t border-zee-border/60 space-y-2">
+                {convMsgs.map((m) => (
+                  <div class={m.role === 'user' ? 'text-sm' : 'text-sm text-zee-muted'}>
+                    <span class="text-[10px] font-semibold uppercase tracking-wider mr-2">
+                      {m.role === 'user' ? 'reader' : 'zita'}
+                    </span>
+                    <span class="whitespace-pre-wrap">{m.content}</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    )}
+  </section>
+
+  <p class="text-xs text-zee-muted mt-8 mb-8">
+    Data source: <code class="text-xs">zita_messages</code> + <code class="text-xs">daily_pieces</code> (for headlines) + <code class="text-xs">observer_events</code> (for truncation count). Window: 30 days. Messages cap per view: 100 conversations. Older data stays in D1.
+  </p>
+
+</BaseLayout>

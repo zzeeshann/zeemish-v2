@@ -33,7 +33,20 @@ Two-commit split was deliberate: the 0012 rollout on 2026-04-20 hit d1_migration
 
 Verified end-to-end via `preview_start` + `preview_eval`: daily-piece page renders with `piece-date` attribute from frontmatter, POST body carries it, 400 fires on missing piece_date, valid requests pass validation. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date" for the full trade-offs.
 
-**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 3 — admin Zita view (`/dashboard/admin/zita/` + per-piece section).
+**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 4 — safety smallest-viable pass (zita_claude_error + zita_rate_limited observer events, output-length cap).
+
+## Zita admin view (2026-04-21)
+Phase 3 of the Zita improvement plan. Three surfaces went live, same-day sequel to Phase 2:
+
+1. **`/dashboard/admin/zita/`** — standalone "What readers are asking" view. 30-day stats grid (conversations / messages / readers / truncations) + expandable conversation cards grouped by `(user_id, piece_date)`. Piece headlines joined from `daily_pieces`, deep-links to per-piece admin on every card.
+2. **Per-piece deep-dive** gains a "Questions from readers" section between Audio and Observer events. Distinct readers listed with full transcripts.
+3. **Main admin page** gains a "Zita activity →" link in the top-right corner for discoverability.
+
+Defensive catch during verification: originally had the Zita query nested inside the same `try/catch` as the audio query on the per-piece page. When the local D1 was missing `daily_piece_audio` (0010 tracker drift), audio threw, the shared catch swallowed it, Zita section silently vanished. Split into its own `try { ... } catch {}` — an unrelated failure can't hide the Questions block now.
+
+No schema changes, no writer changes, no new data flows. All three surfaces read existing tables.
+
+See DECISIONS 2026-04-21 "Admin Zita view (Phase 3)".
 
 ## Zita history soft cap (2026-04-21)
 Phase 2 of the Zita improvement plan. Same-day sequel to the piece-scoping work above. Even scoped by piece_date, one reader's long session could still grow unbounded — in the 92-row audit, one user had 44 messages scoped to a single piece, and Zita reloads the full history into every new Claude call. Cost grows linearly with session length.
