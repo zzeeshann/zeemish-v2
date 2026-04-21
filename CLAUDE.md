@@ -33,7 +33,21 @@ Two-commit split was deliberate: the 0012 rollout on 2026-04-20 hit d1_migration
 
 Verified end-to-end via `preview_start` + `preview_eval`: daily-piece page renders with `piece-date` attribute from frontmatter, POST body carries it, 400 fires on missing piece_date, valid requests pass validation. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date" for the full trade-offs.
 
-**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 6 — write `docs/zita-design.md` (design session, no code). Gates any deep-Zita work.
+**Zita improvement plan complete** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`). Six phases shipped 2026-04-21 in sequence: piece-scoping (1A + 1B), history soft cap (2), admin view (3), safety pass (4), P1.5 Learner skeleton (5), design doc (6). All phases verified, each has its own DECISIONS entry, no follow-ups open from the plan itself (the `zita_messages_backup_20260421` drop on 2026-04-28 is queued in FOLLOWUPS).
+
+## Zita design doc (2026-04-21)
+Phase 6 of the Zita improvement plan and the final one. Book ch.17 required a design doc before any deep-Zita code — that doc now exists at [`docs/zita-design.md`](docs/zita-design.md). Decisions (not wishlist) for the six questions ch.17 posed:
+
+1. **Multi-turn state** — three layers: turn history (already exists, bounded), session summary (new `zita_session_summary` rolled at cap-hit), reader profile (new `zita_reader_profile`, derived by the daily P1.5 pass). Cross-session chat retrieval deferred to v2 behind a consent screen.
+2. **Tools** — two: `get_current_piece(date)` (returns MDX, bounded) and `search_library(query, k=3)` (Vectorize). No external web search — would break voice consistency and multiply failure modes. ReAct loop capped at 6 steps per turn.
+3. **Library index** — Cloudflare Vectorize, `@cf/baai/bge-base-en-v1.5` embeddings, indexed on Publisher's `publishing done` with 60s delay. 5-piece manual backfill.
+4. **Failure modes** — six addressed: prompt injection (tool-results treated as untrusted), tool-loop exhaustion (step cap + observer event), wrong library result (k=3 + metadata sanity), voice drift (summary includes voice rules + §6 harness catches it), factual misparaphrase (`get_current_piece` lets Zita verify), hallucinated past piece (only reference via `search_library` results).
+5. **Human handoff** — none. Zeemish isn't staffed for support; a handoff button would be a false promise. Graceful "I don't know" instead, with category-logging (crisis deflection, support deflection, PII acknowledgement, refusal) surfaced via observer events.
+6. **Voice testing** — scripted synthetic-conversation harness (`agents/eval/zita-voice.ts`), 10 personas × 50 turns × 5 runs = 500 scored Zita replies per run, ≥95% voice-rule pass target. Runs before any prompt change.
+
+The doc also sequences the **v1 deep-Zita build** as independently-shippable work items (library index → tool-use loop → session summary → reader profile → voice harness → category logging) and lists explicit non-goals (cross-session retrieval, multi-language, audio Zita).
+
+Next plan (not this one) picks up at the v1 build sequence.
 
 ## P1.5 Learner skeleton — Zita-question synthesis (2026-04-21)
 Phase 5 of the Zita improvement plan. Closes the last gap in the self-improvement loop for Zita: the `source='zita'` slot reserved in migration 0011 now has a writer. Mirrors the three-source pattern exactly — new `LEARNER_ZITA_PROMPT`, new `Learner.analyseZitaPatternsDaily(date)`, new Director `analyseZitaPatternsScheduled` alarm, new `observer.logZitaSynthesisMetered` + `logZitaSynthesisFailure`. No Drafter changes needed (`getRecentLearnings` is already source-agnostic).
