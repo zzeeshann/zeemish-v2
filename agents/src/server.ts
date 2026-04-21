@@ -258,21 +258,31 @@ export default {
             status: 400, headers: corsHeaders(request),
           });
         }
-        // Title is optional; Director's handler logs it into observer events.
-        // Look up from daily_pieces so the log reads right if we have it.
+        // Cadence Phase 6: analyseZitaPatternsScheduled takes piece_id
+        // primary (per-piece scoping) + date for payload compatibility.
+        // Admin still hits this endpoint with ?date=... — resolve
+        // piece_id via daily_pieces (ORDER BY published_at DESC picks
+        // the latest at multi-per-day, matching the "retry the latest"
+        // shape used by /audio-retry).
         const pieceRow = await env.DB
-          .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
+          .prepare('SELECT id, headline FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
           .bind(date)
-          .first<{ headline: string }>();
-        const title = pieceRow?.headline ?? `(no daily_pieces row for ${date})`;
+          .first<{ id: string; headline: string }>();
+        if (!pieceRow?.id) {
+          return new Response(JSON.stringify({ error: `No piece published on ${date}` }), {
+            status: 404, headers: corsHeaders(request),
+          });
+        }
+        const pieceId = pieceRow.id;
+        const title = pieceRow.headline;
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
         ctx.waitUntil(
-          director.analyseZitaPatternsScheduled({ date, title }).catch((err) => {
+          director.analyseZitaPatternsScheduled({ pieceId, date, title }).catch((err) => {
             const message = err instanceof Error ? err.message : 'Unknown error';
-            console.error(`[zita-synthesis-trigger] failed for ${date}:`, message);
+            console.error(`[zita-synthesis-trigger] failed for piece ${pieceId} (${date}):`, message);
           }),
         );
-        return new Response(JSON.stringify({ status: 'started', date, title }), {
+        return new Response(JSON.stringify({ status: 'started', date, pieceId, title }), {
           status: 202, headers: corsHeaders(request),
         });
       } catch (err) {

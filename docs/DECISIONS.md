@@ -2,6 +2,49 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 6 Zita synthesis timing + piece_id scoping
+
+**Context:** Phase 6 "downstream adaptation" from the plan. Scoped tightly to the items that break at the multi-per-day interval flip:
+
+- **Zita synthesis timing** — was an absolute clock target (01:45 UTC day+1) that would have stacked N pieces' synth jobs on one clock at multi-per-day AND given same-date afternoon pieces only a partial reader window. Fixed.
+- **Zita synthesis scoping** — `analyseZitaPatternsDaily(date)` queried `zita_messages WHERE piece_date = ?` and `daily_pieces WHERE date = ?`. At multi-per-day both pooled across pieces sharing a date. Fixed.
+- **Scanner / Curator** — audited and found **no change needed.** `getRecentDailyPieces(30)` already uses `WHERE date >= <30d-ago>` which includes today's pieces. Curator's prompt already says "avoid repetition" against that list. At multi-per-day, today's prior picks are already in the avoidance list — the concern from the original plan briefing turned out to already be handled. No code change.
+
+**Decisions:**
+
+**1. Zita synth fires at relative delay `publish + 23h45m` (= 85500s).** Was `Date.UTC(y, m, d+1, 1, 45)` absolute. Same ~24h window regardless of publish time. At multi-per-day, each piece's synth fires at its own publish+23h45m mark — N pieces → N independent alarm targets, no stacking. At the tightest cadence (1h), synths are separated by 1h each, well within the SDK's alarm queue behaviour.
+
+**2. `analyseZitaPatternsDaily(date)` → `analyseZitaPatternsDaily(pieceId, date)`.** piece_id primary; date retained for result-shape compatibility (the return value still carries `date` for observer event logging). `zita_messages` filter switches to `WHERE piece_id = ?` (column was 100% backfilled during Phase 1). `daily_pieces` filter switches to `WHERE id = ? LIMIT 1`.
+
+**3. Director's `analyseZitaPatternsScheduled` payload gains `pieceId`.** Threaded through from `triggerDailyPiece`'s captured piece_id (same variable that was added for the audio pipeline in Commit 2 of the multi-per-day blocker sequence).
+
+**4. Server's `/zita-synthesis-trigger` endpoint resolves `piece_id` from `?date=...`.** Same pattern as `/audio-retry` — admin UI still hits with date, endpoint looks up piece_id via `daily_pieces ORDER BY published_at DESC LIMIT 1`. At multi-per-day this picks the latest piece for that date, matching the "trigger the most recent" shape.
+
+**Why 85500s (23h45m) and not 86400s (24h).** Leaves a 15-minute margin before the next day's equivalent-slot pipeline would start. At interval_hours=24 (current prod), the 02:00 UTC cron fires the pipeline — synth at publish+23h45m lands at roughly 01:45-02:00 UTC day+1, before the next pipeline starts, mirroring the original absolute-clock intent. At multi-per-day (1h), synths are decoupled from the cron entirely — the 15-min margin doesn't matter, but the number stays the same so behaviour at 24h cadence is unchanged from the absolute-clock version.
+
+**Scanner/Curator audit (no change):** `getRecentDailyPieces(30)` at [`agents/src/director.ts`](../agents/src/director.ts) currently returns headlines from `daily_pieces WHERE date >= <since>` where `since` is 30 days back from now. At multi-per-day with piece A published at 02:00 UTC and Curator running at 06:00 UTC, A's row has `date = today` and matches the `>= <30-days-ago>` bound. Curator's prompt at [`agents/src/curator-prompt.ts`](../agents/src/curator-prompt.ts) labels this list "Already published in last 30 days (avoid repetition)" — the label is slightly misleading at multi-per-day (today IS in the list), but the substantive guidance ("avoid repetition") still applies correctly. Label rewording is Phase 7 cosmetic, not a correctness issue.
+
+**Touched files:**
+- [`agents/src/director.ts`](../agents/src/director.ts) — `triggerDailyPiece` zita schedule (relative delay + pieceId in payload); `analyseZitaPatternsScheduled` accepts pieceId.
+- [`agents/src/learner.ts`](../agents/src/learner.ts) — `analyseZitaPatternsDaily(pieceId, date)` signature + both SELECT updates.
+- [`agents/src/server.ts`](../agents/src/server.ts) — `/zita-synthesis-trigger` resolves pieceId from date before invoking Director.
+
+**Non-goals (deferred):**
+- **writeLearning piece_id extension** — new follow-up surfaced while scoping this. `writeLearning(db, category, observation, evidence, confidence, source, pieceDate)` writes `learnings.piece_date` but not `learnings.piece_id`. At multi-per-day the made-drawer's `WHERE piece_date = ?` query pools learnings across same-date pieces. Cross-cutting fix (4 callers: producer-synth, reflect, reader-learn, zita-synth). New FOLLOWUPS entry. Not bundled into this commit.
+- **"Days running" stat rename.** Cosmetic at multi-per-day. Phase 7.
+- **Observer dashboard grouping by piece_id.** UX polish. Phase 7.
+- **`scripts/reset-today.sh --piece-id` flag.** Operational tool. Phase 7.
+- **Zita synth run frequency at multi-per-day.** One synth per piece means 24 Claude calls/day at the tightest cadence vs 1/day today. Acceptable — each guarded by the ≥5 user-msgs threshold which most pieces will fail until reader traffic grows. If spend becomes a concern, revisit.
+
+**Verification:**
+- Agents TypeScript check clean on touched files. 18 pre-existing SubAgent DurableObjectStub errors in server.ts unchanged.
+- Next pipeline run schedules Zita synth at `publish + 85500s`. Observer event `Zita synthesis (metered)` fires at that offset, not at 01:45 UTC absolute.
+- At multi-per-day flip: two pieces on the same date get two independent synth alarms; Learner queries zita_messages by piece_id so each synthesis sees only its own piece's conversations.
+
+**References:** [agents/src/director.ts](../agents/src/director.ts), [agents/src/learner.ts](../agents/src/learner.ts), [agents/src/server.ts](../agents/src/server.ts), plan file `~/.claude/plans/could-please-do-a-harmonic-waffle.md` §6 Phase 6, DECISIONS 2026-04-21 "P1.5 Learner skeleton" (original absolute-clock rationale that this walks back for multi-per-day).
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 5 admin settings UI
 
 **Context:** Phase 5 of the cadence plan. With blockers #1 #2 #3 resolved (commits `ecedb87` + `900905d` + `30ddbdd`), flipping `interval_hours` below 24 is architecturally safe. Phase 5 ships the admin-facing knob.

@@ -399,22 +399,20 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // Unlike producer + self-reflection above (both fire at publish+1s
     // because they analyse signals complete at publish), Zita synthesis
     // needs a full day of reader traffic to accumulate against this
-    // piece. Schedule for 01:45 UTC on day+1, just before the next
-    // 02:00 UTC cron kicks the following day's pipeline — so we analyse
-    // a complete reader window without interfering with the next run.
-    // Guarded inside Learner by a ≥5 user-message threshold; if the
-    // piece got less traffic than that, the scheduled method logs a
-    // skipped info event and fires no Claude call.
-    // See DECISIONS 2026-04-21 "P1.5 Learner skeleton".
-    const nowUtc = new Date();
-    const zitaTarget = new Date(Date.UTC(
-      nowUtc.getUTCFullYear(),
-      nowUtc.getUTCMonth(),
-      nowUtc.getUTCDate() + 1,
-      1, 45, 0, 0,
-    ));
-    const zitaDelaySeconds = Math.max(60, Math.floor((zitaTarget.getTime() - nowUtc.getTime()) / 1000));
-    await this.schedule(zitaDelaySeconds, 'analyseZitaPatternsScheduled', {
+    // piece. Schedule as a RELATIVE delay of publish+23h45m — each
+    // piece gets its own synthesis window rather than stacking on an
+    // absolute clock target. Critical at multi-per-day: the old
+    // absolute-01:45-UTC-day+1 target would have queued N pieces'
+    // synthesis jobs on one clock, and same-date pieces published at
+    // 14:00 UTC would only get ~12h of reader window before firing.
+    // Relative delay gives every piece the same ~24h window regardless
+    // of publish time. Guarded inside Learner by a ≥5 user-message
+    // threshold; a piece with thin traffic logs a skipped info event
+    // and fires no Claude call. See DECISIONS 2026-04-21 "Zita
+    // synthesis timing — per-piece relative delay (Phase 6)".
+    const ZITA_SYNTHESIS_DELAY_SECONDS = 23 * 60 * 60 + 45 * 60; // 85500s
+    await this.schedule(ZITA_SYNTHESIS_DELAY_SECONDS, 'analyseZitaPatternsScheduled', {
+      pieceId,
       date: today,
       title: brief.headline,
     });
@@ -499,14 +497,15 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * visible over time.
    */
   async analyseZitaPatternsScheduled(payload: {
+    pieceId: string;
     date: string;
     title: string;
   }): Promise<void> {
-    const { date, title } = payload;
+    const { pieceId, date, title } = payload;
     const observer = await this.subAgent(ObserverAgent, 'observer');
     try {
       const learner = await this.subAgent(LearnerAgent, 'learner');
-      const result = await learner.analyseZitaPatternsDaily(date);
+      const result = await learner.analyseZitaPatternsDaily(pieceId, date);
       await observer
         .logZitaSynthesisMetered(date, title, result)
         .catch(() => { /* observer write failure never blocks */ });

@@ -22,6 +22,15 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 6 Zita synthesis timing + scoping (2026-04-21)
+Zita synthesis is now piece-scoped on both timing and input. Previous absolute clock target (01:45 UTC day+1) would have stacked N pieces' synth jobs on one clock at multi-per-day AND given same-date afternoon pieces a truncated reader window. Relative delay of `publish + 85500s` (23h45m) per piece gives every piece the same ~24h window regardless of publish time. Learner's SELECT switches from `WHERE piece_date = ?` to `WHERE piece_id = ?` to stop cross-piece pooling on shared dates.
+
+Scanner / Curator audited — **no change needed**. `getRecentDailyPieces(30)` already uses `WHERE date >= <30d-ago>` which includes today's pieces. Curator's prompt "avoid repetition" signal already covers today's prior picks at multi-per-day.
+
+Surfaced during scoping: **`writeLearning` doesn't persist `piece_id`** — made-drawer's per-piece "What the system learned" section pools across same-date pieces at multi-per-day. New FOLLOWUPS entry. Cross-cutting (4 writer callers); must land before flipping `interval_hours<24` for the drawer to display correctly.
+
+Other Phase 6 items deferred to Phase 7 (cosmetic): "days running" stat rename, observer dashboard grouping by piece_id, `reset-today.sh --piece-id` flag, Curator prompt label "Already published in last 30 days" (misleading at multi-per-day but substantively correct).
+
 ## Multi-piece cadence — Phase 5 admin settings UI (2026-04-21)
 Admin-gated dashboard surface for flipping `admin_settings.interval_hours` without a redeploy. With the 3 multi-per-day blockers resolved (commits `ecedb87` + `900905d` + `30ddbdd`), flipping to any allowed value is now architecturally safe.
 

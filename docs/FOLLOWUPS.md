@@ -57,6 +57,28 @@ All three deploy clean through CI. Admin UI for interval flip (Phase 5) unblocke
 
 ---
 
+## [open] 2026-04-21: `writeLearning` doesn't persist `piece_id` — made-drawer pools at multi-per-day
+
+**Surfaced:** 2026-04-21 during cadence Phase 6 (Zita synthesis timing + piece_id scoping) scoping. The Learner's synthesis path now scopes its INPUT by piece_id, but its OUTPUT writes via [`agents/src/shared/learnings.ts`](../agents/src/shared/learnings.ts) `writeLearning(...)` still only persists `piece_date`, not `piece_id`. At multi-per-day cadence, the made-drawer's per-piece "What the system learned" section ([`src/pages/api/daily/[date]/made.ts`](../src/pages/api/daily/[date]/made.ts) + [`src/interactive/made-drawer.ts`](../src/interactive/made-drawer.ts)) queries `WHERE piece_date = ?` — pools all same-date pieces' learnings into every piece's drawer.
+
+**Hypothesis:** `writeLearning` signature extended to `(db, category, observation, evidence, confidence, source, pieceDate, pieceId)`. All four callers updated to thread piece_id alongside the existing piece_date arg:
+
+1. `Learner.analysePiecePostPublish` — already takes pieceId since Phase 6 blocker #3. Pass it down.
+2. `Drafter.reflect` — Director's `reflectOnPieceScheduled` payload needs pieceId. Propagate.
+3. `Learner.analyseAndLearn` (reader-behaviour path) — needs pieceId derived from the engagement row's lesson_id. At multi-per-day the `lesson_id = daily/<date>` mapping breaks; decide between adding piece_id to engagement or deriving via a join.
+4. `Learner.analyseZitaPatternsDaily` — already takes pieceId since this commit. Pass it down.
+
+Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already receives date in the URL; look up piece_id via `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` (post-Phase-4 route passes slug too, which would disambiguate at multi-per-day — use slug to find the exact piece), then filter `learnings WHERE piece_id = ?`.
+
+**Investigation hints:**
+- Made-drawer URL at post-Phase-4 is `/daily/{date}/{slug}/` and the `<made-drawer>` component fetches `/api/daily/{date}/made`. The API still takes date only — will need to accept slug too for piece-id resolution at multi-per-day.
+- Drafter.reflect's call site at director.ts `reflectOnPieceScheduled` doesn't have pieceId in its current payload; scheduled from triggerDailyPiece which DOES have pieceId post-blocker-#2. Easy add.
+- Reader-learn path (`analyseAndLearn`) is harder — engagement rows are keyed by `lesson_id` which was designed pre-multi-per-day. May need its own FOLLOWUPS depending on how engagement tracking evolves.
+
+**Priority:** Medium. Not a blocker for multi-per-day flip itself (cadence switch works) but the per-piece drawer at multi-per-day shows wrong data until this lands. At `interval_hours=24` (current prod) the behaviour is correct because piece_date uniquely identifies a piece. So: required before flipping, not before shipping Phase 5/6 admin UI.
+
+---
+
 ## [open] 2026-04-21: `daily_candidates.selected` never flipped on historical runs
 
 **Surfaced:** 2026-04-21 during multi-piece cadence Phase 1 sizing audit. Prod `daily_candidates` has 250 rows across 5 dates (50/day, consistent with Scanner's `MAX_CANDIDATES_PER_DAY` cap) but **zero rows have `selected = 1`** — meaning no historical daily_candidates row maps back to the piece it became. Director's post-curation UPDATE at [director.ts:150-156](../agents/src/director.ts) is wrapped in `.run().catch(() => {})` which silently swallows any error.

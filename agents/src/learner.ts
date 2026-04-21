@@ -479,16 +479,21 @@ ${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
    * Non-retriable on failure (same posture as analysePiecePostPublish
    * and reflect): Director catches, logs via observer, moves on.
    */
-  async analyseZitaPatternsDaily(date: string): Promise<ZitaSynthesisResult> {
+  async analyseZitaPatternsDaily(pieceId: string, date: string): Promise<ZitaSynthesisResult> {
     const started = Date.now();
 
     // ── 1. Pull the conversations for this piece ─────────────────
+    // Scoped by piece_id (cadence Phase 6). `date` is retained on the
+    // signature for logging/return-value shape compatibility only —
+    // all D1 filters use piece_id to avoid cross-piece pooling at
+    // multi-per-day cadence. zita_messages.piece_id was backfilled
+    // 100% during cadence Phase 1 so every pre-Phase-1 row has it.
     const msgsRes = await this.env.DB
       .prepare(
         `SELECT user_id, role, content, created_at
-         FROM zita_messages WHERE piece_date = ? ORDER BY created_at ASC`,
+         FROM zita_messages WHERE piece_id = ? ORDER BY created_at ASC`,
       )
-      .bind(date)
+      .bind(pieceId)
       .all<{ user_id: string; role: 'user' | 'assistant'; content: string; created_at: number }>();
 
     const messages = msgsRes.results;
@@ -510,12 +515,14 @@ ${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
     }
 
     // ── 3. Pull piece metadata for the prompt's context block ────
+    // Piece-id keyed (cadence Phase 6) so at multi-per-day we pull THIS
+    // piece's metadata, not an arbitrary same-date row.
     const piece = await this.env.DB
       .prepare(
         `SELECT headline, underlying_subject
-         FROM daily_pieces WHERE date = ? LIMIT 1`,
+         FROM daily_pieces WHERE id = ? LIMIT 1`,
       )
-      .bind(date)
+      .bind(pieceId)
       .first<{ headline: string; underlying_subject: string | null }>();
 
     // ── 4. Build a compact, conversation-grouped context ─────────
