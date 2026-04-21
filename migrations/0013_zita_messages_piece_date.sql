@@ -1,0 +1,155 @@
+-- 0013_zita_messages_piece_date.sql
+--
+-- Add `piece_date` TEXT to `zita_messages` so a conversation can be
+-- scoped to the specific daily piece it was about. Required because
+-- every daily piece today mounts `<zita-chat course="daily" lesson="0">`
+-- (LessonLayout.astro:74-78), so all 92 pre-migration rows across
+-- multiple pieces pooled under the same (course_slug, lesson_number)
+-- key. One reader's 80 messages about QVC → Hormuz → tariffs all
+-- loaded into every new Claude call together; Zita coped by noticing
+-- ("we've been wandering through the whole lesson") but couldn't
+-- prevent it.
+--
+-- Nullable at schema level so this migration applies non-destructively
+-- to pre-existing rows. Application layer will enforce non-null going
+-- forward for `course_slug='daily'` requests (Commit B). Same defensive
+-- shape as `learnings.piece_date` (migration 0012).
+--
+-- Enables (Commit B):
+--   - Scoped history: `SELECT role, content FROM zita_messages
+--     WHERE user_id = ? AND course_slug = ? AND lesson_number = ?
+--       AND piece_date = ? ORDER BY created_at`
+--   - System-prompt can name the piece: "You are discussing the piece
+--     titled <title>, published <date>."
+--   - P1.5 synthesis (Phase 5): `analyseZitaPatternsDaily(date)` reads
+--     by piece_date.
+--   - Admin Zita view (Phase 3): group conversations by piece_date.
+
+ALTER TABLE zita_messages ADD COLUMN piece_date TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_zita_piece ON zita_messages(user_id, piece_date);
+
+-- ──────────────────────────────────────────────────────────────────
+-- ONE-TIME BACKFILL (run 2026-04-21) — preserved for historical record
+-- ──────────────────────────────────────────────────────────────────
+-- Pre-migration state: 92 rows, 3 users, all keyed (course='daily',
+-- lesson_number=0), spanning multiple pieces. Calendar-date equality
+-- (the 0012 pattern) does not work here: readers arrive at their own
+-- cadence, so created_at does not reliably match the piece's publish
+-- date. Mapping is by conversation content + created_at windows,
+-- hand-verified against the five pieces published so far:
+--
+--   2026-04-17 — QVC files for bankruptcy (business-model disruption)
+--   2026-04-18 — Hormuz 'open' during ceasefire (chokepoints)
+--   2026-04-19 — Airline jet fuel shakeup (commodity shocks)
+--   2026-04-20 — Hormuz shipping grinds to halt (chokepoints)
+--   2026-04-21 — Trump refunds $166bn in tariffs (tariff mechanics)
+--
+-- Per-user mapping (verified by reading /tmp/zita_messages.json dump
+-- on 2026-04-21, full 92 rows):
+--
+--   User 5bcf333c-a403-4f33-a47f-9ca15f9bae1d — 4 rows → 2026-04-19
+--     Content: "Will people's flights be cancelled" / "fuel prices
+--     spike" / "airlines hedge fuel costs". Direct match to airline
+--     jet fuel piece.
+--
+--   User a49d0295-db50-43cc-bce5-a8c3e976792d — 8 rows → 2026-04-20
+--     Content: "Strait of Hormuz isn't fragile because of engineering
+--     or geography. It's fragile because of geopolitics" / "21-mile
+--     passage" / chokepoint framing. Hormuz piece. 2026-04-20
+--     preferred over 2026-04-18 on timestamp proximity — the messages
+--     were written on 2026-04-20.
+--
+--   User fb906615-c162-4983-800f-4e2e62356936 — 80 rows, split into
+--     three segments by content + created_at boundaries:
+--
+--       Segment A (created_at < 1776500000000, 18 rows) → 2026-04-17
+--         Content: "vulnerability index went down" → QVC / cannibalize
+--         yourself / go online before Amazon kills the TV business.
+--         The QVC piece is the only business-disruption framing.
+--
+--       Segment B (1776500000000 ≤ created_at < 1776700000000, 20
+--         rows) → 2026-04-20
+--         Content: "chokpoints are rhe feature of optimisation" /
+--         "bug that looks like a feature" / Suez example / curiosity
+--         vs fear. Chokepoints is shared with 2026-04-18 but the
+--         reader's timestamp + the "bug/feature" framing lands on the
+--         2026-04-20 piece.
+--
+--       Segment C (created_at ≥ 1776700000000, 42 rows) → 2026-04-21
+--         Content: "Will consumers get their money back" / "four
+--         situations governments refund tariffs" / "$166 billion
+--         number in the title". Direct match to the tariff-refunds
+--         piece.
+--
+-- Boundaries (1776500000000, 1776700000000) chosen to fall in the
+-- multi-hour silent gaps between User C's conversation segments
+-- (A→B gap ≈55h, B→C gap ≈21h). Safe midpoints.
+--
+-- Running order — step 0 is the free-rollback snapshot. Run each block
+-- via `wrangler d1 execute zeemish --remote --command "..."`.
+--
+-- ─── Step 0: Snapshot (free rollback while we verify the mapping). ──
+-- CREATE TABLE zita_messages_backup_20260421 AS SELECT * FROM zita_messages;
+-- SELECT COUNT(*) FROM zita_messages_backup_20260421;  -- expect 92
+--
+-- ─── Step 1: Dry-run — see what we're about to UPDATE. ──────────────
+-- SELECT user_id, COUNT(*) AS rows, MIN(created_at) AS first_ms,
+--        MAX(created_at) AS last_ms
+-- FROM zita_messages WHERE piece_date IS NULL GROUP BY user_id
+-- ORDER BY rows DESC;
+--
+-- Expected output before backfill:
+--   fb906615… | 80 | 1776442897080 | 1776742581269
+--   a49d0295… |  8 | 1776523031315 | 1776523173452
+--   5bcf333c… |  4 | 1776602239718 | 1776602249375
+--
+-- ─── Step 2: Backfill UPDATEs. ──────────────────────────────────────
+-- UPDATE zita_messages SET piece_date = '2026-04-19'
+-- WHERE user_id = '5bcf333c-a403-4f33-a47f-9ca15f9bae1d'
+--   AND piece_date IS NULL;
+--
+-- UPDATE zita_messages SET piece_date = '2026-04-20'
+-- WHERE user_id = 'a49d0295-db50-43cc-bce5-a8c3e976792d'
+--   AND piece_date IS NULL;
+--
+-- UPDATE zita_messages SET piece_date = '2026-04-17'
+-- WHERE user_id = 'fb906615-c162-4983-800f-4e2e62356936'
+--   AND piece_date IS NULL
+--   AND created_at < 1776500000000;
+--
+-- UPDATE zita_messages SET piece_date = '2026-04-20'
+-- WHERE user_id = 'fb906615-c162-4983-800f-4e2e62356936'
+--   AND piece_date IS NULL
+--   AND created_at >= 1776500000000
+--   AND created_at <  1776700000000;
+--
+-- UPDATE zita_messages SET piece_date = '2026-04-21'
+-- WHERE user_id = 'fb906615-c162-4983-800f-4e2e62356936'
+--   AND piece_date IS NULL
+--   AND created_at >= 1776700000000;
+--
+-- ─── Step 3: Verify — no rows left un-backfilled, distribution sane. ─
+-- SELECT piece_date, COUNT(*) AS rows FROM zita_messages
+-- GROUP BY piece_date ORDER BY piece_date;
+--
+-- Expected output after backfill:
+--   2026-04-17 | 18    (User C Segment A)
+--   2026-04-19 |  4    (User A)
+--   2026-04-20 | 28    (User B + User C Segment B)
+--   2026-04-21 | 42    (User C Segment C)
+--   Total: 92 — matches snapshot, zero NULLs.
+--
+-- SELECT COUNT(*) FROM zita_messages WHERE piece_date IS NULL;
+-- -- expect 0
+--
+-- ─── Rollback (only if Step 2 distribution is wrong). ───────────────
+-- DELETE FROM zita_messages;
+-- INSERT INTO zita_messages SELECT * FROM zita_messages_backup_20260421;
+-- -- Then re-inspect the dump and revise the mapping above.
+--
+-- ─── Retention: drop the backup table on or after 2026-04-28. ───────
+-- FOLLOWUPS entry queued: "[open] 2026-04-21: Drop
+-- zita_messages_backup_20260421 snapshot". Once Commit B has been live
+-- for a week and the per-piece distribution above is confirmed stable:
+--   DROP TABLE zita_messages_backup_20260421;

@@ -2,6 +2,27 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Scope `zita_messages` by piece_date (migration 0013 Commit A)
+
+**Context:** Direct query of `zita_messages` on 2026-04-21 returned 92 rows from 3 users across 5 different daily pieces, all keyed under the same `(course_slug='daily', lesson_number=0)` — because [`LessonLayout.astro:74-78`](../src/layouts/LessonLayout.astro) hardcodes those attributes on `<zita-chat>` for every piece. One reader (User fb906615) had 80 messages spanning QVC → Hormuz → tariffs, all of which loaded into every new Claude call as conversation history. Zita coped verbally ("we've been wandering through the whole lesson") but couldn't prevent cross-piece history contamination or cost creep, and had no way to tell the reader which piece they were on.
+
+**Decision:** Add `zita_messages.piece_date TEXT` (nullable at schema level) + composite index `idx_zita_piece(user_id, piece_date)`. Matches the shape of the `learnings.piece_date` column added in migration 0012 — both are hand-backfilled with a one-time commented UPDATE block inside the migration file, both nullable at schema level so the ALTER applies non-destructively, both enforced non-null at the application layer going forward. This is Commit A of a two-commit Phase 1: schema-only now, code changes (LessonLayout pass-through, request-body field, scoped history SELECT, scoped INSERTs, system-prompt line naming the piece) in Commit B after the migration is applied and verified.
+
+**Two-commit split because:** the 0012 rollout (resolved FOLLOWUPS "D1 migration tracker out of sync") burned an evening recovering from `d1_migrations` drift when code + schema landed together. Separating the commits means: (a) schema change lands, is applied, column existence is verified with a `PRAGMA table_info` query, *then* code starts reading/writing the new column. No "code deployed but column missing" or "column added but code still writing NULL" race window.
+
+**Backfill by content, not by calendar date.** Migration 0012 used `date(created_at/1000, 'unixepoch') = 'YYYY-MM-DD'` to match learnings rows to pieces — works because Learner + Drafter-reflection run within seconds of publish, same calendar day. For Zita messages that pattern fails: readers arrive on their own cadence, and User 5bcf333c's entire conversation about airline jet fuel (2026-04-19 piece) happened on 2026-04-20. Every row was hand-mapped by reading content against the five pieces' headlines. User fb906615 split into three segments by created_at boundaries chosen to fall inside the 55-hour and 21-hour silent gaps between their QVC / Hormuz / tariffs reading sessions. Full mapping, including per-user evidence, lives in [`migrations/0013_zita_messages_piece_date.sql`](../migrations/0013_zita_messages_piece_date.sql) as commented UPDATEs.
+
+**Snapshot before UPDATE.** `CREATE TABLE zita_messages_backup_20260421 AS SELECT * FROM zita_messages;` runs as Step 0 of the backfill — 92-row free rollback, one line, zero downside. Queued for drop on or after 2026-04-28 in FOLLOWUPS once Commit B has been live for a week. Rollback path (if Step 3 distribution is wrong): `DELETE FROM zita_messages; INSERT INTO zita_messages SELECT * FROM zita_messages_backup_20260421;` then revise the mapping.
+
+**Non-goals:**
+- No change to the Zita system prompt in this commit. Prompt change ("You are discussing the piece titled …, published …") lives in Commit B, because it reads `piece_date` at request time.
+- No deletion of legacy lesson-course conversations. `course_slug='lessons'` rows (if any future path re-enables them) will continue to work with `piece_date=NULL`.
+- No backfill of `zita_messages_backup_*` snapshots retroactively for past migrations — this is a one-off safety net for the hand-mapped backfill.
+
+**References:** [migrations/0013_zita_messages_piece_date.sql](../migrations/0013_zita_messages_piece_date.sql), [docs/SCHEMA.md](SCHEMA.md) (zita_messages section + migrations summary), [docs/FOLLOWUPS.md](FOLLOWUPS.md) ("[open] 2026-04-21: Drop `zita_messages_backup_20260421` snapshot"). Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md`.
+
+---
+
 ## 2026-04-20: Drop StructureEditor's writeLearning calls
 
 **Context:** FOLLOWUPS 2026-04-20 "StructureEditor writes violation-shaped observations into learnings, not forward-going lessons" flagged that the 2026-04-17 per-piece drawer surfaces raw audit diagnostics ("Hook exceeds one screen - it's two full paragraphs with ~120 words") next to lesson-shaped prose from Learner and Drafter-reflection. The FOLLOWUPS framed two options — (1) retune SE's prompt to emit lesson-shaped prose, or (2) drop SE's writeLearning calls entirely since Learner.analysePiecePostPublish covers the ground from the same source data.

@@ -61,8 +61,9 @@ Conversation history for the Zita learning guide.
 | role | TEXT | "user" or "assistant" |
 | content | TEXT | Message text |
 | created_at | INTEGER | |
+| piece_date | TEXT | YYYY-MM-DD of the `daily_pieces` row this conversation is about. Nullable at schema level so migration 0013 applied non-destructively to 92 pre-existing rows (backfilled via commented one-time UPDATEs in the migration file). Application layer (Commit B of Phase 1) enforces non-null for `course_slug='daily'` requests; lessons-course path still works with piece_date=null. Indexed via `idx_zita_piece(user_id, piece_date)`. Primary read paths: scoped history load in `/api/zita/chat`, per-piece admin view, P1.5 synthesis by piece. |
 
-Migration: `0001_init.sql`
+Migrations: `0001_init.sql` (initial), `0013_zita_messages_piece_date.sql` (added `piece_date`).
 
 ## Agent-side tables
 
@@ -226,7 +227,7 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 
 Migration: `0007_pipeline_log.sql`
 
-## Migrations summary (11 migrations, 13 tables)
+## Migrations summary (13 migrations, 13 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -239,3 +240,4 @@ Migration: `0007_pipeline_log.sql`
 - `0010_audio_pipeline.sql` — created `daily_piece_audio` (per-beat audio rows) + added `daily_pieces.has_audio` boolean. Un-paused the audio pipeline.
 - `0011_learnings_source.sql` — added `learnings.source` (reader/producer/self-reflection/zita, nullable TEXT, no CHECK) + `idx_learnings_source`. Plumbing for P1.3 — widens the Learner from reader-only to all-signal.
 - `0012_learnings_piece_date.sql` — added `learnings.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer) + `idx_learnings_piece_date`. Enables the per-piece "What the system learned" section of the How-this-was-made drawer. Backfill for pre-migration rows is included as a commented one-time UPDATE inside the migration file (not auto-applied); mapping works via nearest-timestamp join of `learnings.created_at` to `daily_pieces.published_at`, restricted to producer/self-reflection sources.
+- `0013_zita_messages_piece_date.sql` — added `zita_messages.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer for `course_slug='daily'`) + composite `idx_zita_piece(user_id, piece_date)`. Fixes the data-model bug where every daily piece mounted `<zita-chat course="daily" lesson="0">` and pooled all pieces' conversations under one key. Backfill for the 92 pre-migration rows is a commented one-time block inside the migration file, mapped by hand from conversation content + created_at windows against the five pieces 2026-04-17 through 2026-04-21. Includes a snapshot step (`zita_messages_backup_20260421`) run before any UPDATE — rollback is `DELETE + INSERT SELECT` from the backup. Backup table queued for drop on or after 2026-04-28 via FOLLOWUPS.

@@ -13,6 +13,21 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-21: Drop `zita_messages_backup_20260421` snapshot
+
+**Surfaced:** 2026-04-21 alongside migration 0013 Commit A. The 92-row snapshot was created as a free-rollback safety net while verifying the hand-mapped content-based backfill of `zita_messages.piece_date`. Should be dropped on or after **2026-04-28** once Phase 1 Commit B has been live for a week and the per-piece distribution (`SELECT piece_date, COUNT(*) FROM zita_messages GROUP BY piece_date`) has remained stable through at least one full daily cycle with new writes.
+
+**Hypothesis:** None — this is housekeeping, not a bug. The retention window is to give us one admin Zita view session (Phase 3) against real data, during which a bad mapping would become visible in grouping before it ages out of easy correction.
+
+**Investigation hints:**
+- Before dropping: re-run the verification SELECT from migration 0013 Step 3 and compare against the expected distribution documented in the migration file.
+- Drop command: `DROP TABLE zita_messages_backup_20260421;` via `wrangler d1 execute zeemish --remote --command`.
+- Close with a DECISIONS entry on the drop date naming the SHA that dropped it.
+
+**Priority:** Low. One-line operational task, no downstream dependency.
+
+---
+
 ## [open] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path
 
 **Surfaced:** 2026-04-19 during retro audio generation for 2026-04-17. Admin "Continue" retry button (after a mid-pipeline silent stall at 4/8 beats) produced two `audio-publishing done` events in observer_events: 543651b (first, correct) and 02882fd (second, corrupted). The second commit deleted the audioBeats map and collapsed `qualityFlag: "low"\n---\n` onto a single line `qualityFlag: "low"---`.
