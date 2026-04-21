@@ -234,22 +234,52 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
   occasional signal; `zita_handler_error` warrants investigation.
 
 ## Zita operations
-- **Admin view of reader chats:** `/dashboard/admin/zita/` (ADMIN_EMAIL only) — 30-day window, conversations grouped by reader × piece, expandable transcripts. Per-piece "Questions from readers" section lives on `/dashboard/admin/piece/[date]/` for per-piece context.
-- **Manual P1.5 trigger (test synthesis before the 24-hour alarm fires):**
-  ```bash
-  curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/zita-synthesis-trigger?date=2026-04-20" \
-    -H "Authorization: Bearer YOUR_ADMIN_SECRET"
-  # Returns 202 {"status":"started","date":"2026-04-20","title":"…"}.
-  # Work runs in ctx.waitUntil — observer_event lands within ~10s on
-  # success (logZitaSynthesisMetered), a few seconds on the skip path.
-  # The ≥5 user-message guard still applies — below threshold fires a
-  # "Zita synthesis skipped: …" observer info event + zero Claude cost.
-  ```
-- **Inspect what Zita synthesis produced:** query `learnings` for a specific piece:
-  ```bash
-  wrangler d1 execute zeemish --remote --command="SELECT source, category, observation FROM learnings WHERE piece_date = '2026-04-21' AND source = 'zita'"
-  ```
-- **Cost metering:** every synthesis run — skipped or success — writes a `logZitaSynthesisMetered` observer event with `{tokensIn, tokensOut, durationMs}`. Watch drift there before it matters.
+
+### How the synthesis fires (automatic is the default)
+The P1.5 synthesis runs **automatically**, you don't need to do anything:
+
+- Every day a new piece publishes at 02:00 UTC. That same run schedules a synthesis for 01:45 UTC **on the next day**, targeting **today's piece**. The 23h45m gap lets a full day of reader traffic accumulate before the synthesis looks at the chats.
+- If the piece got ≥5 reader messages, the synthesis runs, writes up to 10 `source='zita'` rows into `learnings`, and those rows flow into the next Drafter prompt via `getRecentLearnings(10)`.
+- If it got fewer than 5, the synthesis skips silently (one `info` observer event, zero Claude cost).
+- Failures are non-retriable: one `warn` observer event ("Zita synthesis missed: …"), and the loop moves on. The piece is already live and permanent — a missed batch of learnings is recoverable via manual trigger.
+
+The **Run synthesis** button on `/dashboard/admin/piece/[date]/` is there for the recovery case (a scheduled run failed and you want to retry) and the testing case (verify the synthesis works against an older piece). Under normal operation you never need it.
+
+### Admin surfaces
+- **Reader chats:** `/dashboard/admin/zita/` (ADMIN_EMAIL only) — 30-day window, conversations grouped by reader × piece, expandable transcripts.
+- **Per-piece chats:** `/dashboard/admin/piece/[date]/` → "Questions from readers" section.
+- **Run synthesis button:** on the same per-piece page, next to the "Questions from readers" header. Uses your admin session, no secret to type.
+
+### Manual trigger via curl (if you prefer)
+```bash
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/zita-synthesis-trigger?date=2026-04-20" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+# Returns 202 {"status":"started","date":"2026-04-20","title":"…"}.
+# Observer event lands within ~10s on success (logZitaSynthesisMetered),
+# a few seconds on the skip path.
+```
+
+### Inspect what synthesis produced
+```bash
+wrangler d1 execute zeemish --remote --command="SELECT source, category, observation FROM learnings WHERE piece_date = '2026-04-20' AND source = 'zita'"
+```
+
+### Cost metering
+Every synthesis run — skipped or success — writes a `logZitaSynthesisMetered` observer event with `{tokensIn, tokensOut, durationMs}`. First real run (2026-04-21, against the 2026-04-20 Hormuz piece): 1,636 in / 368 out / 10.7s / 5 learnings written. ~$0.01 at current Sonnet 4.5 prices. Watch drift there before it matters.
+
+### Limits & knobs (all code-level constants, single-file edits)
+
+| Knob | Value | Where | Purpose |
+|---|---|---|---|
+| Max reader message length | 2,000 chars | [`src/pages/api/zita/chat.ts`](../src/pages/api/zita/chat.ts) input guard | Stops paste-bomb abuse |
+| Reader rate limit | 20 msgs / 15 min / user | same file, `checkRateLimit(…, 20, 900)` | Stops runaway clients; 429 fires `zita_rate_limited` observer event |
+| Per-turn history sent to Claude | Last 40 messages | `ZITA_HISTORY_LIMIT` | Bounds per-turn cost; clipping logs `zita_history_truncated` |
+| Max stored content length | 4,000 chars | `ZITA_STORED_CONTENT_CAP` | Hard ceiling on what lands in `zita_messages.content` — appends `[…truncated]` marker if hit |
+| Synthesis minimum threshold | 5 reader messages per piece | `ZITA_SYNTHESIS_MIN_USER_MESSAGES` in [`agents/src/learner.ts`](../agents/src/learner.ts) | Below this, synthesis skips without calling Claude |
+| Synthesis write cap | 10 learnings per run | `ZITA_LEARNINGS_WRITE_CAP` | If Claude produces more, overflow is logged via observer |
+| Synthesis schedule | 01:45 UTC on day+1 | [`agents/src/director.ts`](../agents/src/director.ts) `triggerDailyPiece` | Just before next 02:00 UTC pipeline; gives readers a full day to chat |
+| Claude model + max_tokens | Sonnet 4.5, 300 per turn | chat.ts | Short replies enforced at the API level |
+| Synthesis max_tokens | 2,000 | `learner.ts` synthesis call | Enough for 10 learnings |
 
 ## Dashboard API endpoints (site worker)
 ```bash
