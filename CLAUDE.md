@@ -22,6 +22,25 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 1 identity foundations (2026-04-21)
+Start of a new plan (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`). Goal: admin-configurable publishing cadence — testing at 1 piece every 4 hours (6/day), production at 1 piece every 1 hour (24/day). Currently 1/day is baked in as both schema and semantics across ~50 sites.
+
+Phase 1 shipped identity foundations only — zero runtime behaviour change. The work unblocks everything downstream (Phases 2–7) by ensuring no table's keys collide at multi-per-day.
+
+**Key architectural finding:** `daily_pieces.id` is already a UUID (via `crypto.randomUUID()` at [director.ts:286](agents/src/director.ts)). piece_id doesn't need a new column on the parent table — `id` IS piece_id. Child tables (audit_results, learnings, zita_messages, daily_candidates) each got a nullable `piece_id TEXT` FK. `pipeline_log.run_id` stays TEXT but its values migrated from `YYYY-MM-DD` to piece_id UUIDs for the 5 historical runs. `daily_piece_audio` got a PK rebuild — old `(date, beat_name)` → new `(piece_id, beat_name)` — via snapshot → new table → copy → drop → rename dance in one atomic migration.
+
+Two migrations shipped:
+- [migrations/0014_piece_id_fks.sql](migrations/0014_piece_id_fks.sql) — additive ALTERs on 4 child tables + commented backfill UPDATEs (run manually via wrangler). pipeline_log.run_id backfill lives here too as commented UPDATEs.
+- [migrations/0015_daily_piece_audio_piece_id_pk.sql](migrations/0015_daily_piece_audio_piece_id_pk.sql) — auto-applied PK rebuild with `daily_piece_audio_backup_20260421` snapshot as safety net.
+
+**Verified remote (2026-04-21):** 100% piece_id coverage across all 4 child tables (3 + 27 + 92 + 32 rows). pipeline_log has 5 UUID run_ids matching daily_pieces.id with step counts preserved (31/23/19/19/19 = 111). Two snapshot tables held for 7-day rollback (`daily_piece_audio_backup_20260421` 32 rows, `pipeline_log_backup_20260421` 111 rows) — drops queued in FOLLOWUPS for 2026-04-28.
+
+**Ten architectural decisions** (URL nesting `/daily/YYYY-MM-DD/slug/` with no 301 redirect, piece_id = daily_pieces.id, run_id = piece_id, hourly cron + runtime gate anchored to hour 2 UTC with divisors-of-24 constraint, most-recent hero by published_at, flat library, publish+23h45m per-piece Zita synthesis, 6/50 feeds at 4/day, keep "daily" copy, D1 admin_settings table) recorded in DECISIONS 2026-04-21 "Multi-piece cadence — Phase 1 identity foundations".
+
+**Deferred to later phases:** admin_settings table (Phase 2), hourly cron + gate + multi-per-day code paths (Phase 3), URL routing + slug column + frontmatter updates (Phase 4), admin UI (Phase 5), Zita synthesis re-scoping + Scanner/Curator retune (Phase 6), copy + docs (Phase 7).
+
+**Investigation parked:** `daily_candidates.selected` never set on historical runs (250 rows, 0 with selected=1). See FOLLOWUPS.
+
 ## Zita scoped by piece_date (2026-04-21)
 Phase 1 of the Zita improvement plan. Live query on 2026-04-21 showed 92 `zita_messages` rows from 3 users pooled under the same `(course='daily', lesson_number=0)` key because [`LessonLayout.astro`](src/layouts/LessonLayout.astro) hardcodes those attributes for every daily piece. One reader's 80-message session spanned QVC → Hormuz → tariffs, all loading into every new Claude call together. Fixed in two commits.
 
@@ -160,7 +179,7 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 13 tables, 11 migrations)
+### Database (D1 — 13 tables, 15 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log

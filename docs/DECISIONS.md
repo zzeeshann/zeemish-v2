@@ -2,6 +2,76 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 1 identity foundations
+
+**Context:** The site currently publishes 1 piece/day at 02:00 UTC — baked in as both schema and semantics at ~50 sites across the codebase. The goal is admin-configurable cadence: testing at 1 piece every 4 hours (6/day), production at 1 piece every 1 hour (24/day). Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md`. This entry records the 10 architectural decisions that unblock the rest of the cadence plan, plus the Phase 1 schema work that makes multi-per-day non-colliding without changing any runtime behaviour yet.
+
+**The 10 decisions (plan §5):**
+
+1. **URL structure: `/daily/YYYY-MM-DD/slug/`** (nested). The alternative flat `/daily/YYYY-MM-DD-HHmm-slug/` put a timestamp in the URL with no reader value; the UUID option was unshareable; the sequence-number option had no meaning for readers. Nested is clean, shareable, and groups naturally by day.
+2. **Unique identifier: `piece_id` = `daily_pieces.id` (existing UUID).** Audit on 2026-04-21 confirmed all 5 prod rows are UUIDs generated via `crypto.randomUUID()` at [director.ts:286](../agents/src/director.ts#L286). Adding a separate `piece_id` column would have been duplication. The `date` column stays alongside `id` as the calendar/display key.
+3. **`run_id` shape: `run_id = piece_id`.** Literally the same value — `pipeline_log.run_id` holds the piece's UUID, not a calendar date. Joins to `daily_pieces.id` directly without translation.
+4. **Scheduling: hourly cron (`0 * * * *`) + runtime gate** on `admin_settings.interval_hours`. Anchor the fire slot to hour 2 UTC so the current 02:00 ritual is preserved at any interval: `if ((hour - 2 + 24) % intervalHours !== 0) skip;`. Interval choices constrained to divisors of 24 — {1, 2, 3, 4, 6, 8, 12, 24} — so the rhythm repeats each day cleanly. Non-divisors would create drift across days. Dynamic cron re-scheduling (Option C in the plan) rejected due to the cancel-from-onStart hazard documented at [director.ts:46-55](../agents/src/director.ts#L46-L55); static crons rejected because they require a redeploy per interval change.
+5. **Homepage hero: most-recent by `published_at DESC`.** Tiebreaker required because multiple pieces can share a `date`. Preserves the factory-floor aesthetic (the page responds to the pipeline) over an admin-pinned hero.
+6. **Library: flat newest-first (current shape).** Grouping by day with date headers becomes necessary around 6-8 pieces/day; not designing for 24/day yet. Same `published_at DESC` tiebreaker.
+7. **Zita synthesis: `publish + 23h45m`** relative delay per piece, plus `zita_messages.piece_id` column added this phase (not deferred). Absolute 01:45 UTC day+1 breaks when N pieces publish per day (all N synth jobs stack on one clock). Piece-id scoping is the same fix as the Phase 1 Zita plan's piece_date addition, one level deeper — at multi-per-day the `piece_date` column pools conversations from different pieces sharing a date.
+8. **Scanner/Curator: 6 feeds / 50 cap sufficient at 4/day, revisit at 24/day.** Sequential Curator (re-use existing code, one pick per run); a run that finds no teachable story is a valid no-op, not a failure. Add: pass **today's prior picks** into Curator's `recentPieces` input so it doesn't re-select. Today's traffic at 4/day lands ~60-80 candidates per day after URL dedup; 24/day pushes the selection rate to ~16% and may need more feeds.
+9. **Copy: keep "daily".** Refers to reader rhythm, not publish rate. Readers can still have a daily read even when the system publishes 24×/day.
+10. **Config home: D1 `admin_settings` table + `/api/dashboard/admin/settings` endpoint.** Env-var alternative would mean a redeploy per cadence change — friction this plan cannot afford while testing. Every admin mutation fires an `admin_settings_changed` observer_event (audit trail).
+
+**Refinement 1 — no 301 redirect for old `/daily/YYYY-MM-DD/` URLs.** Per Zishan 2026-04-21: dev phase, 5 pieces, no bookmarks. Old URLs stop existing when Phase 4 ships; no redirect layer.
+
+**Refinement 3 — `zita_messages` gets `piece_id` in Phase 1, not deferred.** Same argument as the decision text above for #7.
+
+**Why piece_id and not a new column like `piece_uuid`.** Every INSERT path in the agents worker already calls `crypto.randomUUID()` for the daily_pieces.id. Six existing writer sites ([director.ts](../agents/src/director.ts), [observer.ts](../agents/src/observer.ts), [scanner.ts](../agents/src/scanner.ts), [shared/learnings.ts](../agents/src/shared/learnings.ts)) generate UUIDs today. The PK on daily_pieces is `id TEXT PRIMARY KEY`, already unique, already stable. Introducing a parallel `piece_id TEXT UNIQUE` would have forced every query and every writer to choose between two equivalent keys. Reuse is the simpler, less-error-prone choice — at the small cost that the semantic name "piece_id" now lives in application-code comments and child-table FK column names, not on the parent table.
+
+**Phase 1 shipping artifacts (this commit):**
+- [migrations/0014_piece_id_fks.sql](../migrations/0014_piece_id_fks.sql) — add nullable `piece_id TEXT` column + index to `audit_results`, `learnings`, `zita_messages`, `daily_candidates`. Auto-applied ALTERs; backfill UPDATEs commented for manual `wrangler d1 execute` runs. Includes `pipeline_log.run_id` backfill (no schema change, just `UPDATE run_id = daily_pieces.id WHERE run_id = daily_pieces.date`).
+- [migrations/0015_daily_piece_audio_piece_id_pk.sql](../migrations/0015_daily_piece_audio_piece_id_pk.sql) — PK rebuild. Old table's composite PK `(date, beat_name)` cannot tolerate multi-per-day. Snapshot-first (`daily_piece_audio_backup_20260421`, same pattern as Zita Phase 1's `zita_messages_backup_20260421`), create new table with PK `(piece_id, beat_name)`, copy rows joining piece_id via `daily_pieces.date`, drop old, rename new. Auto-applied. 32 rows across 5 dates — snapshot is free insurance.
+- This DECISIONS entry.
+- No code changes in Phase 1. Director, auditors, Publisher all keep passing `date` as today. After the backfill lands, every historical row has piece_id, and Phase 2 / Phase 3 start writing piece_id on new rows without breaking existing callers.
+
+**Hazards addressed:**
+- **Cancel-from-onStart swallow** — Option A (hourly cron + gate) picked for decision #4 so onStart never re-schedules; the cron stays `0 * * * *` regardless of admin-settings value.
+- **Zita synthesis absolute-clock collision** — decision #7 uses per-piece relative delay so N pieces generate N independent synthesis targets.
+- **run_id collision at multi-per-day** — decision #3 + migration 0014's run_id backfill eliminates it before Phase 3 starts writing multi-per-day.
+- **Audio PK collision at multi-per-day** — migration 0015 rebuilds the PK before Phase 3.
+
+**Deferred to later phases:**
+- **Phase 2:** `admin_settings` table + Director reads config (no UI yet).
+- **Phase 3:** cron switches from `0 2 * * *` to `0 * * * *` + runtime gate + multi-per-day dedup. Adds a new slug column to `daily_pieces` at this point since the URL change needs it.
+- **Phase 4:** URL routing `/daily/[date]/[slug]/`, homepage + library tiebreaker, per-piece admin route shift, content-collection filename + frontmatter convention.
+- **Phase 5:** Admin settings UI.
+- **Phase 6:** Zita synthesis re-scoping to piece_id (uses the column added in Phase 1), Scanner/Curator retune, "days running" rename, reset-today flag.
+- **Phase 7:** Copy + docs.
+
+**Non-goals for Phase 1 (explicit):**
+- No schema change to `pipeline_log` (the `run_id` column stays TEXT; only the values migrate).
+- No 301 redirect layer for old URLs (decision above).
+- No `piece_id` backfill for `daily_candidates` — prod has 250 rows across 5 dates with **zero `selected=1`** (historical data-flow quirk where the post-curator UPDATE apparently didn't land; separate investigation). New runs write piece_id going forward.
+- No frontmatter edits to the 5 existing MDX files in this phase. Phase 4's URL work may add slug/publishedAt fields — metadata carve-out applies then, not now.
+- No new `admin_settings` table in this phase — Phase 2.
+
+**Verified (pre-apply):**
+- `daily_pieces.id` values for all 5 prod rows match the UUID v4 shape (verified via direct D1 query 2026-04-21).
+- `daily_piece_audio` rows: 32 total (8+6+6+6+6) across 5 dates, 1:1 with daily_pieces.
+- `learnings` rows: 22 across 3 piece_dates — every row's `piece_date` has a matching `daily_pieces.date`.
+- `zita_messages` rows: 92 across 4 piece_dates — all from the 2026-04-21 Phase 1 backfill; every piece_date has a matching daily_pieces row.
+- `pipeline_log` rows: 111 across 5 run_ids (`'2026-04-17'` … `'2026-04-21'`) — every run_id maps to exactly one daily_pieces row via date.
+- `audit_results` rows: 3, all from 2026-04-21 — unambiguous backfill target.
+
+**Post-apply verification (run before declaring Phase 1 done):**
+- `PRAGMA table_info(audit_results)` / `learnings` / `zita_messages` / `daily_candidates` — all show `piece_id TEXT` column present.
+- `SELECT COUNT(*) FROM daily_piece_audio WHERE piece_id IS NULL` — expect 0.
+- `SELECT COUNT(*) FROM learnings WHERE piece_id IS NULL AND piece_date IS NOT NULL` — expect 0 after manual backfill.
+- `SELECT COUNT(*) FROM zita_messages WHERE piece_id IS NULL AND piece_date IS NOT NULL` — expect 0 after manual backfill.
+- `SELECT run_id, COUNT(*) FROM pipeline_log GROUP BY run_id` — expect 5 UUID run_ids, each matching `daily_pieces.id`.
+- `SELECT COUNT(*) FROM daily_piece_audio_backup_20260421` — expect 32.
+
+**References:** [migrations/0014_piece_id_fks.sql](../migrations/0014_piece_id_fks.sql), [migrations/0015_daily_piece_audio_piece_id_pk.sql](../migrations/0015_daily_piece_audio_piece_id_pk.sql), [agents/src/director.ts](../agents/src/director.ts) (id generation + run_id write), plan file `~/.claude/plans/could-please-do-a-harmonic-waffle.md`.
+
+---
+
 ## 2026-04-21: Dashboard "latest observation" label uses piece_date, not created_at
 
 **Context:** Surfaced the moment the first real `source='zita'` learning landed on prod. The public dashboard ([`/dashboard/`](../src/pages/dashboard/index.astro)) shows the most recent observation under "What we've learned so far" with an attribution line: *"— {source label}, after the {date} piece."* The date was derived from `learnings.created_at.toISOString().slice(0, 10)`. For producer and self-reflection sources this is correct because those writers fire seconds after publish — `created_at` and `piece_date` match. For Zita-source rows they diverge: synthesis runs at 01:45 UTC on day+1, so the row is written a calendar day after the piece it's about. Right after the first real Zita synthesis, the dashboard attributed a learning about 2026-04-20's Hormuz piece to "the 2026-04-21 piece" — the date the row was written, not the piece it was about.

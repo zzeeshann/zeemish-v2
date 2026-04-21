@@ -13,6 +13,54 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-21: `daily_candidates.selected` never flipped on historical runs
+
+**Surfaced:** 2026-04-21 during multi-piece cadence Phase 1 sizing audit. Prod `daily_candidates` has 250 rows across 5 dates (50/day, consistent with Scanner's `MAX_CANDIDATES_PER_DAY` cap) but **zero rows have `selected = 1`** — meaning no historical daily_candidates row maps back to the piece it became. Director's post-curation UPDATE at [director.ts:150-156](../agents/src/director.ts) is wrapped in `.run().catch(() => {})` which silently swallows any error.
+
+**Hypothesis:** Three candidates:
+1. `curatorResult.selectedCandidateId` is falsy in the returned shape, so the UPDATE is skipped by the truthy guard (`if (curatorResult.selectedCandidateId)`). Would be visible in the admin Director logs if the selected id was empty.
+2. The id string shape mismatches between Scanner's write (`agents/src/scanner.ts:120` uses `crypto.randomUUID()`) and Curator's return. Curator's prompt may be returning a truncated or different-shape identifier.
+3. The UPDATE runs but throws — `.catch(() => {})` swallows with no observer event, so it's invisible in the admin feed.
+
+**Investigation hints:**
+- Pull the most recent Curator output from admin dashboard (task-level data) and compare `selectedCandidateId` returned vs the IDs in `daily_candidates` for that date.
+- Temporarily replace the `.catch(() => {})` with a `.catch(err => observer.logError(...))` to expose silent failures.
+- Matters for Phase 3: with piece_id FKs in place, Director should set `daily_candidates.piece_id` and `selected=1` atomically for the winning candidate. Won't help if the current code path never fires the UPDATE.
+
+**Priority:** Medium. Non-blocking for Phase 1 (piece_id column added nullable), but Phase 3's admin observability depends on being able to trace "which candidate became which piece." Investigate alongside or before Phase 3.
+
+---
+
+## [open] 2026-04-21: Drop `daily_piece_audio_backup_20260421` snapshot
+
+**Surfaced:** 2026-04-21 alongside migration 0015 (multi-piece cadence Phase 1). The 32-row snapshot was created as a free-rollback safety net for the daily_piece_audio PK rebuild. Should be dropped on or after **2026-04-28** once Phase 3 has been live for a week and queries against the new `(piece_id, beat_name)` PK have been exercised by at least one real multi-per-day run.
+
+**Hypothesis:** None — housekeeping, not a bug. Retention window gives us time to detect any row-shape regressions in the new table that manual verification missed. Small (32 rows) so cost of keeping it a few extra days is nothing.
+
+**Investigation hints:**
+- Before dropping: re-run the verification query from migration 0015 (`SELECT piece_id, COUNT(*) FROM daily_piece_audio GROUP BY piece_id ORDER BY piece_id`) and confirm the 5 piece_id groups match the snapshot's 8+6+6+6+6 distribution.
+- Drop command: `DROP TABLE daily_piece_audio_backup_20260421;` via `wrangler d1 execute zeemish --remote --command`.
+- Close with a DECISIONS entry on the drop date naming the SHA that dropped it.
+
+**Priority:** Low. One-line operational task, no downstream dependency.
+
+---
+
+## [open] 2026-04-21: Drop `pipeline_log_backup_20260421` snapshot
+
+**Surfaced:** 2026-04-21 alongside migration 0014's manual backfill UPDATEs (multi-piece cadence Phase 1). The 111-row snapshot was created before rewriting `pipeline_log.run_id` from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs for the 5 historical runs. Destructive UPDATE (values overwritten in place), snapshot is the only rollback path. Drop on or after **2026-04-28** once Phase 3 has been writing new UUID-shape run_ids for a week.
+
+**Hypothesis:** None — housekeeping. Same retention logic as the daily_piece_audio snapshot above.
+
+**Investigation hints:**
+- Before dropping: verify `SELECT COUNT(DISTINCT run_id) FROM pipeline_log` returns at least 5 (historical) + however many Phase 3 has produced, and every run_id matches a `daily_pieces.id`.
+- Drop command: `DROP TABLE pipeline_log_backup_20260421;` via `wrangler d1 execute zeemish --remote --command`.
+- Close with a DECISIONS entry.
+
+**Priority:** Low.
+
+---
+
 ## [open] 2026-04-21: Drop `zita_messages_backup_20260421` snapshot
 
 **Surfaced:** 2026-04-21 alongside migration 0013 Commit A. The 92-row snapshot was created as a free-rollback safety net while verifying the hand-mapped content-based backfill of `zita_messages.piece_date`. Should be dropped on or after **2026-04-28** once Phase 1 Commit B has been live for a week and the per-piece distribution (`SELECT piece_date, COUNT(*) FROM zita_messages GROUP BY piece_date`) has remained stable through at least one full daily cycle with new writes.

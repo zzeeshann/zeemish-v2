@@ -1,0 +1,207 @@
+-- 0014_piece_id_fks.sql
+--
+-- Multi-piece cadence — Phase 1 identity foundations.
+--
+-- "piece_id" is `daily_pieces.id` — the existing UUID PRIMARY KEY, not a
+-- new column on the parent table. Verified 2026-04-21: all 5 prod rows
+-- in `daily_pieces` are UUIDs generated via `crypto.randomUUID()` at
+-- agents/src/director.ts:286. Adding a parallel column would have been
+-- duplication.
+--
+-- This migration propagates `piece_id` as a nullable FK into four
+-- child tables that historically associated with a piece by `date` or
+-- `piece_date`. At 1 piece/day those keys were unambiguous; at
+-- multi-per-day they collide. Application layer will enforce non-null
+-- on new INSERTs going forward (same defensive pattern as
+-- `learnings.source` from migration 0011 and `learnings.piece_date` +
+-- `zita_messages.piece_date` from migrations 0012 and 0013).
+--
+-- A fifth table, `pipeline_log`, does NOT receive a new column. Its
+-- existing `run_id TEXT` column is repurposed in-place: old rows hold
+-- `YYYY-MM-DD`, new rows will hold `daily_pieces.id`. Backfill is a
+-- commented UPDATE below. `run_id = piece_id` mapping is one-to-one at
+-- 1 piece/day, so the backfill is unambiguous.
+--
+-- `daily_piece_audio` PK rebuild is too large to belong here — it
+-- lives in its own migration 0015 with a snapshot-first safety net.
+--
+-- All backfills are commented and run manually via `wrangler d1
+-- execute --remote` after the auto-applied ALTERs land. Snapshots are
+-- unnecessary for audit_results / learnings / zita_messages /
+-- daily_candidates — all four backfills are additive (NULL →
+-- piece_id) and rollback is just `UPDATE … SET piece_id = NULL`.
+-- `pipeline_log.run_id` IS overwritten (date-string → UUID-string) —
+-- a one-shot backup table is listed in the comments for paranoia.
+
+-- ══════════════════════════════════════════════════════════════════
+-- AUTO-APPLIED (runs on `wrangler d1 migrations apply`)
+-- ══════════════════════════════════════════════════════════════════
+
+ALTER TABLE audit_results ADD COLUMN piece_id TEXT;
+ALTER TABLE learnings ADD COLUMN piece_id TEXT;
+ALTER TABLE zita_messages ADD COLUMN piece_id TEXT;
+ALTER TABLE daily_candidates ADD COLUMN piece_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_audit_results_piece ON audit_results(piece_id);
+CREATE INDEX IF NOT EXISTS idx_learnings_piece_id  ON learnings(piece_id);
+CREATE INDEX IF NOT EXISTS idx_zita_piece_id       ON zita_messages(piece_id);
+CREATE INDEX IF NOT EXISTS idx_candidates_piece_id ON daily_candidates(piece_id);
+
+-- ══════════════════════════════════════════════════════════════════
+-- ONE-TIME BACKFILL — run 2026-04-21 via `wrangler d1 execute --remote`
+-- ══════════════════════════════════════════════════════════════════
+--
+-- Sizing audit (prod, 2026-04-21):
+--   audit_results:     3 rows, all on 2026-04-21
+--   learnings:        22 rows across 3 piece_dates
+--   zita_messages:    92 rows across 4 piece_dates
+--   daily_candidates: 250 rows, 0 with selected=1 (historical quirk,
+--                      no backfill needed — see note below)
+--   pipeline_log:    111 rows across 5 run_ids
+--
+-- Running order — each block is dry-run → UPDATE → verify.
+
+-- ─── Step 1: audit_results (3 rows, all 2026-04-21) ────────────────
+--
+-- Dry-run:
+-- SELECT id, task_id, date(created_at/1000,'unixepoch') AS d
+-- FROM audit_results WHERE piece_id IS NULL ORDER BY created_at;
+-- -- expect 3 rows, all d='2026-04-21'
+--
+-- Backfill via correlated subquery on created_at date:
+-- UPDATE audit_results SET piece_id = (
+--   SELECT id FROM daily_pieces
+--   WHERE daily_pieces.date = date(audit_results.created_at/1000,'unixepoch')
+--   LIMIT 1
+-- ) WHERE piece_id IS NULL;
+--
+-- Verify:
+-- SELECT piece_id, COUNT(*) FROM audit_results GROUP BY piece_id;
+-- -- expect 1 group: ab95f0f8-b419-4e2e-95a8-46ca0290957a → 3
+--
+-- Fallback (if D1 rejects the correlated subquery — the 0012 shape
+-- failed in WHERE/ORDER BY; this shape uses it in SET and should
+-- work, but keep the simple per-date path ready):
+-- UPDATE audit_results SET piece_id = 'ab95f0f8-b419-4e2e-95a8-46ca0290957a'
+-- WHERE piece_id IS NULL
+--   AND date(created_at/1000,'unixepoch') = '2026-04-21';
+
+-- ─── Step 2: learnings (22 rows across 3 piece_dates) ──────────────
+--
+-- Dry-run:
+-- SELECT piece_date, source, COUNT(*) AS n FROM learnings
+-- WHERE piece_id IS NULL GROUP BY piece_date, source ORDER BY piece_date, source;
+-- -- expect:
+-- --   2026-04-17 producer         4
+-- --   2026-04-20 producer         5
+-- --   2026-04-20 self-reflection  4
+-- --   2026-04-20 zita             5
+-- --   2026-04-21 producer         5
+-- --   2026-04-21 self-reflection  4
+-- --   Total: 27 (22 observed + 5 zita-source rows for 2026-04-20 that
+-- --   post-dated the earlier count; use the live query at execute time)
+--
+-- Backfill via piece_date → daily_pieces.date lookup:
+-- UPDATE learnings SET piece_id = (
+--   SELECT id FROM daily_pieces WHERE daily_pieces.date = learnings.piece_date
+-- ) WHERE piece_id IS NULL AND piece_date IS NOT NULL;
+--
+-- Verify:
+-- SELECT piece_id, COUNT(*) FROM learnings
+-- WHERE piece_id IS NOT NULL GROUP BY piece_id;
+-- -- expect 3 non-null piece_id groups matching daily_pieces.id for
+-- -- 2026-04-17, 2026-04-20, 2026-04-21.
+--
+-- SELECT COUNT(*) FROM learnings
+-- WHERE piece_id IS NULL AND piece_date IS NOT NULL;
+-- -- expect 0
+
+-- ─── Step 3: zita_messages (92 rows across 4 piece_dates) ──────────
+--
+-- The Phase 1 Zita plan already hand-mapped all 92 rows to piece_date
+-- via the migration 0013 backfill (completed 2026-04-21 earlier in
+-- the day). This step simply lifts the mapping one level: piece_date
+-- → daily_pieces.id.
+--
+-- Dry-run:
+-- SELECT piece_date, COUNT(*) AS rows FROM zita_messages
+-- WHERE piece_id IS NULL AND piece_date IS NOT NULL
+-- GROUP BY piece_date ORDER BY piece_date;
+-- -- expect (matches migration 0013's Step 3 verify):
+-- --   2026-04-17  18
+-- --   2026-04-19   4
+-- --   2026-04-20  28
+-- --   2026-04-21  42
+--
+-- Backfill:
+-- UPDATE zita_messages SET piece_id = (
+--   SELECT id FROM daily_pieces WHERE daily_pieces.date = zita_messages.piece_date
+-- ) WHERE piece_id IS NULL AND piece_date IS NOT NULL;
+--
+-- Verify:
+-- SELECT piece_id, COUNT(*) FROM zita_messages
+-- WHERE piece_id IS NOT NULL GROUP BY piece_id;
+-- -- expect 4 piece_id groups summing to 92.
+--
+-- SELECT COUNT(*) FROM zita_messages
+-- WHERE piece_id IS NULL AND piece_date IS NOT NULL;
+-- -- expect 0
+
+-- ─── Step 4: daily_candidates (no historical backfill) ─────────────
+--
+-- Prod has 250 candidate rows across 5 dates but zero with
+-- `selected=1`. The director.ts:150-156 post-curator UPDATE
+-- (`UPDATE daily_candidates SET selected = 1 WHERE id = ?`) appears
+-- not to have landed on historical runs — separate investigation,
+-- see FOLLOWUPS. This means:
+--   (a) no historical row maps uniquely to a piece, so nothing to backfill
+--   (b) no column update needed for the 250 unselected rows
+--
+-- New runs write piece_id on the selected row in the same transaction
+-- as selected=1, starting in Phase 3 (the director.ts update). No
+-- action here.
+
+-- ─── Step 5: pipeline_log (111 rows across 5 run_ids) ──────────────
+--
+-- Semantic shift: run_id column stays TEXT, but old rows hold
+-- 'YYYY-MM-DD' and new rows (Phase 3 onwards) will hold UUIDs. Backfill
+-- rewrites historical run_id values in place.
+--
+-- Optional snapshot before UPDATE (111 rows, free insurance):
+-- CREATE TABLE pipeline_log_backup_20260421 AS SELECT * FROM pipeline_log;
+-- SELECT COUNT(*) FROM pipeline_log_backup_20260421;  -- expect 111
+--
+-- Dry-run:
+-- SELECT run_id, COUNT(*) AS steps FROM pipeline_log GROUP BY run_id ORDER BY run_id;
+-- -- expect 5 YYYY-MM-DD run_ids: 2026-04-17 (31), -18 (23), -19 (19), -20 (19), -21 (19)
+--
+-- Backfill (correlated UPDATE — run_id stays TEXT, values swap):
+-- UPDATE pipeline_log SET run_id = (
+--   SELECT id FROM daily_pieces WHERE daily_pieces.date = pipeline_log.run_id
+-- ) WHERE run_id LIKE '____-__-__';
+--
+-- Verify:
+-- SELECT run_id, COUNT(*) AS steps FROM pipeline_log GROUP BY run_id ORDER BY steps DESC;
+-- -- expect 5 UUID run_ids, each matching a daily_pieces.id; step
+-- -- counts preserved from dry-run.
+--
+-- SELECT COUNT(*) FROM pipeline_log WHERE run_id LIKE '____-__-__';
+-- -- expect 0 (no remaining date-shape run_ids)
+--
+-- Rollback (if the UPDATE lands wrong and the snapshot was taken):
+-- DELETE FROM pipeline_log;
+-- INSERT INTO pipeline_log SELECT * FROM pipeline_log_backup_20260421;
+
+-- ══════════════════════════════════════════════════════════════════
+-- POST-APPLY FINAL VERIFY
+-- ══════════════════════════════════════════════════════════════════
+--
+-- PRAGMA table_info(audit_results);   -- expect piece_id TEXT column
+-- PRAGMA table_info(learnings);       -- expect piece_id TEXT column
+-- PRAGMA table_info(zita_messages);   -- expect piece_id TEXT column
+-- PRAGMA table_info(daily_candidates); -- expect piece_id TEXT column
+--
+-- SELECT 'audit_results'    AS t, COUNT(*) AS non_null_piece_id FROM audit_results    WHERE piece_id IS NOT NULL
+-- UNION ALL SELECT 'learnings',     COUNT(*) FROM learnings     WHERE piece_id IS NOT NULL
+-- UNION ALL SELECT 'zita_messages', COUNT(*) FROM zita_messages WHERE piece_id IS NOT NULL;
+-- -- expect audit_results=3, learnings=13+ (depends on Zita synth row count), zita_messages=92

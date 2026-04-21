@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**13 tables across 10 migrations.**
+**13 tables across 15 migrations.**
 
 ## Reader-side tables
 
@@ -62,8 +62,9 @@ Conversation history for the Zita learning guide.
 | content | TEXT | Message text |
 | created_at | INTEGER | |
 | piece_date | TEXT | YYYY-MM-DD of the `daily_pieces` row this conversation is about. Nullable at schema level so migration 0013 applied non-destructively to 92 pre-existing rows (backfilled via commented one-time UPDATEs in the migration file). Application layer (Commit B of Phase 1) enforces non-null for `course_slug='daily'` requests; lessons-course path still works with piece_date=null. Indexed via `idx_zita_piece(user_id, piece_date)`. Primary read paths: scoped history load in `/api/zita/chat`, per-piece admin view, P1.5 synthesis by piece. |
+| piece_id | TEXT | `daily_pieces.id` (UUID) this conversation is about. Added migration 0014 (cadence Phase 1) so Phase 6's Zita re-scoping can target a specific piece when multiple share a date. Nullable at schema level; backfilled from `piece_date → daily_pieces.date → daily_pieces.id` for the 92 migration-0013 rows. Indexed via `idx_zita_piece_id`. `piece_date` stays alongside for now — Phase 6 will deprecate the date-scoped SELECT in favour of piece_id. |
 
-Migrations: `0001_init.sql` (initial), `0013_zita_messages_piece_date.sql` (added `piece_date`).
+Migrations: `0001_init.sql` (initial), `0013_zita_messages_piece_date.sql` (added `piece_date`), `0014_piece_id_fks.sql` (added `piece_id`).
 
 ## Agent-side tables
 
@@ -111,12 +112,13 @@ Cross-agent learnings database — patterns that work or don't. Drafter reads th
 | applied_to_prompts | INTEGER | 0 or 1 |
 | source | TEXT | `reader` \| `producer` \| `self-reflection` \| `zita`. Where the signal came from. Loose TEXT, nullable — no CHECK constraint because a future fifth origin is cheap to add at the write site. NULL means "unspecified (pre-P1.3)". Indexed via `idx_learnings_source`. **Application layer is stricter than the schema:** `writeLearning` refuses to insert a row whose `source` is null, empty, or non-string — logs a warn to `observer_events` and skips. Column nullability remains so historical pre-P1.3 rows stay readable; new rows must always carry a source. |
 | piece_date | TEXT | YYYY-MM-DD of the `daily_pieces` row this learning is about. Nullable at schema level so migration 0012 could apply non-destructively to pre-existing rows, which were then filled via a one-time manual UPDATE matching `learnings.created_at` to `daily_pieces.published_at`. **Application layer enforces non-null going forward:** `writeLearning` refuses rows missing `piece_date`, same defensive pattern as `source` (both checks route through the shared `logMissingField` helper). Indexed via `idx_learnings_piece_date`. Primary read path: the per-piece "What the system learned" section of the How-this-was-made drawer. |
+| piece_id | TEXT | `daily_pieces.id` (UUID) this learning is about. Added migration 0014 (cadence Phase 1). Nullable at schema level; backfilled for all 27 prod rows via `piece_date → daily_pieces.date → daily_pieces.id` lookup. Indexed via `idx_learnings_piece_id`. `piece_date` stays alongside — Phase 3+ callers pass both; a later phase may drop `piece_date` once the dual-key write posture is proven. |
 | created_at | INTEGER | |
 | last_validated_at | INTEGER | |
 
 `category` and `source` are orthogonal: `category` is *what* kind of learning (voice/structure/…); `source` is *who* produced the signal (reader/producer/…).
 
-Migrations: `0003_engagement_learnings.sql` (initial), `0011_learnings_source.sql` (added `source`), `0012_learnings_piece_date.sql` (added `piece_date`).
+Migrations: `0003_engagement_learnings.sql` (initial), `0011_learnings_source.sql` (added `source`), `0012_learnings_piece_date.sql` (added `piece_date`), `0014_piece_id_fks.sql` (added `piece_id`).
 
 ### audit_results
 One row per audit pass per draft — durable audit trail. Written by DirectorAgent after each audit round.
@@ -130,11 +132,12 @@ One row per audit pass per draft — durable audit trail. Written by DirectorAge
 | passed | INTEGER | 0 or 1 |
 | score | INTEGER | 0-100 for voice auditor, null for others |
 | notes | TEXT | JSON: violations, issues, or claims |
+| piece_id | TEXT | `daily_pieces.id` (UUID) this audit is about. Added migration 0014 (cadence Phase 1). Nullable; backfilled for the 3 prod rows via `date(created_at/1000,'unixepoch') → daily_pieces.date → daily_pieces.id`. Indexed via `idx_audit_results_piece`. Existing `task_id` / `draft_id` stay alongside — they're per-round identifiers that don't cleanly map to a single piece without the FK. |
 | created_at | INTEGER | |
 
-Indexes: `idx_audit_task` on `task_id`, `idx_audit_created` on `created_at`.
+Indexes: `idx_audit_task` on `task_id`, `idx_audit_created` on `created_at`, `idx_audit_results_piece` on `piece_id`.
 
-Migrations: `0004_audit_results.sql` (original), `0008_drop_agent_tasks.sql` (dropped the FK to the deleted `agent_tasks` table; original `audit_results` was empty across all runs because every INSERT failed the orphaned FK check).
+Migrations: `0004_audit_results.sql` (original), `0008_drop_agent_tasks.sql` (dropped the FK to the deleted `agent_tasks` table; original `audit_results` was empty across all runs because every INSERT failed the orphaned FK check), `0014_piece_id_fks.sql` (added `piece_id`).
 
 ### magic_tokens
 Time-limited tokens for magic link passwordless login.
@@ -165,10 +168,11 @@ News candidates from the Scanner, evaluated by the Director.
 | summary | TEXT | Short description from RSS |
 | url | TEXT | Link to original story |
 | teachability_score | INTEGER | 0-100, set by Director |
-| selected | INTEGER | 1 if Director picked this story |
+| selected | INTEGER | 1 if Director picked this story. **Historical data-flow quirk:** all 250 prod rows have `selected=0` despite 5 pieces having been published — see FOLLOWUPS "`daily_candidates.selected` never flipped on historical runs". |
+| piece_id | TEXT | `daily_pieces.id` (UUID) for the candidate Director picked. Added migration 0014 (cadence Phase 1). Nullable — unselected candidates carry NULL, the selected one gets set atomically with `selected=1`. No historical backfill (0 historical rows had `selected=1`). Indexed via `idx_candidates_piece_id`. |
 | created_at | INTEGER | |
 
-Migration: `0006_daily_pieces.sql`
+Migrations: `0006_daily_pieces.sql`, `0014_piece_id_fks.sql` (added `piece_id`).
 
 ### daily_pieces
 Published daily teaching pieces.
@@ -198,8 +202,9 @@ Per-beat audio rows — one row per `<lesson-beat>` per piece. Producer writes; 
 
 | Column | Type | Notes |
 |--------|------|-------|
-| date | TEXT | YYYY-MM-DD. Part of composite PK. |
+| piece_id | TEXT | `daily_pieces.id` (UUID). Part of composite PK. Added via migration 0015 (cadence Phase 1) — previously `date` held this role. |
 | beat_name | TEXT | e.g. "hook", "teach-1", "close". Matches `<lesson-beat name="…">`. Part of composite PK. |
+| date | TEXT | YYYY-MM-DD. Kept as a non-PK column for display/filter after the 0015 PK rebuild — no longer part of the key. |
 | r2_key | TEXT | e.g. `audio/daily/2026-04-18/hook.mp3` |
 | public_url | TEXT | URL the reader fetches. Currently `/{r2_key}` — needs site-worker R2 binding to resolve in prod. |
 | character_count | INTEGER | Characters sent to ElevenLabs (post-`prepareForTTS`) — the billed count. |
@@ -209,9 +214,9 @@ Per-beat audio rows — one row per `<lesson-beat>` per piece. Producer writes; 
 | voice_id | TEXT | e.g. `j9jfwdrw7BRfcR43Qohk` (Frederick Surrey). Same reason as model. |
 | generated_at | INTEGER | Unix timestamp ms. |
 
-PK: (date, beat_name). Index: `idx_piece_audio_date` on date.
+PK: **(piece_id, beat_name)** (since migration 0015). Indexes: `idx_piece_audio_piece` on `piece_id`, `idx_piece_audio_date` on `date`.
 
-Migration: `0010_audio_pipeline.sql`
+Migrations: `0010_audio_pipeline.sql` (original, PK was (date, beat_name)), `0015_daily_piece_audio_piece_id_pk.sql` (PK rebuild to (piece_id, beat_name), snapshot → create-new → copy → drop-old → rename, with `daily_piece_audio_backup_20260421` held for rollback through 2026-04-28).
 
 ### pipeline_log
 Step-by-step record of each daily piece run. The admin dashboard polls this for the live pipeline monitor.
@@ -219,15 +224,15 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| run_id | TEXT | YYYY-MM-DD (one run per day) |
+| run_id | TEXT | `daily_pieces.id` (UUID) — the piece this run produced. **Semantic shift as of 2026-04-21 (cadence Phase 1):** historical rows carried `YYYY-MM-DD` values because 1 piece/day meant date was unique per run. Migration 0014's backfill rewrote all 111 historical rows from date-strings to piece_id UUIDs; new rows write piece_id from Phase 3 onwards. Column type unchanged (still TEXT). Snapshot `pipeline_log_backup_20260421` held for rollback through 2026-04-28. |
 | step | TEXT | scanning, curating, drafting, auditing_r1, publishing, done, error |
 | status | TEXT | running, done, failed |
 | data | TEXT | JSON with step-specific data (scores, counts, headlines) |
 | created_at | INTEGER | |
 
-Migration: `0007_pipeline_log.sql`
+Migrations: `0007_pipeline_log.sql` (initial), `0014_piece_id_fks.sql` (run_id semantic shift — values migrated, no schema change).
 
-## Migrations summary (13 migrations, 13 tables)
+## Migrations summary (15 migrations, 13 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -241,3 +246,5 @@ Migration: `0007_pipeline_log.sql`
 - `0011_learnings_source.sql` — added `learnings.source` (reader/producer/self-reflection/zita, nullable TEXT, no CHECK) + `idx_learnings_source`. Plumbing for P1.3 — widens the Learner from reader-only to all-signal.
 - `0012_learnings_piece_date.sql` — added `learnings.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer) + `idx_learnings_piece_date`. Enables the per-piece "What the system learned" section of the How-this-was-made drawer. Backfill for pre-migration rows is included as a commented one-time UPDATE inside the migration file (not auto-applied); mapping works via nearest-timestamp join of `learnings.created_at` to `daily_pieces.published_at`, restricted to producer/self-reflection sources.
 - `0013_zita_messages_piece_date.sql` — added `zita_messages.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer for `course_slug='daily'`) + composite `idx_zita_piece(user_id, piece_date)`. Fixes the data-model bug where every daily piece mounted `<zita-chat course="daily" lesson="0">` and pooled all pieces' conversations under one key. Backfill for the 92 pre-migration rows is a commented one-time block inside the migration file, mapped by hand from conversation content + created_at windows against the five pieces 2026-04-17 through 2026-04-21. Includes a snapshot step (`zita_messages_backup_20260421`) run before any UPDATE — rollback is `DELETE + INSERT SELECT` from the backup. Backup table queued for drop on or after 2026-04-28 via FOLLOWUPS.
+- `0014_piece_id_fks.sql` — multi-piece cadence Phase 1. Added nullable `piece_id TEXT` FK columns + indexes to `audit_results`, `learnings`, `zita_messages`, `daily_candidates`. Auto-applied ALTERs; backfill UPDATEs commented for manual `wrangler d1 execute` runs (all 4 tables + `pipeline_log.run_id` semantic shift from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs). Applied 2026-04-21. `daily_candidates` has no historical backfill — 250 rows, 0 with `selected=1` (separate FOLLOWUPS investigation).
+- `0015_daily_piece_audio_piece_id_pk.sql` — multi-piece cadence Phase 1, PK rebuild. `daily_piece_audio` PK switched from `(date, beat_name)` to `(piece_id, beat_name)` via snapshot → create-new → copy → drop-old → rename, all auto-applied. 32 rows backfilled via correlated subquery on `daily_pieces.date`. `daily_piece_audio_backup_20260421` snapshot held for rollback through 2026-04-28 via FOLLOWUPS.

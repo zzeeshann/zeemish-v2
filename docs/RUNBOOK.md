@@ -81,7 +81,7 @@ wrangler secret put SCANNER_RSS_FEEDS_JSON
 ## D1 Database
 
 ### Run migrations
-There are 13 migrations (`0001_init.sql` … `0013_zita_messages_piece_date.sql`).
+There are 15 migrations (`0001_init.sql` … `0015_daily_piece_audio_piece_id_pk.sql`).
 Apply them (idempotent — skips any already recorded in `d1_migrations`):
 ```bash
 wrangler d1 migrations apply zeemish --remote
@@ -98,7 +98,7 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events OR
 ```
 
 ### Migration tracker hygiene
-Migrations are tracked in the `d1_migrations` table. As of 2026-04-21 the tracker is in sync (13 rows, 0001–0013). Keep it that way:
+Migrations are tracked in the `d1_migrations` table. As of 2026-04-21 the tracker is in sync (15 rows, 0001–0015). Keep it that way:
 
 - **Use `wrangler d1 migrations apply zeemish --remote`** for any new migration on a live DB — not `wrangler d1 execute --file=...` and not `wrangler d1 execute --command=...`. Only `migrations apply` writes to `d1_migrations`; the other paths run the SQL but leave the tracker blind, which is how we got into the 2026-04-20 mess.
 - **Pre-flight check** before applying:
