@@ -332,6 +332,30 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       brief,
     });
 
+    // ─── Post-publish Zita-question synthesis (P1.5, off-pipeline) ──
+    // Unlike producer + self-reflection above (both fire at publish+1s
+    // because they analyse signals complete at publish), Zita synthesis
+    // needs a full day of reader traffic to accumulate against this
+    // piece. Schedule for 01:45 UTC on day+1, just before the next
+    // 02:00 UTC cron kicks the following day's pipeline — so we analyse
+    // a complete reader window without interfering with the next run.
+    // Guarded inside Learner by a ≥5 user-message threshold; if the
+    // piece got less traffic than that, the scheduled method logs a
+    // skipped info event and fires no Claude call.
+    // See DECISIONS 2026-04-21 "P1.5 Learner skeleton".
+    const nowUtc = new Date();
+    const zitaTarget = new Date(Date.UTC(
+      nowUtc.getUTCFullYear(),
+      nowUtc.getUTCMonth(),
+      nowUtc.getUTCDate() + 1,
+      1, 45, 0, 0,
+    ));
+    const zitaDelaySeconds = Math.max(60, Math.floor((zitaTarget.getTime() - nowUtc.getTime()) / 1000));
+    await this.schedule(zitaDelaySeconds, 'analyseZitaPatternsScheduled', {
+      date: today,
+      title: brief.headline,
+    });
+
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
     // Schedule audio to run in an alarm-triggered invocation instead of
     // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
@@ -392,6 +416,39 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
         .logLearnerFailure(date, title, reason)
+        .catch(() => { /* observer write failure never blocks */ });
+      // non-retriable: logged, moving on
+    }
+  }
+
+  /**
+   * Alarm callback — runs Learner's Zita-question synthesis in a
+   * fresh DO invocation 01:45 UTC on day+1. Scheduled by
+   * `triggerDailyPiece` right after `publishing done`, but with a
+   * 23-hour-ish delay to let a full day of reader traffic accumulate
+   * against this piece.
+   *
+   * Non-retriable on failure (same posture as analyseProducerSignals
+   * and reflect). On skip (insufficient reader traffic) or success,
+   * logs a single metered info event so cost / skip-rate drift is
+   * visible over time.
+   */
+  async analyseZitaPatternsScheduled(payload: {
+    date: string;
+    title: string;
+  }): Promise<void> {
+    const { date, title } = payload;
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    try {
+      const learner = await this.subAgent(LearnerAgent, 'learner');
+      const result = await learner.analyseZitaPatternsDaily(date);
+      await observer
+        .logZitaSynthesisMetered(date, title, result)
+        .catch(() => { /* observer write failure never blocks */ });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      await observer
+        .logZitaSynthesisFailure(date, title, reason)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }

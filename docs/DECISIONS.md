@@ -2,6 +2,44 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: P1.5 Learner skeleton — Zita-question synthesis scheduled 01:45 UTC day+1 (Phase 5)
+
+**Context:** Phase 5 of the Zita improvement plan and P1.5 from the 2026-04-19 improvement plan. Schema plumbing for `source='zita'` has been in place since migration 0011 (2026-04-20), labels in the made-drawer and public dashboard have referenced it since 2026-04-20 commit [a0a9b22](https://github.com/zzeeshann/zeemish-v2/commit/a0a9b22), but no code path wrote rows with that source. CLAUDE.md has flagged it as "blocked on reader + Zita traffic" — but waiting for real data to arrive before building the synthesis means we'd be writing the synthesis on the day the first real signal appeared, under time pressure. Better to build the skeleton now, guarded so it no-ops cleanly at current traffic levels, and let it start producing rows organically as reader traffic grows.
+
+**Decision:** Mirror the three-source pattern exactly.
+
+1. **New prompt** `LEARNER_ZITA_PROMPT` in [`agents/src/learner-prompt.ts`](../agents/src/learner-prompt.ts). Shape identical to `LEARNER_POST_PUBLISH_PROMPT`: 0–10 learnings, strict JSON, category is voice/structure/fact/engagement, no hedging. Prompt posture is different — it names the Socratic-chat context, asks for pattern-recurrence (not per-conversation summaries), and its example learnings are all recognition-of-misreading / beyond-the-piece-questions / engagement-pattern shaped (not audit-violation shaped).
+
+2. **New Learner method** `analyseZitaPatternsDaily(date)` in [`agents/src/learner.ts`](../agents/src/learner.ts). Pulls `zita_messages WHERE piece_date = ? ORDER BY created_at ASC`, counts user messages, **returns `{ skipped: true, userMsgCount, durationMs }` without firing a Claude call when `userMsgCount < ZITA_SYNTHESIS_MIN_USER_MESSAGES` (5).** Above threshold: pulls the piece's headline + underlying_subject for context, groups messages by reader, builds a compact "### Conversation N (K turns)\\nReader: …\\nZita: …" block per reader, sends to Claude Sonnet 4.5 (max_tokens: 2000, same model as the other two synthesis calls), parses JSON with the existing `extractJson` helper, caps writes at `ZITA_LEARNINGS_WRITE_CAP` (10), writes via `writeLearning(db, category, observation, { date, phase: 'zita-synthesis', readerCount, userMsgCount, totalMsgCount }, 60, 'zita', date)`. Returns `ZitaSynthesisResult { date, skipped, userMsgCount, written, overflowCount, considered, tokensIn, tokensOut, durationMs }` — the last three are for cost metering.
+
+3. **Director scheduling** in [`agents/src/director.ts`](../agents/src/director.ts) `triggerDailyPiece`, after `publishing done`. Unlike producer + self-reflection (which fire at publish+1s because they analyse signals complete at publish), Zita synthesis needs a full day of reader traffic. Schedule for **01:45 UTC on day+1** — just before the 02:00 UTC cron kicks the next run, so we analyse a complete window without interfering. Computed via `Date.UTC(y, m, d+1, 1, 45)` and `Math.max(60, Math.floor(...))`. For a publish at ~02:07 UTC, delay is ~23.63h / 85080s.
+
+4. **New alarm handler** `analyseZitaPatternsScheduled({date, title})` mirrors `analyseProducerSignalsScheduled` shape exactly. Calls `learner.analyseZitaPatternsDaily(date)`, logs via `observer.logZitaSynthesisMetered(...)` (handles both skipped and success paths — the skip log is informational so "is the P1.5 schedule firing?" has a visible answer even when traffic is below threshold), logs via `observer.logZitaSynthesisFailure(...)` on throw. Non-retriable.
+
+5. **Observer methods** in [`agents/src/observer.ts`](../agents/src/observer.ts):
+   - `logZitaSynthesisMetered(date, title, metrics)` — branches on `metrics.skipped`. Skipped: `severity: 'info'`, "Zita synthesis skipped: title" / "only N reader messages, threshold 5, no Claude call fired". Success: "Zita synthesis: title" / tokens-in/out + latency + overflow. Both shapes match the existing `logReflectionMetered` posture.
+   - `logZitaSynthesisFailure(date, title, reason)` — `severity: 'warn'`, same shape as `logLearnerFailure` and `logReflectionFailure`.
+
+6. **No Drafter changes.** The runtime `getRecentLearnings(db, 10)` in [`agents/src/shared/learnings.ts`](../agents/src/shared/learnings.ts) is source-agnostic — `source='zita'` rows auto-flow into the next Drafter prompt the moment they're written. Zero work needed on the reader side of the loop.
+
+**Why the guard at 5, not 0.** Below 5 user messages, Claude would produce learnings from 1–4 chat turns, which is noise rather than pattern. A pattern by definition requires repetition or a striking exchange; single chats don't qualify. At current traffic (3 users across 5 pieces as of 2026-04-21), most days will skip. That's the right behaviour — we'd rather have `source='zita'` rows appear organically when real signal exists than produce a stream of low-confidence rows that pollute the Drafter's feed. The skip is metered so we know the schedule is running; the count is a leading indicator for when the feature "activates" naturally.
+
+**Why not schedule at publish+1h.** That's what producer + self-reflection do, because they analyse signals complete at publish. Zita synthesis needs reader traffic that takes a day. At publish+1h the ≥5 guard would skip every run (readers haven't arrived yet), and we'd never know if the schedule was firing vs the guard was the problem. Scheduling at 01:45 UTC day+1 means the guard becomes a real threshold instead of a false one.
+
+**Non-retriable by design.** Same reasoning as `analysePiecePostPublish` and `reflect`: the piece is live, one missed synthesis isn't catastrophic, and retry logic turns into mystery failures later. If a run fails, `logZitaSynthesisFailure` warns in the admin feed and the loop moves on.
+
+**Verified locally:** typecheck passes with zero new errors (33 pre-existing SubAgent typing errors before AND after the change). Schedule math verified via a simulated 02:07 UTC publish: target = 01:45 UTC next day, delay = 85080s = 23.63h. Full runtime test (triggering the alarm) would require waiting 24 hours or invoking the scheduled method directly via the agents worker; deferred to Zishan's call on whether to manually trigger against the 2026-04-20 piece's 26 messages (17 user messages, above threshold) to see a real Claude synthesis run.
+
+**Non-goals:**
+- No Drafter retuning to weight `source='zita'` differently. They flow into the same 10-row feed as the other sources, equal standing.
+- No per-conversation analysis or drill-down UI — the admin Zita view (Phase 3) already provides the raw data; this synthesis is about patterns, not individual sessions.
+- No real-time / per-message triggering. One synthesis per piece per day is enough; the schedule boundary is deliberate.
+- No cost alerting / escalation on token spike. Metered info event is sufficient until we see actual drift.
+
+**References:** [agents/src/learner-prompt.ts](../agents/src/learner-prompt.ts) (new `LEARNER_ZITA_PROMPT`), [agents/src/learner.ts](../agents/src/learner.ts) (new `analyseZitaPatternsDaily`), [agents/src/director.ts](../agents/src/director.ts) (schedule + alarm handler), [agents/src/observer.ts](../agents/src/observer.ts) (new `logZitaSynthesisMetered` + `logZitaSynthesisFailure`).
+
+---
+
 ## 2026-04-21: Zita safety smallest-viable pass (Phase 4)
 
 **Context:** Phase 4 of the Zita improvement plan. With piece-scoping (Phase 1), a history cap (Phase 2), and admin visibility (Phase 3) in place, three operational blind spots remained:

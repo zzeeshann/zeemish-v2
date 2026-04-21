@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { writeLearning } from './shared/learnings';
 import { extractJson } from './shared/parse-json';
-import { LEARNER_ANALYSE_PROMPT, LEARNER_POST_PUBLISH_PROMPT } from './learner-prompt';
+import { LEARNER_ANALYSE_PROMPT, LEARNER_POST_PUBLISH_PROMPT, LEARNER_ZITA_PROMPT } from './learner-prompt';
 
 /** Cap on producer-side learnings written per post-publish run. If
  *  the analysis produces more than this from one piece, something is
@@ -11,6 +11,17 @@ import { LEARNER_ANALYSE_PROMPT, LEARNER_POST_PUBLISH_PROMPT } from './learner-p
  *  the overflow to observer_events — it's easier to notice the
  *  over-generation than to let it flood the table. */
 const PRODUCER_LEARNINGS_WRITE_CAP = 10;
+
+/** Minimum user-messages in a piece's Zita conversations before we
+ *  bother running a synthesis pass. Below this threshold, Claude's
+ *  output would be noise, not patterns. Director schedules the call
+ *  regardless; this guard turns the no-signal case into a cheap skip.
+ *  See DECISIONS 2026-04-21 "P1.5 Learner skeleton". */
+const ZITA_SYNTHESIS_MIN_USER_MESSAGES = 5;
+
+/** Cap on Zita-origin learnings written per synthesis run. Same shape
+ *  and reasoning as PRODUCER_LEARNINGS_WRITE_CAP. */
+const ZITA_LEARNINGS_WRITE_CAP = 10;
 
 /** Producer-side analysis output from Claude. Category/observation
  *  shape mirrors the prompt's JSON contract. */
@@ -76,6 +87,23 @@ export interface PostPublishResult {
   written: number;      // how many rows actually landed in learnings
   overflowCount: number; // how many were produced beyond PRODUCER_LEARNINGS_WRITE_CAP
   considered: number;   // total learnings Claude produced (written + overflowCount on success)
+}
+
+/** Result of a Zita-question synthesis — surfaced back to Director
+ *  so it can log metered info / overflow / skipped events. Mirrors
+ *  PostPublishResult with token metering (this is a Sonnet call that
+ *  doesn't gate anything, so cost visibility is the whole point)
+ *  plus a skipped flag for the insufficient-traffic case. */
+export interface ZitaSynthesisResult {
+  date: string;
+  skipped: boolean;      // true when userMsgCount < ZITA_SYNTHESIS_MIN_USER_MESSAGES
+  userMsgCount: number;  // how many user messages were in the synthesis window
+  written: number;
+  overflowCount: number;
+  considered: number;
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number;
 }
 
 /**
@@ -396,5 +424,154 @@ ${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
     });
 
     return { date, written, overflowCount, considered: all.length };
+  }
+
+  /**
+   * Read a day's Zita conversations and extract reader-question
+   * learnings — "what readers struggled with, misread, or asked
+   * beyond the piece" patterns. Scheduled by Director at 01:45 UTC on
+   * day+1 (so the full day of reader traffic has accumulated against
+   * the prior day's piece) rather than at publish+1h like Learner's
+   * producer-side analysis: Zita synthesis needs reader traffic,
+   * which takes a day. See DECISIONS 2026-04-21 "P1.5 Learner
+   * skeleton".
+   *
+   * Guarded no-op below ZITA_SYNTHESIS_MIN_USER_MESSAGES — returns
+   * skipped=true so Director can log a metered skip without firing
+   * a Claude call. This matters because the publication cadence
+   * outruns reader-traffic accumulation at current scale (3 users
+   * across 5 pieces as of 2026-04-21); firing Claude on thin signal
+   * would produce noise, not patterns.
+   *
+   * Non-retriable on failure (same posture as analysePiecePostPublish
+   * and reflect): Director catches, logs via observer, moves on.
+   */
+  async analyseZitaPatternsDaily(date: string): Promise<ZitaSynthesisResult> {
+    const started = Date.now();
+
+    // ── 1. Pull the conversations for this piece ─────────────────
+    const msgsRes = await this.env.DB
+      .prepare(
+        `SELECT user_id, role, content, created_at
+         FROM zita_messages WHERE piece_date = ? ORDER BY created_at ASC`,
+      )
+      .bind(date)
+      .all<{ user_id: string; role: 'user' | 'assistant'; content: string; created_at: number }>();
+
+    const messages = msgsRes.results;
+    const userMsgCount = messages.filter((m) => m.role === 'user').length;
+
+    // ── 2. Insufficient-traffic guard ───────────────────────────
+    if (userMsgCount < ZITA_SYNTHESIS_MIN_USER_MESSAGES) {
+      return {
+        date,
+        skipped: true,
+        userMsgCount,
+        written: 0,
+        overflowCount: 0,
+        considered: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        durationMs: Date.now() - started,
+      };
+    }
+
+    // ── 3. Pull piece metadata for the prompt's context block ────
+    const piece = await this.env.DB
+      .prepare(
+        `SELECT headline, underlying_subject
+         FROM daily_pieces WHERE date = ? LIMIT 1`,
+      )
+      .bind(date)
+      .first<{ headline: string; underlying_subject: string | null }>();
+
+    // ── 4. Build a compact, conversation-grouped context ─────────
+    const byUser = new Map<string, typeof messages>();
+    for (const m of messages) {
+      if (!byUser.has(m.user_id)) byUser.set(m.user_id, []);
+      byUser.get(m.user_id)!.push(m);
+    }
+    const convoBlocks: string[] = [];
+    let convoIdx = 0;
+    for (const [, convo] of byUser) {
+      convoIdx += 1;
+      const lines = convo.map((m) => `${m.role === 'user' ? 'Reader' : 'Zita'}: ${m.content}`).join('\n');
+      convoBlocks.push(`### Conversation ${convoIdx} (${convo.length} turns)\n${lines}`);
+    }
+
+    const context = `## Piece
+- Date: ${date}
+- Headline: "${piece?.headline ?? '(no daily_pieces row — piece may have been deleted)'}"
+- Underlying subject: ${piece?.underlying_subject ?? 'unknown'}
+
+## Zita conversations
+Total: ${byUser.size} reader${byUser.size === 1 ? '' : 's'}, ${messages.length} messages (${userMsgCount} from readers).
+
+${convoBlocks.join('\n\n')}`;
+
+    // ── 5. Ask Claude for Zita-side learnings ───────────────────
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 2000,
+      system: LEARNER_ZITA_PROMPT,
+      messages: [{ role: 'user', content: context }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    let parsed: { learnings?: ProducerLearning[] };
+    try {
+      parsed = extractJson<typeof parsed>(text);
+    } catch {
+      parsed = { learnings: [] };
+    }
+    const all: ProducerLearning[] = Array.isArray(parsed.learnings) ? parsed.learnings : [];
+
+    // ── 6. Cap writes + return overflow to Director ─────────────
+    const toWrite = all.slice(0, ZITA_LEARNINGS_WRITE_CAP);
+    const overflowCount = Math.max(0, all.length - ZITA_LEARNINGS_WRITE_CAP);
+
+    let written = 0;
+    for (const l of toWrite) {
+      if (!l?.observation) continue;
+      const category = normalizeProducerCategory(l.category);
+      try {
+        await writeLearning(
+          this.env.DB,
+          category,
+          l.observation,
+          {
+            date,
+            phase: 'zita-synthesis',
+            readerCount: byUser.size,
+            userMsgCount,
+            totalMsgCount: messages.length,
+          },
+          60,
+          'zita',
+          date,
+        );
+        written += 1;
+      } catch {
+        // per-row write failure isn't fatal
+      }
+    }
+
+    this.setState({
+      ...this.state,
+      learningsWritten: this.state.learningsWritten + written,
+    });
+
+    return {
+      date,
+      skipped: false,
+      userMsgCount,
+      written,
+      overflowCount,
+      considered: all.length,
+      tokensIn: response.usage.input_tokens,
+      tokensOut: response.usage.output_tokens,
+      durationMs: Date.now() - started,
+    };
   }
 }

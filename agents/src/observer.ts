@@ -153,6 +153,63 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Zita synthesis ran — one metered info event per run so we can
+   *  spot cost/latency drift before it matters. Same shape as
+   *  logReflectionMetered. Fires on both skipped and written paths —
+   *  the skipped path is informational (no Claude call happened) but
+   *  worth a breadcrumb so "is the P1.5 schedule firing?" has a
+   *  visible answer. */
+  async logZitaSynthesisMetered(
+    date: string,
+    title: string,
+    metrics: {
+      skipped: boolean;
+      userMsgCount: number;
+      written: number;
+      overflowCount: number;
+      considered: number;
+      tokensIn: number;
+      tokensOut: number;
+      durationMs: number;
+    },
+  ): Promise<void> {
+    if (metrics.skipped) {
+      await this.writeEvent({
+        severity: 'info',
+        title: `Zita synthesis skipped: ${title}`,
+        body: `Reader Q&A synthesis for "${title}" (${date}) skipped — only ${metrics.userMsgCount} reader message${metrics.userMsgCount === 1 ? '' : 's'}, threshold is 5. No Claude call fired. Latency: ${metrics.durationMs}ms (DB only).`,
+        context: { date, ...metrics },
+      });
+      return;
+    }
+    const overflowNote =
+      metrics.overflowCount > 0
+        ? ` Overflow: ${metrics.overflowCount} dropped (cap 10).`
+        : '';
+    await this.writeEvent({
+      severity: 'info',
+      title: `Zita synthesis: ${title}`,
+      body: `Reader Q&A synthesis for "${title}" (${date}) considered ${metrics.userMsgCount} reader messages, produced ${metrics.considered} bullets, wrote ${metrics.written}.${overflowNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+      context: { date, ...metrics },
+    });
+  }
+
+  /** Zita synthesis call failed — non-retriable by design, worth a
+   *  warn so the admin feed knows this day's reader-signal got
+   *  dropped. Same posture as logLearnerFailure / logReflectionFailure. */
+  async logZitaSynthesisFailure(
+    date: string,
+    title: string,
+    reason: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Zita synthesis missed: ${title}`,
+      body: `Reader Q&A synthesis failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
+      context: { date, reason },
+    });
+  }
+
   /** Self-reflection call failed — non-retriable by design, but worth
    *  a warn so the admin feed knows the loop missed an iteration. */
   async logReflectionFailure(

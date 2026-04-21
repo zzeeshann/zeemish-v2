@@ -33,7 +33,18 @@ Two-commit split was deliberate: the 0012 rollout on 2026-04-20 hit d1_migration
 
 Verified end-to-end via `preview_start` + `preview_eval`: daily-piece page renders with `piece-date` attribute from frontmatter, POST body carries it, 400 fires on missing piece_date, valid requests pass validation. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date" for the full trade-offs.
 
-**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 5 — P1.5 Learner skeleton (guarded, 01:45 UTC day+1 schedule).
+**Next in plan** (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`): Phase 6 — write `docs/zita-design.md` (design session, no code). Gates any deep-Zita work.
+
+## P1.5 Learner skeleton — Zita-question synthesis (2026-04-21)
+Phase 5 of the Zita improvement plan. Closes the last gap in the self-improvement loop for Zita: the `source='zita'` slot reserved in migration 0011 now has a writer. Mirrors the three-source pattern exactly — new `LEARNER_ZITA_PROMPT`, new `Learner.analyseZitaPatternsDaily(date)`, new Director `analyseZitaPatternsScheduled` alarm, new `observer.logZitaSynthesisMetered` + `logZitaSynthesisFailure`. No Drafter changes needed (`getRecentLearnings` is already source-agnostic).
+
+Schedule is **01:45 UTC on day+1**, not publish+1h like the producer / self-reflection runs. Zita synthesis needs reader traffic that takes a day; firing at publish+1h means the ≥5-user-message guard would skip every run and mask the mis-scheduling. At 01:45 UTC day+1 the guard becomes a real signal — it skips when reader traffic is genuinely thin, not because we checked too early.
+
+Guarded no-op below 5 user messages per piece. At today's traffic (3 readers, 5 pieces, 46 user messages across 4 days) most days will skip. The skip path still fires a metered info observer_event so "is the schedule running?" has a visible answer even when nothing lands.
+
+Verified: typecheck passes with zero new errors (33 pre-existing before and after). Schedule math validated via a simulated 02:07 UTC publish → target 01:45 UTC next day, 85080s (23.63h) delay. Full runtime test deferred — would either need to wait 24 hours or manually invoke against real 26-message 2026-04-20 piece (17 user messages above threshold).
+
+See DECISIONS 2026-04-21 "P1.5 Learner skeleton — Zita-question synthesis scheduled 01:45 UTC day+1 (Phase 5)".
 
 ## Zita safety smallest-viable pass (2026-04-21)
 Phase 4 of the Zita improvement plan. Four observer call sites added via the Phase 2 `logObserverEvent` helper, plus a `capStoredContent(content, 4000)` on both INSERTs:
