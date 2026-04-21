@@ -51,7 +51,7 @@ Format per entry:
 **Resolved:** 2026-04-21 via three atomic commits in sequence:
 - `ecedb87` — item #1 (pre-run `pipeline_log` DELETE removed). See DECISIONS "Remove pre-run pipeline_log DELETE."
 - `900905d` — item #2 (audio retry-fresh + R2 key shape), plus a latent persistBeatRow NOT NULL bug found during scoping. See DECISIONS "Scope audio pipeline state per piece_id."
-- `<pending>` — item #3 (Learner synthesis input scoped by time window). See DECISIONS "Scope Learner synthesis input by time window."
+- `30ddbdd` — item #3 (Learner synthesis input scoped by time window). See DECISIONS "Scope Learner synthesis input by time window."
 
 All three deploy clean through CI. Admin UI for interval flip (Phase 5) unblocked.
 
