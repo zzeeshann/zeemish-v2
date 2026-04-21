@@ -631,7 +631,15 @@ function publishedDisplay(): string {
         <section class="mb-10">
           <div class="flex items-baseline justify-between gap-4 mb-4">
             <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Questions from readers</h2>
-            <a href="/dashboard/admin/zita/" class="text-xs text-zee-primary hover:underline">All Zita activity →</a>
+            <div class="flex items-center gap-4 text-xs">
+              <button
+                id="zita-synth-btn"
+                data-date={date}
+                class="text-zee-primary hover:underline"
+              >Run synthesis</button>
+              <span id="zita-synth-status" class="text-zee-muted"></span>
+              <a href="/dashboard/admin/zita/" class="text-zee-primary hover:underline">All Zita activity →</a>
+            </div>
           </div>
           <div class="space-y-3">
             {zitaConvos.map((c) => (
@@ -786,4 +794,37 @@ function publishedDisplay(): string {
 
   continueBtn?.addEventListener('click', () => runRetry(continueBtn, 'continue'));
   freshBtn?.addEventListener('click', () => runRetry(freshBtn, 'fresh'));
+
+  // Zita-synthesis manual trigger — fires Learner.analyseZitaPatternsDaily
+  // for this piece without waiting for the 01:45 UTC day+1 alarm. The
+  // ≥5-user-message guard still applies server-side; below threshold
+  // the call completes as an observer "skipped" info event.
+  const synthBtn = document.getElementById('zita-synth-btn') as HTMLButtonElement | null;
+  const synthStatus = document.getElementById('zita-synth-status');
+
+  synthBtn?.addEventListener('click', async () => {
+    if (!synthStatus) return;
+    const date = synthBtn.dataset.date;
+    if (!date) return;
+    synthBtn.disabled = true;
+    synthStatus.textContent = 'Starting…';
+    try {
+      const res = await fetch(`/api/agents/zita-synthesis-trigger?date=${date}`, { method: 'POST' });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const body = await res.json() as { error?: string };
+          if (body.error) detail = body.error;
+        } catch { /* not JSON */ }
+        synthStatus.textContent = `Failed: ${res.status} ${detail}`;
+        synthBtn.disabled = false;
+        return;
+      }
+      synthStatus.textContent = 'Started — check Observer events in ~10s.';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error';
+      synthStatus.textContent = `Failed: ${msg}`;
+      synthBtn.disabled = false;
+    }
+  });
 </script>
