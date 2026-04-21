@@ -48,12 +48,12 @@ Format per entry:
 
 ## [open] 2026-04-21: Drop `pipeline_log_backup_20260421` snapshot
 
-**Surfaced:** 2026-04-21 alongside migration 0014's manual backfill UPDATEs (multi-piece cadence Phase 1). The 111-row snapshot was created before rewriting `pipeline_log.run_id` from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs for the 5 historical runs. Destructive UPDATE (values overwritten in place), snapshot is the only rollback path. Drop on or after **2026-04-28** once Phase 3 has been writing new UUID-shape run_ids for a week.
+**Surfaced:** 2026-04-21 alongside migration 0014's manual backfill UPDATEs (multi-piece cadence Phase 1). The 111-row snapshot was created before rewriting `pipeline_log.run_id` from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs. **Update 2026-04-21 (same day): the backfill was rolled back — the snapshot was consumed for that rollback.** See DECISIONS 2026-04-21 "Roll back `pipeline_log.run_id` backfill". The snapshot still holds the correct pre-rewrite values (which are also the current live values, since they were restored from it) — keeping it through 2026-04-28 gives a second-attempt audit window before Phase 3 re-approaches adding a `piece_id` column to this table.
 
-**Hypothesis:** None — housekeeping. Same retention logic as the daily_piece_audio snapshot above.
+**Hypothesis:** None — housekeeping.
 
 **Investigation hints:**
-- Before dropping: verify `SELECT COUNT(DISTINCT run_id) FROM pipeline_log` returns at least 5 (historical) + however many Phase 3 has produced, and every run_id matches a `daily_pieces.id`.
+- Before dropping: verify `SELECT run_id, COUNT(*) FROM pipeline_log GROUP BY run_id` matches the snapshot distribution (5 date-shape run_ids, 31/23/19/19/19 = 111 rows). If anything has drifted, don't drop.
 - Drop command: `DROP TABLE pipeline_log_backup_20260421;` via `wrangler d1 execute zeemish --remote --command`.
 - Close with a DECISIONS entry.
 

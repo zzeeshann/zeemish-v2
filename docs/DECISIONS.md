@@ -2,6 +2,46 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Roll back `pipeline_log.run_id` backfill — revert decision #3 from cadence Phase 1
+
+**Context:** Phase 1's manual backfill (documented earlier in today's entry "Multi-piece cadence — Phase 1 identity foundations") rewrote all 111 historical `pipeline_log.run_id` values from `YYYY-MM-DD` date-strings to `daily_pieces.id` UUIDs, on the stated architectural principle that `run_id = piece_id` simplifies joins. The principle is correct in isolation; the mistake was not auditing site-worker consumers before landing the destructive UPDATE.
+
+**What broke.** Two reader-visible surfaces + one admin surface had date-shape `run_id` assumed in their queries:
+
+- [`src/pages/api/daily/[date]/made.ts:87`](../src/pages/api/daily/[date]/made.ts) — `SELECT ... FROM pipeline_log WHERE run_id = ?` `.bind(date)`. Powers the "How this was made" drawer on every public daily-piece page. Returned zero rows post-backfill — timeline section on /daily/2026-04-17 through /daily/2026-04-21 was empty for several hours 2026-04-21 afternoon.
+- [`src/pages/dashboard/admin/piece/[date].astro:120`](../src/pages/dashboard/admin/piece/[date].astro) — same query shape. Admin per-piece deep-dive pipeline section empty.
+- [`src/pages/dashboard/index.astro:165-171`](../src/pages/dashboard/index.astro) — `isRunningNow = lastStep.run_id === today && !terminal`. With UUID run_ids, the string-equality check against `today` (YYYY-MM-DD) was always false. Live-pipeline indicator on public dashboard would not activate during the next 2am run.
+- [`src/pages/api/dashboard/pipeline.ts:16`](../src/pages/api/dashboard/pipeline.ts) — same pattern, powering admin live polling. Admin live-pipeline feed would have been empty on the next cron fire.
+
+**Decision:** Roll back the destructive UPDATE via the `pipeline_log_backup_20260421` snapshot and walk back Phase 1 decision #3 (`run_id = piece_id`). `pipeline_log.run_id` stays `YYYY-MM-DD` permanently — the column is semantically "which calendar day does this step belong to," distinct from "which piece." Phase 3 will add a separate **`pipeline_log.piece_id` column** for per-piece filtering at multi-per-day cadence; both columns coexist.
+
+Rollback ran 2026-04-21 via `wrangler d1 execute --remote`:
+```sql
+DELETE FROM pipeline_log;
+INSERT INTO pipeline_log SELECT * FROM pipeline_log_backup_20260421;
+```
+All 111 rows restored to date-shape run_ids with step counts intact (31/23/19/19/19). Local D1 reverse-migrated via `UPDATE run_id = (SELECT date FROM daily_pieces WHERE id = run_id)` — local didn't have the snapshot because I only ran the backup on remote in Phase 1.
+
+**Why decision #3 was wrong.** The "simpler joins" argument ignored that the existing 5 site-worker consumers had already embedded the `run_id=date` convention. At 1 piece/day, `WHERE run_id = ?` with either a date or piece_id works equivalently (one row per day either way). The semantic split — calendar day vs piece identity — only matters at multi-per-day. At that cadence, we need both: a column for "all steps from today's runs" (run_id stays date) and a column for "all steps from THIS piece's run" (piece_id). Forcing them into one column was YAGNI in reverse — collapsing two future concepts prematurely.
+
+**Revised architecture (supersedes Phase 1 decision #3):**
+- `pipeline_log.run_id` = `YYYY-MM-DD`, unchanged from launch. One date may have multiple runs at multi-per-day — acceptable; the column represents the day, not the run.
+- `pipeline_log.piece_id` — new nullable TEXT column added in Phase 3. Links to `daily_pieces.id`. Per-piece queries (`made.ts`, admin deep-dive) switch from `WHERE run_id = <date>` to `WHERE piece_id = <uuid>` (via a small lookup). Cross-day queries keep using run_id.
+- At Phase 3 deploy, the code+schema change is atomic: migration adds `piece_id` column + backfills historical 5-row data + site-worker queries are updated in the same commit. No interim broken state.
+
+**Guardrail for future destructive data migrations.** Before any UPDATE that rewrites values in a shared column, `grep` the full repo for usages of that column with string-literal or parameter-bound comparisons against the OLD shape. The Phase 1 oversight was: running `grep run_id` would have surfaced the 4 consumer sites and caught the assumption. Pattern to add to the runbook's migration hygiene section.
+
+**Backup table disposition.** `pipeline_log_backup_20260421` was already queued for drop on 2026-04-28 in FOLLOWUPS. The entry text updates to note the snapshot served its purpose — consumed for this rollback on 2026-04-21 — with the drop date unchanged. The snapshot can still be useful for a second-attempt audit before Phase 3 touches the column.
+
+**Non-goals:**
+- No revert of Phase 1's other backfills (`audit_results`, `learnings`, `zita_messages` piece_id columns — those are additive and don't break any reader). Those stay.
+- No edits to the already-applied migration 0014 SQL (it ran, it's part of history). A prominent warning comment is added to the file's pipeline_log backfill block pointing to this DECISIONS entry so a future replay doesn't re-break the site.
+- No production piece re-publish or reader-visible apology. The broken window was ~4 hours on a new launch week; reader traffic is low; the drawer's timeline section empty-state is inert (no error, just empty). Not worth narrating.
+
+**References:** [migrations/0014_piece_id_fks.sql](../migrations/0014_piece_id_fks.sql) (rollback warning added), [src/pages/api/daily/[date]/made.ts](../src/pages/api/daily/[date]/made.ts), [src/pages/dashboard/admin/piece/[date].astro](../src/pages/dashboard/admin/piece/[date].astro), [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro), [src/pages/api/dashboard/pipeline.ts](../src/pages/api/dashboard/pipeline.ts).
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 2 admin_settings plumbing
 
 **Context:** Phase 1 of the cadence plan (earlier this session) laid the identity foundations — piece_id FKs across child tables, audio PK rebuild, pipeline_log.run_id semantic shift. Phase 2 is the second atomic deliverable: the `admin_settings` table that will eventually hold all admin-configurable system state, seeded with the cadence value Phase 3 will gate on. Plan §6 Phase 2 scope is explicit: no behavioural change, just the table + a Director read path that proves the plumbing works.

@@ -163,9 +163,27 @@ CREATE INDEX IF NOT EXISTS idx_candidates_piece_id ON daily_candidates(piece_id)
 
 -- ─── Step 5: pipeline_log (111 rows across 5 run_ids) ──────────────
 --
--- Semantic shift: run_id column stays TEXT, but old rows hold
--- 'YYYY-MM-DD' and new rows (Phase 3 onwards) will hold UUIDs. Backfill
--- rewrites historical run_id values in place.
+-- ⚠️  DO NOT RUN — THIS STEP WAS ROLLED BACK 2026-04-21.
+--
+-- The backfill below was applied on 2026-04-21 and then reverted the
+-- same day after it broke site-worker pipeline queries in
+-- `src/pages/api/daily/[date]/made.ts`, `src/pages/dashboard/admin/
+-- piece/[date].astro`, `src/pages/api/dashboard/pipeline.ts`, and
+-- `src/pages/dashboard/index.astro`. All four consumers assumed
+-- `pipeline_log.run_id` matches `YYYY-MM-DD`; rewriting to UUIDs made
+-- their per-piece timeline queries return zero rows.
+--
+-- Revised architecture (see DECISIONS 2026-04-21 "Roll back
+-- pipeline_log.run_id backfill"): `run_id` stays `YYYY-MM-DD`
+-- permanently; a separate `piece_id` column will be added in a future
+-- migration alongside the site-worker query updates, atomically.
+--
+-- This commented block is preserved for audit trail — what ran and
+-- what reverted — but must not be executed again.
+--
+-- Semantic shift (ORIGINAL — now walked back): run_id column stays
+-- TEXT, but old rows hold 'YYYY-MM-DD' and new rows (Phase 3 onwards)
+-- will hold UUIDs. Backfill rewrites historical run_id values in place.
 --
 -- Optional snapshot before UPDATE (111 rows, free insurance):
 -- CREATE TABLE pipeline_log_backup_20260421 AS SELECT * FROM pipeline_log;

@@ -224,13 +224,13 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| run_id | TEXT | `daily_pieces.id` (UUID) — the piece this run produced. **Semantic shift as of 2026-04-21 (cadence Phase 1):** historical rows carried `YYYY-MM-DD` values because 1 piece/day meant date was unique per run. Migration 0014's backfill rewrote all 111 historical rows from date-strings to piece_id UUIDs; new rows write piece_id from Phase 3 onwards. Column type unchanged (still TEXT). Snapshot `pipeline_log_backup_20260421` held for rollback through 2026-04-28. |
+| run_id | TEXT | `YYYY-MM-DD` — the calendar day of this step's run. **Semantic walk-back 2026-04-21:** Phase 1's briefing had proposed shifting run_id to piece_id UUIDs, and the backfill ran, but four site-worker queries (`made.ts`, admin piece deep-dive, dashboard pipeline API + index) had embedded `run_id = YYYY-MM-DD` assumptions. Backfill rolled back from `pipeline_log_backup_20260421` the same day. Revised architecture: run_id stays date-shape permanently; a separate `piece_id TEXT` column will be added in a future migration for per-piece filtering. See DECISIONS 2026-04-21 "Roll back `pipeline_log.run_id` backfill". |
 | step | TEXT | scanning, curating, drafting, auditing_r1, publishing, done, error |
 | status | TEXT | running, done, failed |
 | data | TEXT | JSON with step-specific data (scores, counts, headlines) |
 | created_at | INTEGER | |
 
-Migrations: `0007_pipeline_log.sql` (initial), `0014_piece_id_fks.sql` (run_id semantic shift — values migrated, no schema change).
+Migrations: `0007_pipeline_log.sql` (initial). Migration 0014's proposed run_id semantic shift was reverted same-day — no net schema or data change to this table.
 
 ### admin_settings
 Key/value table for admin-configurable system state. One row per setting. First consumer is `interval_hours` read by Director (Phase 2 of the cadence plan); future settings (rate limits, feature flags, voice overrides, scanner feed overrides) live here too.
