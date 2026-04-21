@@ -72,7 +72,7 @@ export default {
     }
 
     // Admin endpoints require auth
-    const adminPaths = ['/daily-trigger', '/audio-retry', '/status', '/digest', '/events', '/engagement'];
+    const adminPaths = ['/daily-trigger', '/audio-retry', '/zita-synthesis-trigger', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -215,6 +215,48 @@ export default {
           }),
         );
         return new Response(JSON.stringify({ status: 'started', date, mode }), {
+          status: 202, headers: corsHeaders(request),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: corsHeaders(request),
+        });
+      }
+    }
+
+    // Zita synthesis manual trigger: POST /zita-synthesis-trigger?date=YYYY-MM-DD
+    // Fires Director.analyseZitaPatternsScheduled against an already-
+    // published piece, without waiting for the natural 01:45 UTC day+1
+    // alarm. Used for (a) testing the P1.5 synthesis path before the
+    // first natural run, (b) re-running synthesis for a day whose
+    // scheduled run failed. The Learner's ≥5-user-message guard still
+    // applies — a skip still produces an info observer event but no
+    // Claude call + no learnings rows. See DECISIONS 2026-04-21 "P1.5
+    // Learner skeleton" + RUNBOOK "Zita operations".
+    if (url.pathname === '/zita-synthesis-trigger' && request.method === 'POST') {
+      try {
+        const date = url.searchParams.get('date') ?? '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid date (YYYY-MM-DD)' }), {
+            status: 400, headers: corsHeaders(request),
+          });
+        }
+        // Title is optional; Director's handler logs it into observer events.
+        // Look up from daily_pieces so the log reads right if we have it.
+        const pieceRow = await env.DB
+          .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
+          .bind(date)
+          .first<{ headline: string }>();
+        const title = pieceRow?.headline ?? `(no daily_pieces row for ${date})`;
+        const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        ctx.waitUntil(
+          director.analyseZitaPatternsScheduled({ date, title }).catch((err) => {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.error(`[zita-synthesis-trigger] failed for ${date}:`, message);
+          }),
+        );
+        return new Response(JSON.stringify({ status: 'started', date, title }), {
           status: 202, headers: corsHeaders(request),
         });
       } catch (err) {

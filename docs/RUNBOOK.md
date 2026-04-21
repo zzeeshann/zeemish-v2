@@ -235,15 +235,15 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
 
 ## Zita operations
 - **Admin view of reader chats:** `/dashboard/admin/zita/` (ADMIN_EMAIL only) — 30-day window, conversations grouped by reader × piece, expandable transcripts. Per-piece "Questions from readers" section lives on `/dashboard/admin/piece/[date]/` for per-piece context.
-- **Manual P1.5 trigger (test synthesis before the 24-hour alarm fires):** call the Director agent's `analyseZitaPatternsScheduled` method directly. No site-worker endpoint yet — invoke via wrangler or add a dev-only trigger. Example using the agents worker's internal route (expand `/trigger-zita-synthesis` if you wire one):
+- **Manual P1.5 trigger (test synthesis before the 24-hour alarm fires):**
   ```bash
-  # Future endpoint — not implemented yet. For now, use the daily
-  # publish path which already schedules the synthesis for day+1:
-  curl "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
+  curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/zita-synthesis-trigger?date=2026-04-20" \
     -H "Authorization: Bearer YOUR_ADMIN_SECRET"
-  # Then wait until 01:45 UTC next day, OR manually shorten the
-  # delay in the Director.triggerDailyPiece schedule for a one-off
-  # dev-test run.
+  # Returns 202 {"status":"started","date":"2026-04-20","title":"…"}.
+  # Work runs in ctx.waitUntil — observer_event lands within ~10s on
+  # success (logZitaSynthesisMetered), a few seconds on the skip path.
+  # The ≥5 user-message guard still applies — below threshold fires a
+  # "Zita synthesis skipped: …" observer info event + zero Claude cost.
   ```
 - **Inspect what Zita synthesis produced:** query `learnings` for a specific piece:
   ```bash
