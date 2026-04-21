@@ -1,8 +1,15 @@
 import { Agent } from 'agents';
 import type { Env } from './types';
 
-/** Audio brief for a daily piece — the date is the piece identity. */
+/**
+ * Audio brief for a daily piece. `pieceId` is the primary identity
+ * (matches `daily_pieces.id`). `date` stays on the brief for R2 path
+ * grouping (`audio/daily/{date}/{pieceId}/…`) and for display/logging,
+ * but all D1 filters use `pieceId` to avoid cross-piece pooling at
+ * multi-per-day cadence.
+ */
 export interface AudioBrief {
+  pieceId: string;
   date: string; // YYYY-MM-DD
 }
 
@@ -131,10 +138,10 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
     const priorRes = await this.env.DB
       .prepare(
         `SELECT request_id FROM daily_piece_audio
-         WHERE date = ? AND request_id IS NOT NULL
+         WHERE piece_id = ? AND request_id IS NOT NULL
          ORDER BY generated_at DESC LIMIT 3`,
       )
-      .bind(brief.date)
+      .bind(brief.pieceId)
       .all<{ request_id: string }>();
     // Reverse so oldest-first, matching the order ElevenLabs expects
     const priorRequestIds: string[] = priorRes.results
@@ -147,7 +154,12 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
     for (const beat of prepared) {
       if (processedThisCall >= maxBeats) break;
 
-      const r2Key = `audio/daily/${brief.date}/${beat.name}.mp3`;
+      // Piece_id subdirectory in the path avoids same-date beat-name
+      // collisions at multi-per-day cadence (every piece has a "hook"
+      // beat). Legacy pre-cadence-Phase-5 pieces stay at the older
+      // date-only path; readers fetch via `public_url` which derives
+      // from the stored r2_key per-row, so the dual-path is safe.
+      const r2Key = `audio/daily/${brief.date}/${brief.pieceId}/${beat.name}.mp3`;
       const existing = await this.env.AUDIO_BUCKET.head(r2Key);
 
       // Skip already-done beats without counting against maxBeats — a
@@ -171,7 +183,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       };
       processedBeats.push(beatAudio);
 
-      await this.persistBeatRow(brief.date, beatAudio);
+      await this.persistBeatRow(brief.pieceId, brief.date, beatAudio);
 
       if (res.requestId) {
         priorRequestIds.push(res.requestId);
@@ -184,8 +196,8 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
     // Retries, partial prior runs, and concurrent invocations all land
     // here consistently.
     const countRow = await this.env.DB
-      .prepare('SELECT COUNT(*) AS cnt FROM daily_piece_audio WHERE date = ?')
-      .bind(brief.date)
+      .prepare('SELECT COUNT(*) AS cnt FROM daily_piece_audio WHERE piece_id = ?')
+      .bind(brief.pieceId)
       .first<{ cnt: number }>();
     const completedCount = countRow?.cnt ?? 0;
 
@@ -327,16 +339,17 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
    * producer re-runs (manual retry, partial failure recovery), each
    * row is refreshed rather than duplicated.
    */
-  private async persistBeatRow(date: string, beat: BeatAudio): Promise<void> {
+  private async persistBeatRow(pieceId: string, date: string, beat: BeatAudio): Promise<void> {
     await this.env.DB.prepare(
       `INSERT OR REPLACE INTO daily_piece_audio
-         (date, beat_name, r2_key, public_url, character_count,
+         (piece_id, beat_name, date, r2_key, public_url, character_count,
           duration_seconds, request_id, model, voice_id, generated_at)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
     )
       .bind(
-        date,
+        pieceId,
         beat.beatName,
+        date,
         beat.r2Key,
         beat.publicUrl,
         beat.characterCount,

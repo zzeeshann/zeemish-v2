@@ -2,6 +2,48 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Scope audio pipeline state per piece_id (multi-per-day unblock, #2 + R2 key fix)
+
+**Context:** Commit 2 of the 3-blocker sequence. Phase 3's audit flagged [`director.ts:783`](../agents/src/director.ts) — `retryAudioFresh(date)` issued `DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'` keyed by date. At 1 piece/day this correctly wipes "today's audio retry" state. At multi-per-day the same DELETE wipes across all pieces that share a date. Blocked the admin interval flip.
+
+**Plus a fourth blocker found while scoping this one.** The audio producer at [`agents/src/audio-producer.ts`](../agents/src/audio-producer.ts) wrote to R2 at `audio/daily/{brief.date}/{beat.name}.mp3` — date-scoped, not piece-scoped. Two pieces sharing a date have overlapping beat names (every piece has a "hook" beat) that would silently overwrite each other in R2. Same multi-per-day blocker theme — fixed in the same commit.
+
+**Plus a latent critical bug caught while reading the code.** `persistBeatRow` at [`agents/src/audio-producer.ts`](../agents/src/audio-producer.ts) INSERTed `(date, beat_name, r2_key, …)` — but Phase 1's migration 0015 rebuilt `daily_piece_audio` with PK `(piece_id, beat_name)` + `piece_id TEXT NOT NULL`. The INSERT without a `piece_id` binding would have hit a NOT NULL violation on EVERY new piece's audio generation. No piece has run through the pipeline since Phase 1 landed earlier today — existing 5 pieces hit R2 head-check before the INSERT, so the bug was latent. Tonight's 02:00 UTC cron would have been the first to trip it. Unblocking audio generation going forward was a bigger motivator for this commit than the multi-per-day story it was scoped for.
+
+**Five decisions (now implemented):**
+
+**1. `retryAudioFresh` takes a `piece_id`, not a `date`.** Signature changed `retryAudioFresh(date: string)` → `retryAudioFresh(pieceId: string)`. Same for `retryAudio(date)` → `retryAudio(pieceId)`. Both validate the incoming string matches the UUID v4 shape. `retryAudio` derives `date` internally from `daily_pieces WHERE id = ?`. The site worker's `/audio-retry` endpoint still accepts `?date=...` from the admin UI but now looks up piece_id from `daily_pieces` (`ORDER BY published_at DESC LIMIT 1` — at multi-per-day picks the most recent piece for the date, which matches the "retry the latest" intent).
+
+**2. `daily_piece_audio` is the single source of truth for piece audio state.** Post-Phase-1 the table's PK is `(piece_id, beat_name)`. Retry-fresh iterates `daily_piece_audio WHERE piece_id = ?`, calls `AUDIO_BUCKET.delete(row.r2_key)` for each stored r2_key verbatim, then `DELETE FROM daily_piece_audio WHERE piece_id = ?`. `r2_key` holds the full path used at generation time — no path reconstruction. Works for both legacy and new-format keys.
+
+**3. R2 key structure gains a piece_id component going forward.** New format: `audio/daily/{date}/{piece_id}/{beat_name}.mp3`. The 5 existing pieces' R2 objects stay at the old 1-level path (`audio/daily/{date}/{beat}.mp3`) — no rename, no re-upload (permanence rule). `daily_piece_audio.r2_key` records the full path per-row, so the audio delivery layer must tolerate both shapes permanently. See the "Dual-path read contract" below.
+
+**Dual-path read contract — permanent.** The audio-serving path must tolerate BOTH key shapes forever: `audio/daily/{date}/{beat}.mp3` for the 5 legacy pieces, `audio/daily/{date}/{piece_id}/{beat}.mp3` for everything from this commit onwards. The `daily_piece_audio.r2_key` column is authoritative per-row; no code should reconstruct paths from `(date, beat_name)` tuples. Called out explicitly so a future audit of `/audio/*` routing or R2 binding logic doesn't assume a single-shape world and break the legacy pieces.
+
+**4. Removed the `DELETE FROM pipeline_log` from retry-fresh entirely.** Audio-step pipeline_log rows stay as append-only audit history. Admin view dedups by newest-wins; a fresh retry fires new `audio-*` step rows that naturally supersede the old failed attempt's rows in any "current state" query. Resolves the multi-per-day blocker with zero data loss.
+
+**5. No schema change.** Migrations 0014/0015 already established `daily_piece_audio.piece_id` NOT NULL. This commit is code-only on top of the existing schema. The latent `persistBeatRow` bug documented above is fixed by threading `pieceId` through the audio brief (`AudioBrief.pieceId`, `AudioAuditBrief.pieceId`) and the call chain (`triggerDailyPiece` captures the UUID before INSERT → schedules `runAudioPipelineScheduled({pieceId, date, …})` → `runAudioPipeline(pieceId, date, …)` → `generateAudioChunk({pieceId, date}, …)` / `auditor.audit({pieceId, date})` → `persistBeatRow(pieceId, date, beat)` INSERTs with piece_id in the `(piece_id, beat_name, date, …)` column order).
+
+**Touched files:**
+- [`agents/src/audio-producer.ts`](../agents/src/audio-producer.ts) — `AudioBrief` adds `pieceId`; r2Key gets piece_id subdirectory; prior-request-id SELECT + COUNT switch to `WHERE piece_id = ?`; `persistBeatRow(pieceId, date, beat)` INSERTs piece_id.
+- [`agents/src/audio-auditor.ts`](../agents/src/audio-auditor.ts) — `AudioAuditBrief` adds `pieceId`; `loadRows(pieceId)` filters by piece_id.
+- [`agents/src/director.ts`](../agents/src/director.ts) — piece_id captured into local var before `daily_pieces` INSERT; threaded through audio schedule payload, `runAudioPipelineScheduled`, `runAudioPipeline`, `retryAudio`, `retryAudioFresh`; audio-publisher SELECT + has_audio UPDATE switch to piece_id.
+- [`agents/src/server.ts`](../agents/src/server.ts) — `/audio-retry` endpoint looks up piece_id from `daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1` before invoking the Director RPC.
+
+**Non-goals (deferred):**
+- No Learner-side piece_id threading (blocker #3, next commit).
+- No frontend change to the admin retry button. It still POSTs `?date=...`; server-side lookup handles the conversion to piece_id. If admin UX gains a "retry a specific piece" control at multi-per-day, the endpoint can accept `?pieceId=...` as an alternative.
+- No re-upload of the 5 legacy pieces' R2 objects to the new nested path. Their `daily_piece_audio.r2_key` values record the old path verbatim.
+
+**Verification:**
+- Agents TypeScript check clean on all four touched files. 18 pre-existing SubAgent DurableObjectStub errors in server.ts unchanged.
+- Next 02:00 UTC cron fire is the runtime smoke test — piece gets a UUID, audio persists with piece_id populated, R2 key lands at the new nested path.
+- Retry-fresh at 1/day: admin hits the button with date, endpoint resolves piece_id, RPC wipes that piece's audio and delegates to retryAudio. Legacy pieces' retry would delete old-format R2 keys via the stored r2_key column — exercising the dual-path contract.
+
+**References:** [agents/src/audio-producer.ts](../agents/src/audio-producer.ts), [agents/src/audio-auditor.ts](../agents/src/audio-auditor.ts), [agents/src/director.ts](../agents/src/director.ts), [agents/src/server.ts](../agents/src/server.ts), [migrations/0015_daily_piece_audio_piece_id_pk.sql](../migrations/0015_daily_piece_audio_piece_id_pk.sql) (schema that made this necessary), FOLLOWUPS 2026-04-21 "Unblock multi-per-day flip" (items #2 and #4 resolved by this commit).
+
+---
+
 ## 2026-04-21: Remove pre-run `pipeline_log` DELETE (multi-per-day unblock, #1)
 
 **Context:** Commit 1 of the 3-blocker sequence flagged by Phase 3's pipeline_log consumer audit. [`director.ts:109`](../agents/src/director.ts) ran `DELETE FROM pipeline_log WHERE run_id = ? .bind(today)` at the top of `triggerDailyPiece`. At 1 piece/day the DELETE correctly clears stale rows from an earlier interrupted attempt on the same date. At multi-per-day (admin flipping `interval_hours` below 24) the same DELETE wipes all earlier completed runs' pipeline_log history from the same date when a new run starts — silent audit-trail loss.

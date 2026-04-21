@@ -333,14 +333,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
 
     // Log to daily_pieces table. fact_check_passed reflects the last
-    // audit round, not an assumption.
+    // audit round, not an assumption. piece_id is captured into a local
+    // so the audio pipeline can thread it through the R2 key + D1
+    // filters (see cadence Phase 5 "Scope audio pipeline state per
+    // piece_id"). Without it, persistBeatRow would violate the
+    // NOT NULL piece_id PK column added by migration 0015.
     const factsPassed = failedGates.includes('facts') ? 0 : 1;
+    const pieceId = crypto.randomUUID();
     await this.env.DB
       .prepare(
         `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, quality_flag, published_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(crypto.randomUUID(), today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
+      .bind(pieceId, today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
         currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, publishedAtMs, publishedAtMs)
       .run().catch(() => {});
 
@@ -423,6 +428,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // already permanent either way; audio is ship-and-retry. See
     // DECISIONS 2026-04-19 "Audio via alarm, not inline".
     await this.schedule(2, 'runAudioPipelineScheduled', {
+      pieceId,
       date: today,
       filePath: publishResult.filePath,
       title: brief.headline,
@@ -571,11 +577,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * the payload — scheduled payloads live in SQLite and stay small.
    */
   async runAudioPipelineScheduled(payload: {
+    pieceId: string;
     date: string;
     filePath: string;
     title: string;
   }): Promise<void> {
-    const { date, filePath, title } = payload;
+    const { pieceId, date, filePath, title } = payload;
 
     const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
     const current = await publisher.readPublishedMdx(filePath);
@@ -593,7 +600,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       return;
     }
 
-    await this.runAudioPipeline(date, current.mdx, filePath, title);
+    await this.runAudioPipeline(pieceId, date, current.mdx, filePath, title);
   }
 
   /**
@@ -610,6 +617,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * voiceScore or audioBeats.
    */
   private async runAudioPipeline(
+    pieceId: string,
     date: string,
     mdx: string,
     filePath: string,
@@ -640,7 +648,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
             `Audio pipeline exceeded ${MAX_CHUNK_ITERATIONS} chunk iterations — likely stuck`,
           );
         }
-        const chunk = await producer.generateAudioChunk({ date }, mdx, MAX_BEATS_PER_CHUNK);
+        const chunk = await producer.generateAudioChunk({ pieceId, date }, mdx, MAX_BEATS_PER_CHUNK);
         totalBeats = chunk.totalBeats;
         totalCharacters = chunk.totalCharacters;
         if (chunk.completedCount >= totalBeats) break;
@@ -670,7 +678,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     this.enterPhase('audio-auditor');
     await this.logStep(date, 'audio-auditing', 'running', {});
     const auditor = await this.subAgent(AudioAuditorAgent, `audio-auditor-${date}`);
-    const auditResult = await auditor.audit({ date });
+    const auditResult = await auditor.audit({ pieceId, date });
     await this.logStep(date, 'audio-auditing', auditResult.passed ? 'done' : 'failed', {
       passed: auditResult.passed,
       beatCount: auditResult.beatCount,
@@ -697,9 +705,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const allBeatsRes = await this.env.DB
       .prepare(
         `SELECT beat_name, public_url FROM daily_piece_audio
-         WHERE date = ? ORDER BY generated_at ASC`,
+         WHERE piece_id = ? ORDER BY generated_at ASC`,
       )
-      .bind(date)
+      .bind(pieceId)
       .all<{ beat_name: string; public_url: string }>();
     const audioBeats: Record<string, string> = Object.fromEntries(
       allBeatsRes.results.map((r) => [r.beat_name, r.public_url]),
@@ -709,8 +717,8 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const publisher = await this.subAgent(PublisherAgent, `audio-publisher-${date}`);
       const publishResult = await publisher.publishAudio(filePath, audioBeats);
       await this.env.DB
-        .prepare('UPDATE daily_pieces SET has_audio = 1 WHERE date = ?')
-        .bind(date)
+        .prepare('UPDATE daily_pieces SET has_audio = 1 WHERE id = ?')
+        .bind(pieceId)
         .run()
         .catch(() => {});
       await this.logStep(date, 'audio-publishing', 'done', {
@@ -746,18 +754,26 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * Idempotent — if audio already landed, Producer's R2 head-check
    * skips generation, Auditor re-verifies, Publisher's splice is a no-op.
    */
-  async retryAudio(date: string): Promise<void> {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new Error(`retryAudio: invalid date "${date}"`);
+  async retryAudio(pieceId: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
+      throw new Error(`retryAudio: invalid pieceId "${pieceId}"`);
     }
 
     const piece = await this.env.DB
-      .prepare('SELECT headline FROM daily_pieces WHERE date = ? LIMIT 1')
-      .bind(date)
-      .first<{ headline: string }>();
-    if (!piece) throw new Error(`retryAudio: no piece published on ${date}`);
+      .prepare('SELECT date, headline FROM daily_pieces WHERE id = ? LIMIT 1')
+      .bind(pieceId)
+      .first<{ date: string; headline: string }>();
+    if (!piece) throw new Error(`retryAudio: no piece with id ${pieceId}`);
+    const { date } = piece;
 
-    // filePath lives in the publishing.done step's data column.
+    // filePath lives in the publishing.done step's data column. run_id
+    // stays YYYY-MM-DD (cadence Phase 3 walk-back). At multi-per-day
+    // this SELECT returns the latest publishing.done across the day's
+    // pieces via ORDER BY created_at DESC — acceptable because retry
+    // always targets the most-recently-published piece on that date in
+    // practice, and the filePath string itself encodes the slug which
+    // is piece-specific. If ever ambiguous, move to filtering by
+    // pipeline_log.data's {date, piece_id, filePath} payload.
     const pubRow = await this.env.DB
       .prepare(
         `SELECT data FROM pipeline_log
@@ -777,6 +793,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // budget). Validation above catches common error paths before the
     // alarm is scheduled — so the caller sees failures synchronously.
     await this.schedule(1, 'runAudioPipelineScheduled', {
+      pieceId,
       date,
       filePath,
       title: piece.headline,
@@ -793,9 +810,9 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * Text piece itself is untouched — this only resets the audio-side
    * state. Admin dashboard's "Start over" button invokes this path.
    */
-  async retryAudioFresh(date: string): Promise<void> {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new Error(`retryAudioFresh: invalid date "${date}"`);
+  async retryAudioFresh(pieceId: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
+      throw new Error(`retryAudioFresh: invalid pieceId "${pieceId}"`);
     }
 
     // keepAlive is reference-counted inside the SDK — nesting with the
@@ -803,37 +820,42 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // refs are disposed.
     const keepAliveDispose = await this.keepAlive();
     try {
-      // Wipe R2 clips for this date (audio/daily/YYYY-MM-DD/*.mp3)
-      const prefix = `audio/daily/${date}/`;
-      const listed = await this.env.AUDIO_BUCKET.list({ prefix });
+      // `daily_piece_audio` is the authoritative source for this piece's
+      // audio state (post-Phase-1 PK is (piece_id, beat_name)). Iterate
+      // its rows to find every R2 object's exact stored key — no path
+      // reconstruction. This works for BOTH legacy pieces stored at
+      // `audio/daily/{date}/{beat}.mp3` AND new pieces stored at
+      // `audio/daily/{date}/{piece_id}/{beat}.mp3`. See DECISIONS
+      // 2026-04-21 "Scope audio pipeline state per piece_id" →
+      // "Dual-path read contract — permanent."
+      const rows = await this.env.DB
+        .prepare('SELECT r2_key FROM daily_piece_audio WHERE piece_id = ?')
+        .bind(pieceId)
+        .all<{ r2_key: string }>();
       await Promise.all(
-        listed.objects.map((obj) => this.env.AUDIO_BUCKET.delete(obj.key)),
+        rows.results.map((r) => this.env.AUDIO_BUCKET.delete(r.r2_key)),
       );
 
       // Wipe D1 beat rows
       await this.env.DB
-        .prepare('DELETE FROM daily_piece_audio WHERE date = ?')
-        .bind(date)
+        .prepare('DELETE FROM daily_piece_audio WHERE piece_id = ?')
+        .bind(pieceId)
         .run();
 
       // Clear has_audio on the piece so dashboard + site reflect "pending"
       await this.env.DB
-        .prepare('UPDATE daily_pieces SET has_audio = 0 WHERE date = ?')
-        .bind(date)
+        .prepare('UPDATE daily_pieces SET has_audio = 0 WHERE id = ?')
+        .bind(pieceId)
         .run()
         .catch(() => {});
 
-      // Clear audio-* pipeline_log rows so the timeline resets cleanly.
-      // Text-phase rows (scanning, curating, drafting, auditing_*,
-      // publishing, done) stay — they describe a published piece that
-      // remains published.
-      await this.env.DB
-        .prepare("DELETE FROM pipeline_log WHERE run_id = ? AND step LIKE 'audio%'")
-        .bind(date)
-        .run();
+      // No pipeline_log DELETE here. Audio-step rows stay as
+      // append-only history — the admin view dedups by newest-wins.
+      // Removing the prior wipe resolves the multi-per-day blocker
+      // where the DELETE spanned all pieces on a date.
 
       // Delegate to existing retryAudio — it handles MDX read + audio pipeline
-      await this.retryAudio(date);
+      await this.retryAudio(pieceId);
     } finally {
       keepAliveDispose();
     }

@@ -2,7 +2,8 @@ import { Agent } from 'agents';
 import type { Env } from './types';
 
 export interface AudioAuditBrief {
-  date: string;
+  pieceId: string;
+  date: string; // YYYY-MM-DD — retained for display/logging only
 }
 
 export interface AudioAuditResult {
@@ -66,7 +67,7 @@ export class AudioAuditorAgent extends Agent<Env, AudioAuditorState> {
   initialState: AudioAuditorState = { lastResult: null };
 
   async audit(brief: AudioAuditBrief): Promise<AudioAuditResult> {
-    const rows = await this.loadRows(brief.date);
+    const rows = await this.loadRows(brief.pieceId);
     const issues: AudioIssue[] = [];
 
     if (rows.length === 0) {
@@ -161,15 +162,15 @@ export class AudioAuditorAgent extends Agent<Env, AudioAuditorState> {
     return result;
   }
 
-  private async loadRows(date: string): Promise<AudioRow[]> {
+  private async loadRows(pieceId: string): Promise<AudioRow[]> {
     const { results } = await this.env.DB.prepare(
       `SELECT beat_name, r2_key, public_url, character_count,
               duration_seconds, request_id, model, voice_id, generated_at
        FROM daily_piece_audio
-       WHERE date = ?
+       WHERE piece_id = ?
        ORDER BY beat_name`,
     )
-      .bind(date)
+      .bind(pieceId)
       .all<AudioRow>();
     return results ?? [];
   }

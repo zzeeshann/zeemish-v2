@@ -203,18 +203,34 @@ export default {
             status: 400, headers: corsHeaders(request),
           });
         }
+        // Cadence Phase 5: retryAudio(Fresh) take a piece_id, not a date
+        // (scope per piece, not per day). Admin still hits this endpoint
+        // with ?date=... — look up piece_id from daily_pieces here.
+        // At interval_hours=24 (current prod) there's exactly one piece
+        // per date; at multi-per-day we pick the latest via ORDER BY
+        // published_at DESC to match the "retry the most recent" intent.
+        const pieceRow = await env.DB
+          .prepare('SELECT id FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
+          .bind(date)
+          .first<{ id: string }>();
+        if (!pieceRow?.id) {
+          return new Response(JSON.stringify({ error: `No piece published on ${date}` }), {
+            status: 404, headers: corsHeaders(request),
+          });
+        }
+        const pieceId = pieceRow.id;
         const mode = url.searchParams.get('mode') === 'fresh' ? 'fresh' : 'continue';
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
         const run = mode === 'fresh'
-          ? director.retryAudioFresh(date)
-          : director.retryAudio(date);
+          ? director.retryAudioFresh(pieceId)
+          : director.retryAudio(pieceId);
         ctx.waitUntil(
           run.catch((err) => {
             const message = err instanceof Error ? err.message : 'Unknown error';
-            console.error(`[audio-retry:${mode}] failed for ${date}:`, message);
+            console.error(`[audio-retry:${mode}] failed for piece ${pieceId} (${date}):`, message);
           }),
         );
-        return new Response(JSON.stringify({ status: 'started', date, mode }), {
+        return new Response(JSON.stringify({ status: 'started', date, pieceId, mode }), {
           status: 202, headers: corsHeaders(request),
         });
       } catch (err) {
