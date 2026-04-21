@@ -132,20 +132,22 @@ Learner: runs off-pipeline on reader engagement data
 - **File:** `agents/src/publisher.ts`
 
 ### 12. LearnerAgent
-- **Role:** Writes patterns into the `learnings` database so tomorrow's Drafter can see what today's pipeline and readers taught us. Two signal sources wired, two more scaffolded:
+- **Role:** Writes patterns into the `learnings` database so tomorrow's Drafter can see what today's pipeline and readers taught us. All four signal sources are wired as of 2026-04-21:
   - **Producer-side (P1.3, wired 2026-04-19):** `analysePiecePostPublish(date)` reads the full quality record for a just-published piece — `daily_pieces`, `audit_results`, `pipeline_log`, `daily_candidates` — and writes `source='producer'` learnings. Fired by Director off-pipeline immediately after `publishing done`, via a 1-second `this.schedule(...)` so it never blocks the ship. Caps writes at 10 per run; overflow logs to observer_events. Non-retriable by design: a DB/Claude/JSON failure logs to observer_events and moves on.
-  - **Reader-side (P1.5 pending traffic):** `analyse(courseId, days)` produces an engagement report from `engagement`; `analyseAndLearn(lessonData)` extracts learnings and writes `source='reader'`. Only fires when readers generate engagement events (no readers on the daily pieces yet).
-  - **Self-reflection (P1.4 pending):** Drafter's own post-draft review, `source='self-reflection'`.
-  - **Zita (P1.5 pending traffic):** patterns in reader Zita questions, `source='zita'`.
-- **Output:** Producer post-publish result (`{date, written, overflowCount, considered}`) returned to Director for overflow logging; learning rows written to `learnings` with `source` populated.
+  - **Reader-side (pending traffic):** `analyse(courseId, days)` produces an engagement report from `engagement`; `analyseAndLearn(lessonData)` extracts learnings and writes `source='reader'`. Only fires when readers generate engagement events (no readers on the daily pieces yet).
+  - **Self-reflection (P1.4, wired 2026-04-19):** Drafter's own `reflect(brief, mdx, date)` post-publish review, `source='self-reflection'`. Fired by Director off-pipeline immediately after `publishing done`.
+  - **Zita (P1.5, wired 2026-04-21):** `analyseZitaPatternsDaily(date)` reads `zita_messages WHERE piece_date = ?`, groups by reader, synthesises question patterns. Guarded no-op below 5 user messages (returns `{skipped: true}` without firing a Claude call). Scheduled at **01:45 UTC on day+1** — not publish+1h like producer/self-reflection, because Zita synthesis needs reader traffic that takes a day. Writes `source='zita'` rows via `writeLearning(..., 60, 'zita', date)`. Same 10-row cap + non-retriable posture. See DECISIONS 2026-04-21 "P1.5 Learner skeleton".
+- **Output:** Producer post-publish result (`{date, written, overflowCount, considered}`) returned to Director for overflow logging; Zita synthesis returns the same shape plus `{skipped, userMsgCount, tokensIn, tokensOut, durationMs}` for cost metering. All learning rows written to `learnings` with `source` populated.
 - **Does NOT touch published content.** Published pieces are permanent. All improvements feed forward.
 - **Reader surfaces:** Two public views into what the loop produces. (1) `/dashboard/` "What we've learned so far" panel — counts by source plus the latest observation across all pieces, fed by `/api/dashboard/memory`. (2) Per-piece "What the system learned from this piece" section inside the `/daily/[date]/` How-this-was-made drawer — the specific learnings written about that piece, grouped by source, fed by `/api/daily/[date]/made`'s extended envelope. Both surfaces join on `learnings.piece_date` (added in migration 0012) + `learnings.source` (migration 0011).
+- **Admin surface (new 2026-04-21):** `/dashboard/admin/zita/` surfaces the raw reader-chat signal the Zita-source synthesis feeds on. Per-piece deep-dive (`/dashboard/admin/piece/[date]/`) gains a "Questions from readers" section for per-piece context.
 - **File:** `agents/src/learner.ts`
-- **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side)
+- **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side, `LEARNER_ZITA_PROMPT` for Zita-question synthesis)
 
 ### 13. ObserverAgent
-- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `getRecentEvents()`, `getDailyDigest()`
+- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `getRecentEvents()`, `getDailyDigest()`
+- **Site-origin events (new 2026-04-21):** `zita_history_truncated`, `zita_rate_limited`, `zita_claude_error`, `zita_handler_error` — written directly from `src/pages/api/zita/chat.ts` via [`src/lib/observer-events.ts`](../src/lib/observer-events.ts), which mirrors this agent's `writeEvent` shape. Same table, same feed — the admin Observer section doesn't discriminate by origin.
 - **File:** `agents/src/observer.ts`
 
 ## Endpoints

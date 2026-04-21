@@ -2,6 +2,8 @@
 
 *Status: vision chapter. Zita exists in shallow form today. This chapter describes what Zita could become, and why that version is the one that matters most. When Zita actually works this way, this chapter will be rewritten as documentation of reality. Until then, it is a statement of direction.*
 
+*Update (2026-04-21): the design document this chapter calls for — see "The honest order of operations" below — has been written and lives at [`docs/zita-design.md`](../docs/zita-design.md). Decisions have been made for each of the six questions this chapter poses (multi-turn state, tools, library index, failure modes, human handoff, voice testing). The design stage is complete; the build has not started. Shallow Zita has also received its own improvements in the meantime — conversations are now scoped by piece_date so they don't pool across different days, the per-turn history is bounded, the admin can see what readers are asking via `/dashboard/admin/zita/`, safety events land in the observer feed, and the P1.5 learning loop is wired so Zita's questions feed `source='zita'` rows into tomorrow's Drafter prompt. See `CLAUDE.md` "Zita improvement plan" for the 2026-04-21 six-phase rollout.*
+
 ---
 
 Zita is the small conversational helper at the bottom of every Zeemish piece. Right now, it asks readers questions. You've finished the piece on chokepoints. Zita says: *Can you think of a chokepoint in your own life — a single point of failure that an entire system depends on?* You type an answer. Zita asks a follow-up. That's roughly all.

@@ -81,7 +81,7 @@ wrangler secret put SCANNER_RSS_FEEDS_JSON
 ## D1 Database
 
 ### Run migrations
-There are 12 migrations (`0001_init.sql` … `0012_learnings_piece_date.sql`).
+There are 13 migrations (`0001_init.sql` … `0013_zita_messages_piece_date.sql`).
 Apply them (idempotent — skips any already recorded in `d1_migrations`):
 ```bash
 wrangler d1 migrations apply zeemish --remote
@@ -98,7 +98,7 @@ wrangler d1 execute zeemish --remote --command="SELECT * FROM observer_events OR
 ```
 
 ### Migration tracker hygiene
-Migrations are tracked in the `d1_migrations` table. As of 2026-04-20 the tracker is in sync (12 rows, 0001–0012). Keep it that way:
+Migrations are tracked in the `d1_migrations` table. As of 2026-04-21 the tracker is in sync (13 rows, 0001–0013). Keep it that way:
 
 - **Use `wrangler d1 migrations apply zeemish --remote`** for any new migration on a live DB — not `wrangler d1 execute --file=...` and not `wrangler d1 execute --command=...`. Only `migrations apply` writes to `d1_migrations`; the other paths run the SQL but leave the tracker blind, which is how we got into the 2026-04-20 mess.
 - **Pre-flight check** before applying:
@@ -220,18 +220,50 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
   was unreachable, so fact-checking used Claude's first-pass assessment
   only. Pipeline continued, but unverified claims may have slipped past.
   Worth re-running or spot-checking the piece.
+- `severity: 'info'`, title `Zita synthesis skipped: …` — P1.5 fired at
+  01:45 UTC but the piece had fewer than 5 reader messages. Expected at
+  current traffic levels.
+- `severity: 'info'`, title `Zita synthesis: …` — P1.5 produced at
+  least one Zita-source learning; tokens-in/out + latency in the body.
+- `severity: 'warn'`, titles starting `Zita …` without "synthesis" —
+  site-origin events: `zita_history_truncated` (long session past the
+  40-message cap, full row count in context), `zita_rate_limited`
+  (user exceeded 20/15min), `zita_claude_error` (Claude API non-OK,
+  upstream body in context), `zita_handler_error` (unhandled
+  exception in the chat handler). The first three are expected
+  occasional signal; `zita_handler_error` warrants investigation.
+
+## Zita operations
+- **Admin view of reader chats:** `/dashboard/admin/zita/` (ADMIN_EMAIL only) — 30-day window, conversations grouped by reader × piece, expandable transcripts. Per-piece "Questions from readers" section lives on `/dashboard/admin/piece/[date]/` for per-piece context.
+- **Manual P1.5 trigger (test synthesis before the 24-hour alarm fires):** call the Director agent's `analyseZitaPatternsScheduled` method directly. No site-worker endpoint yet — invoke via wrangler or add a dev-only trigger. Example using the agents worker's internal route (expand `/trigger-zita-synthesis` if you wire one):
+  ```bash
+  # Future endpoint — not implemented yet. For now, use the daily
+  # publish path which already schedules the synthesis for day+1:
+  curl "https://zeemish-agents.zzeeshann.workers.dev/daily-trigger" \
+    -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+  # Then wait until 01:45 UTC next day, OR manually shorten the
+  # delay in the Director.triggerDailyPiece schedule for a one-off
+  # dev-test run.
+  ```
+- **Inspect what Zita synthesis produced:** query `learnings` for a specific piece:
+  ```bash
+  wrangler d1 execute zeemish --remote --command="SELECT source, category, observation FROM learnings WHERE piece_date = '2026-04-21' AND source = 'zita'"
+  ```
+- **Cost metering:** every synthesis run — skipped or success — writes a `logZitaSynthesisMetered` observer event with `{tokensIn, tokensOut, durationMs}`. Watch drift there before it matters.
 
 ## Dashboard API endpoints (site worker)
 ```bash
 # Public (no auth):
 GET /api/dashboard/recent     # Last 7 pieces
 GET /api/dashboard/stats      # Library counters
+GET /api/dashboard/memory     # Learning-loop counts + latest observation
 
 # Admin only (ADMIN_EMAIL):
 GET  /api/dashboard/analytics # Engagement data
 GET  /api/dashboard/observer  # Observer events
 POST /api/dashboard/observer  # Acknowledge event { eventId }
 ```
+Admin Astro pages (also ADMIN_EMAIL-gated): `/dashboard/admin/`, `/dashboard/admin/piece/[date]/`, `/dashboard/admin/zita/`.
 
 ## Audio — retry, troubleshooting, cost
 

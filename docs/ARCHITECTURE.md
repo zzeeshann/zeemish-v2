@@ -30,7 +30,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
-- [x] D1 database: 12 tables (see `docs/SCHEMA.md`)
+- [x] D1 database: 13 tables (see `docs/SCHEMA.md`)
 - [x] Anonymous-first auth middleware (cookie on first API call)
 - [x] Progress API: save beat, mark complete, fetch progress
 - [x] Auth API: email upgrade, login, logout
@@ -66,21 +66,30 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - "The body you live in" served its purpose as a testing ground for the pipeline
 - Library page at /library/ replaces /courses/
 
-### Stage 6 — Self-Improvement Loop (partially complete)
+### Stage 6 — Self-Improvement Loop (complete — all four signal sources wired)
 - [x] EngagementAnalystAgent built and deployed
 - [x] LearnerAgent built (merged from EngagementAnalyst + Reviser)
 - [x] Engagement tracking API (`/api/engagement/track`)
 - [x] lesson-shell tracks views and completions
 - [x] D1 tables: engagement, learnings
-- [x] StructureEditorAgent writes learnings (both passing and failing drafts) into the learnings DB
-- [x] LearnerAgent writes engagement-driven learnings (when underperforming pieces are analysed)
-- [ ] Prompt-improvement loop not yet built — Director doesn't consume learnings to propose prompt edits
+- [x] StructureEditorAgent writes learnings — **removed 2026-04-20** in favour of Learner's post-publish synthesis (DECISIONS 2026-04-20 "Drop StructureEditor's writeLearning calls")
+- [x] Reader-side: `LearnerAgent.analyseAndLearn` writes `source='reader'` learnings when engagement signals arrive (pending reader traffic)
+- [x] Producer-side (P1.3, 2026-04-19): `LearnerAgent.analysePiecePostPublish` writes `source='producer'` learnings immediately after `publishing done`
+- [x] Self-reflection (P1.4, 2026-04-19): `DrafterAgent.reflect` writes `source='self-reflection'` learnings immediately after `publishing done`
+- [x] Zita-question synthesis (P1.5, 2026-04-21): `LearnerAgent.analyseZitaPatternsDaily` writes `source='zita'` learnings, scheduled at **01:45 UTC on day+1** (not publish+1h — needs a day of reader traffic to accumulate). Guarded no-op below 5 user messages per piece. See DECISIONS 2026-04-21 "P1.5 Learner skeleton".
+- [x] Drafter runtime reads `getRecentLearnings(DB, 10)` with no source filter — all four sources auto-flow into tomorrow's prompt
 
 ### Stage 7 — Zita (complete)
 - [x] Zita chat API (`/api/zita/chat`) — Socratic guide via Claude API
 - [x] `<zita-chat>` Web Component — floating chat on lesson pages
 - [x] Per-user per-lesson conversation history in D1
 - [x] Integrated into LessonLayout
+- [x] **Scoped by piece_date (2026-04-21)** — every daily piece had been pooling conversations under `(course='daily', lesson_number=0)`; migration 0013 adds `zita_messages.piece_date` with backfill for the 92 pre-migration rows. System prompt now names the piece the reader is on. See DECISIONS 2026-04-21 "Scope zita_messages by piece_date".
+- [x] **History soft cap at 40 (2026-04-21)** — per-turn Claude call capped at last 40 messages; `zita_history_truncated` observer event fires when the cap clips. Full history stays in D1.
+- [x] **Admin view (2026-04-21)** — `/dashboard/admin/zita/` (standalone) + per-piece "Questions from readers" section on `/dashboard/admin/piece/[date]/`. Joins `zita_messages` with `daily_pieces` headlines.
+- [x] **Safety observer events (2026-04-21)** — `zita_claude_error` (on Claude non-OK, captures upstream status + body snippet), `zita_rate_limited` (on 429, captures userId), `zita_handler_error` (on unhandled exception). Storage cap of 4000 chars on both user and assistant content INSERTs.
+- [x] **Design doc for deep-Zita (2026-04-21)** — [`docs/zita-design.md`](zita-design.md) covers multi-turn state, tool-use loop scope, Vectorize library index, failure modes, no-human-handoff decision, voice-consistency harness. Gates all deep-Zita code.
+- [ ] Deep-Zita v1 (library search, tool-use loop, session summary, reader profile, voice harness, category logging) — sequenced in design doc §7, not yet built.
 
 ### Daily Pieces System (complete)
 - [x] ScannerAgent (#14) — fetches Google News RSS across 6 categories
