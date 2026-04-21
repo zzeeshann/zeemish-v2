@@ -22,6 +22,19 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 5 admin settings UI (2026-04-21)
+Admin-gated dashboard surface for flipping `admin_settings.interval_hours` without a redeploy. With the 3 multi-per-day blockers resolved (commits `ecedb87` + `900905d` + `30ddbdd`), flipping to any allowed value is now architecturally safe.
+
+- [`src/pages/dashboard/admin/settings.astro`](src/pages/dashboard/admin/settings.astro) — admin page. Dropdown populated from `ALLOWED_INTERVAL_HOURS = [1,2,3,4,6,8,12,24]` (divisors of 24). Shows current value + last-updated timestamp. Submits via fetch to the POST endpoint.
+- [`src/pages/api/dashboard/admin/settings.ts`](src/pages/api/dashboard/admin/settings.ts) — GET (reads current) + POST (writes new). Both ADMIN_EMAIL-gated. POST validates against the allowed set (400 otherwise), UPSERTs `admin_settings`, then fires an `admin_settings_changed` observer event with before/after values + changed-by email for audit trail.
+- Admin page entry: new "Settings →" link in top-right nav of [`src/pages/dashboard/admin.astro`](src/pages/dashboard/admin.astro) alongside the existing "Zita activity →" link.
+
+`ALLOWED_INTERVAL_HOURS` is duplicated between the site worker (settings endpoint) and agents worker ([`agents/src/shared/admin-settings.ts`](agents/src/shared/admin-settings.ts)). The two workers don't share imports; both must be updated together if the allowed set changes. Defensive layers preserve correctness on drift: the POST endpoint rejects out-of-set values, the agents-side `parseIntervalHours` falls back to 24 for anything not in the set — so a drift still fails safe.
+
+**Verified (local build + preview):** `pnpm build` clean; `/dashboard/admin/settings/` redirects unauthenticated visitors to `/login/?redirect=…`; GET + POST to the API return 401 without an admin session. Authenticated flow runtime-verifies after deploy.
+
+**Effective:** change propagates to Director at the next hourly cron alarm (up to 1h from save). No DO restart required — Director reads fresh via `getAdminSetting` per run (Phase 2).
+
 ## Multi-piece cadence — Phase 4 URL routing + `publishedAt` tiebreaker (2026-04-21)
 Reader-facing URL shape changed from `/daily/YYYY-MM-DD/` to `/daily/YYYY-MM-DD/slug/`. No 301 redirect layer — old URLs stop existing (dev-phase decision from Phase 1 DECISIONS). Slug derives from the existing filename convention (`YYYY-MM-DD-{slug}.mdx`) via [`src/lib/slug.ts`](src/lib/slug.ts): `deriveSlug(entryId)` strips the 11-char date prefix.
 

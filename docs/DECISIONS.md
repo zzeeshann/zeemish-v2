@@ -2,6 +2,56 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 5 admin settings UI
+
+**Context:** Phase 5 of the cadence plan. With blockers #1 #2 #3 resolved (commits `ecedb87` + `900905d` + `30ddbdd`), flipping `interval_hours` below 24 is architecturally safe. Phase 5 ships the admin-facing knob.
+
+**Decision:**
+
+1. **New admin page** [`src/pages/dashboard/admin/settings.astro`](../src/pages/dashboard/admin/settings.astro) — ADMIN_EMAIL-gated (standard admin redirect pattern), dropdown populated from `ALLOWED_INTERVAL_HOURS = [1, 2, 3, 4, 6, 8, 12, 24]` (divisors of 24; non-divisors rejected for the rhythm-drift reason documented in Phase 1 decision #4). Shows current value + `updated_at` timestamp read from `admin_settings` at render time. Select option labels describe each choice — e.g. `4h — 6 pieces per day · every 4 hours` — so the operational meaning is visible inline without a separate legend.
+
+2. **New API endpoint** [`src/pages/api/dashboard/admin/settings.ts`](../src/pages/api/dashboard/admin/settings.ts) exposes GET + POST, both ADMIN_EMAIL-gated (401 otherwise, matching the `observer.ts` precedent).
+   - GET returns `{interval_hours, updated_at, allowed_intervals}`.
+   - POST validates `body.interval_hours` against the allowed set (400 otherwise), upserts `admin_settings` via `INSERT … ON CONFLICT(key) DO UPDATE`, and fires an `admin_settings_changed` observer_event with `{type, key, prior, next, changedBy, changedAt}` context. Prior value captured BEFORE the UPSERT so the event shows the full transition. Uses the existing [`src/lib/observer-events.ts`](../src/lib/observer-events.ts) helper (Phase 2 site-worker → observer_events writer).
+
+3. **Navigation** — new "Settings →" link in top-right of [`src/pages/dashboard/admin.astro`](../src/pages/dashboard/admin.astro), alongside the existing "Zita activity →" link. Consistent pattern for admin subsections.
+
+4. **No CSRF token.** Matches the existing `/api/dashboard/observer` POST handler (which also lacks CSRF). The same-site cookie gating via admin-session is the current boundary. If the admin API set a CSRF pattern later, this endpoint inherits it at that time.
+
+**`ALLOWED_INTERVAL_HOURS` duplication (deliberate).** The agents worker ([`agents/src/shared/admin-settings.ts`](../agents/src/shared/admin-settings.ts)) and the site worker (this new endpoint) don't share imports — two separate packages. The constant is copied into both. Defensive layers handle drift:
+- POST validates against the site-side set (rejects out-of-set values).
+- Agents-side `parseIntervalHours` falls back to 24 for anything not in the agents-side set.
+- So a drift fails safe — it either blocks the admin write, or silently reverts to 24 at Director read time. Neither silently runs at an unintended cadence.
+
+A comment in the endpoint flags this coupling explicitly so a future audit doesn't miss one side.
+
+**Why the 1-1-1 triangle (read on mount, write on submit, read back on save) instead of an optimistic-update flow.** The page re-displays the server-returned `interval_hours` + `updated_at` values after POST success. This confirms to the operator what actually got written — if the write partially fails or a bug returns a different value than what was submitted, the UI reflects reality rather than the optimistic hope. At one-per-day admin usage the server round-trip is imperceptible.
+
+**Audit trail design.** The `admin_settings_changed` event severity is `info`, not `warn` — this is expected admin behaviour, not an anomaly. The event body spells out prior → next + the changed-by email + the "effective next hourly cron alarm (up to 1h from now)" expectation so operators reading the Observer feed later see what happened AND when it took effect without cross-referencing other tables.
+
+**Verified (build + preview):**
+- `pnpm build` clean; the new page + endpoint are in the server bundle.
+- Unauth'd GET /api/dashboard/admin/settings → 401. Unauth'd POST → 401. Unauth'd page → 302 to `/login/?redirect=…` (via `Astro.redirect`).
+- Build's prerender step still renders the existing 5 daily pieces at their new nested slug URLs (Phase 4 still intact).
+
+**Non-goals:**
+- No validation of "is the value safe to flip NOW." The 3 blockers that would have made this unsafe are all resolved pre-Phase-5. If a future change reintroduces a multi-per-day risk, re-add a block here.
+- No UI warning banner when admin picks a value other than 24. Nothing currently breaks at other values — blockers are clear.
+- No historic log of cadence changes on the Settings page itself. The Observer feed at `/dashboard/admin/` already shows them (with full prior→next detail in the event context), so a second view would be redundant.
+- No change to the `/dashboard/admin/piece/[date]/` route's date-keyed URL. That's a separate Phase 5/6 concern for admin UX at multi-per-day; reader-facing URLs are already piece-scoped post-Phase-4.
+- No new migration. `admin_settings` table already exists from Phase 2 (migration 0016).
+
+**Post-deploy verification contract** (real-world, authenticated):
+- Admin visits `/dashboard/admin/settings/` → page renders dropdown with current value selected.
+- Admin picks 4h and clicks Save → status line reads "Saved. Effective next hourly cron alarm (up to 1h)."
+- `SELECT * FROM admin_settings WHERE key = 'interval_hours'` on remote D1 shows value='4' with fresh `updated_at`.
+- `SELECT * FROM observer_events WHERE json_extract(context, '$.type') = 'admin_settings_changed' ORDER BY created_at DESC LIMIT 1` shows the change event with prior='24', next='4', `changedBy` = admin email.
+- Next hourly cron alarm at 02:00/06:00/10:00/14:00/18:00/22:00 UTC fires the pipeline (gate: `(hour-2+24)%4 === 0`), other hours silent-bail.
+
+**References:** [src/pages/dashboard/admin/settings.astro](../src/pages/dashboard/admin/settings.astro), [src/pages/api/dashboard/admin/settings.ts](../src/pages/api/dashboard/admin/settings.ts), [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro) (top-right nav link), [agents/src/shared/admin-settings.ts](../agents/src/shared/admin-settings.ts) (mirror of ALLOWED_INTERVAL_HOURS), [src/lib/observer-events.ts](../src/lib/observer-events.ts) (observer writer), DECISIONS 2026-04-21 "Multi-piece cadence — Phase 1 identity foundations" §4 (interval-hours constraint rationale), plan file `~/.claude/plans/could-please-do-a-harmonic-waffle.md` §6 Phase 5.
+
+---
+
 ## 2026-04-21: Scope Learner synthesis input by time window (multi-per-day unblock, #3 — final)
 
 **Context:** Commit 3 of 3. Completes the multi-per-day unblock sequence from Phase 3's pipeline_log consumer audit. [`agents/src/learner.ts:338`](../agents/src/learner.ts) ran `SELECT … FROM pipeline_log WHERE run_id = ? .bind(date)` to feed Claude's producer-learning synthesis. At 1 piece/day, pipeline_log for a date = exactly one run. At multi-per-day it pooled all that day's pieces' steps → synthesis for piece A saw piece B/C/D's candidate picks, audit rounds, etc. Noise that corrupts the learning output.

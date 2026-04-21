@@ -1,0 +1,177 @@
+---
+export const prerender = false;
+
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import { getUser } from '../../../lib/db';
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+
+if (!user?.email || user.email !== ADMIN_EMAIL) {
+  return Astro.redirect('/login/?redirect=/dashboard/admin/settings/');
+}
+
+// Mirror of agents-side ALLOWED_INTERVAL_HOURS. Kept in sync
+// defensively — the POST endpoint also validates against the same
+// set. See DECISIONS 2026-04-21 "Phase 5 — admin settings UI".
+const ALLOWED_INTERVAL_HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
+
+type Row = { key: string; value: string; updated_at: number };
+let intervalHours = 24;
+let updatedAt: number | null = null;
+
+try {
+  const row = await db
+    .prepare('SELECT key, value, updated_at FROM admin_settings WHERE key = ?')
+    .bind('interval_hours')
+    .first<Row>();
+  if (row) {
+    const n = parseInt(row.value, 10);
+    if (Number.isFinite(n)) intervalHours = n;
+    updatedAt = row.updated_at;
+  }
+} catch { /* fall through with default 24 */ }
+
+function formatTs(ts: number | null): string {
+  if (!ts) return '—';
+  return new Date(ts).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+function slotsPerDay(h: number): number {
+  return 24 / h;
+}
+
+function describeInterval(h: number): string {
+  if (h === 24) return '1 piece per day · 02:00 UTC';
+  if (h === 1) return '24 pieces per day · every hour';
+  return `${slotsPerDay(h)} pieces per day · every ${h} hours`;
+}
+---
+
+<BaseLayout title="Admin settings — Zeemish" description="Multi-piece cadence control">
+  <div class="pt-6 pb-10 flex items-start justify-between gap-6 flex-wrap">
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">
+        The control room
+      </p>
+      <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">
+        Settings
+      </h1>
+      <p class="text-lg text-zee-muted">
+        System-level knobs. Takes effect on the next hourly cron alarm (up to 1h from save).
+      </p>
+    </div>
+    <div class="flex flex-col items-end gap-1 mt-2 text-sm whitespace-nowrap">
+      <a href="/dashboard/admin/" class="text-zee-muted hover:text-zee-primary">← Admin</a>
+    </div>
+  </div>
+
+  <section class="rounded-xl border border-zee-border p-6 mb-8">
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-3">
+      Publish interval
+    </h2>
+    <p class="text-sm text-zee-muted mb-5 leading-relaxed">
+      How often the daily pipeline fires. Cron runs hourly anyway; this
+      value gates which hour slots actually produce a piece. Anchored to
+      02:00 UTC — every interval includes that slot.
+    </p>
+
+    <form id="interval-form" class="flex flex-col sm:flex-row gap-3 sm:items-end" novalidate>
+      <label class="flex-1 min-w-0">
+        <span class="block text-xs text-zee-muted mb-1">interval_hours</span>
+        <select
+          id="interval-select"
+          name="interval_hours"
+          class="w-full px-3 py-2 rounded-lg border border-zee-border bg-zee-bg text-zee-text focus:outline-none focus:ring-2 focus:ring-zee-primary/30"
+        >
+          {ALLOWED_INTERVAL_HOURS.map((h) => (
+            <option value={h} selected={h === intervalHours}>
+              {h}h — {describeInterval(h)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        id="interval-save"
+        type="submit"
+        class="px-5 py-2 rounded-lg bg-zee-primary text-white font-medium text-sm whitespace-nowrap hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition"
+      >
+        Save
+      </button>
+    </form>
+
+    <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+      <div>
+        <p class="text-xs text-zee-muted mb-1">Current value</p>
+        <p class="font-medium" id="interval-current">{intervalHours}h — {describeInterval(intervalHours)}</p>
+      </div>
+      <div>
+        <p class="text-xs text-zee-muted mb-1">Last updated</p>
+        <p class="font-medium" id="interval-updated">{formatTs(updatedAt)}</p>
+      </div>
+    </div>
+
+    <p id="interval-status" class="mt-4 text-sm" aria-live="polite"></p>
+  </section>
+
+  <p class="text-xs text-zee-muted leading-relaxed">
+    Every change writes an <code>admin_settings_changed</code> observer
+    event. See the <a href="/dashboard/admin/" class="text-zee-primary hover:underline">admin dashboard</a> Observer feed for the audit trail.
+  </p>
+</BaseLayout>
+
+<script>
+  (() => {
+    const form = document.getElementById('interval-form') as HTMLFormElement | null;
+    const select = document.getElementById('interval-select') as HTMLSelectElement | null;
+    const btn = document.getElementById('interval-save') as HTMLButtonElement | null;
+    const status = document.getElementById('interval-status');
+    const current = document.getElementById('interval-current');
+    const updated = document.getElementById('interval-updated');
+    if (!form || !select || !btn || !status || !current || !updated) return;
+
+    function describe(h: number): string {
+      if (h === 24) return '1 piece per day · 02:00 UTC';
+      if (h === 1) return '24 pieces per day · every hour';
+      return `${24 / h} pieces per day · every ${h} hours`;
+    }
+
+    function fmtTs(ms: number): string {
+      return new Date(ms).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const value = parseInt(select.value, 10);
+      btn.disabled = true;
+      status.textContent = 'Saving…';
+      status.className = 'mt-4 text-sm text-zee-muted';
+      try {
+        const res = await fetch('/api/dashboard/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval_hours: value }),
+        });
+        const data = await res.json() as { ok?: boolean; interval_hours?: number; updated_at?: number; error?: string };
+        if (!res.ok || !data.ok) {
+          status.textContent = data.error ?? `Save failed (${res.status})`;
+          status.className = 'mt-4 text-sm text-red-600';
+          return;
+        }
+        const h = data.interval_hours ?? value;
+        current.textContent = `${h}h — ${describe(h)}`;
+        if (data.updated_at) updated.textContent = fmtTs(data.updated_at);
+        status.textContent = `Saved. Effective next hourly cron alarm (up to 1h).`;
+        status.className = 'mt-4 text-sm text-green-700';
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Network error';
+        status.textContent = msg;
+        status.className = 'mt-4 text-sm text-red-600';
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  })();
+</script>
