@@ -145,9 +145,6 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       if (existing) return null;
     }
 
-    // Clear previous run's log
-    await this.env.DB.prepare('DELETE FROM pipeline_log WHERE run_id = ?').bind(today).run().catch(() => {});
-
     // Cadence config — multi-piece Phase 2 plumbing. Read-only in this
     // phase; Phase 3 adds the hourly-cron gate that actually uses this
     // value. Logged into the scanning step's data field so admin feed

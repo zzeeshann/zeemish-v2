@@ -2,6 +2,32 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Remove pre-run `pipeline_log` DELETE (multi-per-day unblock, #1)
+
+**Context:** Commit 1 of the 3-blocker sequence flagged by Phase 3's pipeline_log consumer audit. [`director.ts:109`](../agents/src/director.ts) ran `DELETE FROM pipeline_log WHERE run_id = ? .bind(today)` at the top of `triggerDailyPiece`. At 1 piece/day the DELETE correctly clears stale rows from an earlier interrupted attempt on the same date. At multi-per-day (admin flipping `interval_hours` below 24) the same DELETE wipes all earlier completed runs' pipeline_log history from the same date when a new run starts — silent audit-trail loss.
+
+**Decision:** Remove the DELETE entirely. `pipeline_log` accumulates append-only.
+
+**Why:**
+- Storage cost is negligible. At the tightest cadence (`interval_hours=1`), ~20-30 rows per piece × 24 pieces/day = ~480-720 rows/day, ~15-22k rows/month. Small TEXT + JSON rows in D1.
+- The "stale interrupted attempt" concern at 1/day is already covered by the `WHERE date=? existing` guard a few lines up in `triggerDailyPiece`: a run won't fire if today's piece exists. If a prior attempt crashed without INSERTing into `daily_pieces`, its pipeline_log rows stay as honest forensic history of the crash rather than being silently erased on the next attempt.
+- Manual wipe path stays at `scripts/reset-today.sh` for operators who want to reset a day.
+- Admin view ([`dashboard/admin.astro:136-141`](../src/pages/dashboard/admin.astro)) already dedups via "last step per run_id via `WHERE created_at = MAX(...)`" pattern — accumulated rows don't pollute the live pipeline monitor.
+
+**What changed:** One line removed + the comment above it. `triggerDailyPiece` now flows directly from the existence guard into the cadence-config read (Phase 2's `getAdminSetting` call).
+
+**Verification contract:**
+- Next 02:00 UTC cron run fires, produces a piece, pipeline_log gets ~19-31 new rows for that date. The 5 historical run_ids (2026-04-17 → 2026-04-21) stay intact.
+- `SELECT COUNT(*) FROM pipeline_log` grows monotonically from this point forward. No DELETE path except the explicit `scripts/reset-today.sh`.
+
+**Non-goals for this commit:**
+- No changes to `retryAudioFresh`'s audio-step pipeline_log DELETE (that's blocker #2, own commit next).
+- No changes to Learner's pipeline_log SELECT (that's blocker #3, own commit after).
+
+**References:** [agents/src/director.ts](../agents/src/director.ts) (pre-run DELETE removed), FOLLOWUPS 2026-04-21 "Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping" (item #1 of 3 resolved by this commit).
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 4 URL routing + `publishedAt` tiebreaker
 
 **Context:** Phase 4 of the cadence plan. Readers' daily-piece URLs shift from `/daily/YYYY-MM-DD/` to `/daily/YYYY-MM-DD/slug/` so multiple pieces can coexist on the same date. Phase 1 decision #1 (URL option B, nested) + refinement 1 (no 301 redirect layer — dev phase, 5 pieces, no bookmarks). The homepage hero and library lists pick up a `publishedAt DESC` tiebreaker so same-date pieces sort deterministically.
