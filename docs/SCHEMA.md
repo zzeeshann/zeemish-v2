@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**13 tables across 15 migrations.**
+**14 tables across 16 migrations.**
 
 ## Reader-side tables
 
@@ -232,7 +232,24 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 
 Migrations: `0007_pipeline_log.sql` (initial), `0014_piece_id_fks.sql` (run_id semantic shift — values migrated, no schema change).
 
-## Migrations summary (15 migrations, 13 tables)
+### admin_settings
+Key/value table for admin-configurable system state. One row per setting. First consumer is `interval_hours` read by Director (Phase 2 of the cadence plan); future settings (rate limits, feature flags, voice overrides, scanner feed overrides) live here too.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| key | TEXT PK | e.g. `interval_hours` |
+| value | TEXT NOT NULL | Stringly-typed. Caller parses to expected shape via helper (`agents/src/shared/admin-settings.ts` → `getAdminSetting<T>(db, key, parse, fallback)`). Non-null even when logically empty — use a sentinel value rather than allowing null. |
+| updated_at | INTEGER NOT NULL | Unix timestamp ms. Last write time. |
+
+Read path: [`getAdminSetting`](../agents/src/shared/admin-settings.ts) — swallows every failure mode (missing row, non-string value, DB throw) and returns the caller's `fallback`. Fresh read per call, no caching.
+
+Write path: currently seeded via migration only (`INSERT OR IGNORE interval_hours='24'`). Phase 5 of the cadence plan adds the admin UI + `/api/dashboard/admin/settings` endpoint, with an `admin_settings_changed` observer_event fired alongside every UPDATE for audit-trail.
+
+Seeded values: `interval_hours = '24'` (preserves current 1-piece/day production cadence until Phase 3 wires the hourly gate).
+
+Migration: `0016_admin_settings.sql`
+
+## Migrations summary (16 migrations, 14 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -248,3 +265,4 @@ Migrations: `0007_pipeline_log.sql` (initial), `0014_piece_id_fks.sql` (run_id s
 - `0013_zita_messages_piece_date.sql` — added `zita_messages.piece_date` (YYYY-MM-DD TEXT, nullable at schema level for backfillability, enforced non-null at the application layer for `course_slug='daily'`) + composite `idx_zita_piece(user_id, piece_date)`. Fixes the data-model bug where every daily piece mounted `<zita-chat course="daily" lesson="0">` and pooled all pieces' conversations under one key. Backfill for the 92 pre-migration rows is a commented one-time block inside the migration file, mapped by hand from conversation content + created_at windows against the five pieces 2026-04-17 through 2026-04-21. Includes a snapshot step (`zita_messages_backup_20260421`) run before any UPDATE — rollback is `DELETE + INSERT SELECT` from the backup. Backup table queued for drop on or after 2026-04-28 via FOLLOWUPS.
 - `0014_piece_id_fks.sql` — multi-piece cadence Phase 1. Added nullable `piece_id TEXT` FK columns + indexes to `audit_results`, `learnings`, `zita_messages`, `daily_candidates`. Auto-applied ALTERs; backfill UPDATEs commented for manual `wrangler d1 execute` runs (all 4 tables + `pipeline_log.run_id` semantic shift from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs). Applied 2026-04-21. `daily_candidates` has no historical backfill — 250 rows, 0 with `selected=1` (separate FOLLOWUPS investigation).
 - `0015_daily_piece_audio_piece_id_pk.sql` — multi-piece cadence Phase 1, PK rebuild. `daily_piece_audio` PK switched from `(date, beat_name)` to `(piece_id, beat_name)` via snapshot → create-new → copy → drop-old → rename, all auto-applied. 32 rows backfilled via correlated subquery on `daily_pieces.date`. `daily_piece_audio_backup_20260421` snapshot held for rollback through 2026-04-28 via FOLLOWUPS.
+- `0016_admin_settings.sql` — multi-piece cadence Phase 2. Created `admin_settings(key, value, updated_at)` — first admin-configurable surface in Zeemish v2. Seeded `interval_hours='24'` via `INSERT OR IGNORE` (preserves current 1-piece/day cadence). Read by Director at start of `triggerDailyPiece`; gate logic lands in Phase 3. Future settings (rate limits, feature flags, voice overrides) will use the same table.

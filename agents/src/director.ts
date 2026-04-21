@@ -11,6 +11,7 @@ import { DrafterAgent } from './drafter';
 import { AudioProducerAgent, AudioBudgetExceededError } from './audio-producer';
 import { AudioAuditorAgent } from './audio-auditor';
 import { LearnerAgent } from './learner';
+import { getAdminSetting, parseIntervalHours } from './shared/admin-settings';
 import type { Env, DirectorState, DirectorPhase, DailyPieceBrief } from './types';
 import type { VoiceAuditResult } from './voice-auditor';
 import type { StructureAuditResult } from './structure-editor';
@@ -107,9 +108,17 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // Clear previous run's log
     await this.env.DB.prepare('DELETE FROM pipeline_log WHERE run_id = ?').bind(today).run().catch(() => {});
 
+    // Cadence config — multi-piece Phase 2 plumbing. Read-only in this
+    // phase; Phase 3 adds the hourly-cron gate that actually uses this
+    // value. Logged into the scanning step's data field so admin feed
+    // confirms the read path works before Phase 3 relies on it.
+    const intervalHours = await getAdminSetting(
+      this.env.DB, 'interval_hours', parseIntervalHours, 24
+    );
+
     // ─── Phase 1: Scanner ────────────────────────────────────────────
     this.enterPhase('scanner', `daily/${today}`);
-    await this.logStep(today, 'scanning', 'running', {});
+    await this.logStep(today, 'scanning', 'running', { intervalHours });
     const scanner = await this.subAgent(ScannerAgent, 'scanner');
     const candidates = await scanner.scan();
     await this.logStep(today, 'scanning', 'done', { candidateCount: candidates.length });

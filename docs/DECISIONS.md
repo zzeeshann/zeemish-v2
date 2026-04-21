@@ -2,6 +2,50 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-21: Multi-piece cadence — Phase 2 admin_settings plumbing
+
+**Context:** Phase 1 of the cadence plan (earlier this session) laid the identity foundations — piece_id FKs across child tables, audio PK rebuild, pipeline_log.run_id semantic shift. Phase 2 is the second atomic deliverable: the `admin_settings` table that will eventually hold all admin-configurable system state, seeded with the cadence value Phase 3 will gate on. Plan §6 Phase 2 scope is explicit: no behavioural change, just the table + a Director read path that proves the plumbing works.
+
+**Decision:** One migration + one helper + one four-line Director change.
+
+1. **Migration 0016** creates `admin_settings(key TEXT PK, value TEXT NOT NULL, updated_at INTEGER NOT NULL)` and seeds `interval_hours='24'`. Stringly-typed values (application layer parses to whatever the caller wants) is deliberate — future settings like rate limits, feature flags, or voice overrides don't need schema migrations to land, just a new key. `INSERT OR IGNORE` on the seed so a replay doesn't stomp a later admin edit.
+
+2. **New helper** [agents/src/shared/admin-settings.ts](../agents/src/shared/admin-settings.ts): `getAdminSetting<T>(db, key, parse, fallback)`. Catches every failure mode (missing row, null value, non-string value, DB throw) and returns `fallback`. This is deliberate — `admin_settings` is an operational config surface, never a source-of-truth for pipeline identity, so every consumer must have a safe default that preserves current behaviour. Not cached; each call hits D1. At Director's once-per-run cadence the SELECT is ~1ms and the fresh-read semantics mean an admin UI change propagates on the next run without a DO restart.
+
+3. **Director read path** ([agents/src/director.ts](../agents/src/director.ts)) inside `triggerDailyPiece`, after the dedup clear and before the scanner phase. The read stores `intervalHours` in a local variable and passes it into the existing `scanning` step's `data` field — visibility in the admin pipeline feed confirms the read path works, without adding new observer events or noise. The value is otherwise unused in Phase 2; Phase 3 wires it into the hourly gate.
+
+**Why `ALLOWED_INTERVAL_HOURS = [1, 2, 3, 4, 6, 8, 12, 24]`.** Must be divisors of 24 so the hour-2-anchored modulo gate (Phase 3) produces a consistent daily rhythm. Non-divisors drift across days: a 5-hour interval would fire at 02/07/12/17/22 UTC on day 1, then 03/08/13/18/23 on day 2 — the daily rhythm rotates. Every divisor of 24 gives a stable repeating slot pattern. `parseIntervalHours()` enforces this defensively — a manual D1 edit setting `value='5'` falls back to 24, preserving production cadence instead of landing a broken rhythm. The admin UI (Phase 5) will constrain the dropdown to the allowed set; the parser is the second line of defence.
+
+**Why read inside `triggerDailyPiece`, not `onStart`.** Plan §6 Phase 2 lists "Director reads interval_hours on onStart and on each alarm firing." The `onStart` half would be harmless in Phase 2 (reading is not writing, so the cancel-from-onStart hazard at [director.ts:46-55](../agents/src/director.ts) doesn't apply), but it'd read on every DO spin-up — not tied to a specific cron firing — and do nothing with the value. Reading inside `triggerDailyPiece` ties the read to the run it could affect. Cleaner. Phase 3's hourly gate will live here too.
+
+**Fallback posture: 24 everywhere.** If the row is missing, the value is malformed, the DB throws, or `parseIntervalHours` rejects the value, the read returns 24. Defensive layers:
+- Migration seeds `interval_hours='24'`.
+- Helper returns `fallback` on any error.
+- Parser falls back to 24 on non-divisor / non-numeric input.
+- Director passes `24` as the `fallback` argument.
+
+Production cadence stays 1/day through any of those failure paths.
+
+**Verified locally:** migration 0016 applied to local D1 via `wrangler d1 execute --local --file`; `SELECT * FROM admin_settings` returns the single seeded row with `interval_hours='24'`. Agents TypeScript check clean on both touched files (18 pre-existing SubAgent typing errors in `server.ts` unchanged from Phase 1, zero errors in `director.ts` or `admin-settings.ts`).
+
+**Verified remote:** migration 0016 applied via `wrangler d1 migrations apply --remote`; tracker at 0016; seed row present. Director code change lands on the next push + CI deploy, ready for tonight's 02:00 UTC cron to smoke-check the read path.
+
+**Non-goals for Phase 2 (explicit):**
+- No admin UI — that's Phase 5.
+- No gating on the read value — that's Phase 3.
+- No `admin_settings_changed` observer event yet — introduced with the write path in Phase 5.
+- No caching in the helper — fresh read per call keeps the "admin change → next run" propagation story clean.
+- No separate admin_settings reader for the site worker. When Phase 5 adds the write path, it'll either import this helper directly (if the site worker has a D1 binding) or hit the agents worker via the existing admin RPC. Decide then, not now.
+
+**Post-apply verification contract for tonight's 2am UTC run:**
+- `SELECT data FROM pipeline_log WHERE step = 'scanning' AND created_at > <now> ORDER BY created_at DESC LIMIT 1` returns JSON with `intervalHours: 24`.
+- Piece lands as usual (no behavioural change).
+- Observer feed shows no new error categories.
+
+**References:** [migrations/0016_admin_settings.sql](../migrations/0016_admin_settings.sql), [agents/src/shared/admin-settings.ts](../agents/src/shared/admin-settings.ts), [agents/src/director.ts](../agents/src/director.ts) (`triggerDailyPiece` cadence-config read block), plan file `~/.claude/plans/could-please-do-a-harmonic-waffle.md` §6 Phase 2.
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 1 identity foundations
 
 **Context:** The site currently publishes 1 piece/day at 02:00 UTC — baked in as both schema and semantics at ~50 sites across the codebase. The goal is admin-configurable cadence: testing at 1 piece every 4 hours (6/day), production at 1 piece every 1 hour (24/day). Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md`. This entry records the 10 architectural decisions that unblock the rest of the cadence plan, plus the Phase 1 schema work that makes multi-per-day non-colliding without changing any runtime behaviour yet.

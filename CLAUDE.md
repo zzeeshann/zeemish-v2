@@ -22,6 +22,15 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
+## Multi-piece cadence — Phase 2 admin_settings plumbing (2026-04-21)
+Second phase of the cadence plan. Pure plumbing — zero behavioural change. Adds the `admin_settings` key/value table, seeds `interval_hours=24` (preserving current 1-piece/day cadence), and teaches Director to read the value once per run. No gate yet; no UI; nothing uses the value. Phase 3 adds the hourly cron + runtime gate that actually consumes it.
+
+[migrations/0016_admin_settings.sql](migrations/0016_admin_settings.sql) created the table + seeded the row. [agents/src/shared/admin-settings.ts](agents/src/shared/admin-settings.ts) holds the reader (`getAdminSetting<T>(db, key, parse, fallback)`) plus `ALLOWED_INTERVAL_HOURS = [1,2,3,4,6,8,12,24]` and `parseIntervalHours()`. [agents/src/director.ts](agents/src/director.ts) reads the value at the top of `triggerDailyPiece` and passes it into the scanning step's `data` field — visibility in the admin pipeline feed confirms the read path works before Phase 3 relies on it.
+
+`admin_settings` is the first admin-configurable surface in Zeemish v2. Future settings (rate limits, feature flags, voice overrides, scanner feed overrides) live in the same table so there's one operational config surface. Write path lands in Phase 5 with the admin UI; a future `admin_settings_changed` observer_event will provide the audit trail.
+
+**Verified remote (2026-04-21):** admin_settings row = `interval_hours '24'`, tracker at 0016, agents typecheck clean on the two touched files (18 pre-existing SubAgent typing errors in server.ts unchanged). Next 2am UTC cron run smoke-checks the read path — expected to produce 1 piece as before, with `intervalHours: 24` in the scanning step's data JSON.
+
 ## Multi-piece cadence — Phase 1 identity foundations (2026-04-21)
 Start of a new plan (`~/.claude/plans/could-please-do-a-harmonic-waffle.md`). Goal: admin-configurable publishing cadence — testing at 1 piece every 4 hours (6/day), production at 1 piece every 1 hour (24/day). Currently 1/day is baked in as both schema and semantics across ~50 sites.
 
@@ -179,7 +188,7 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 13 tables, 15 migrations)
+### Database (D1 — 14 tables, 16 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
