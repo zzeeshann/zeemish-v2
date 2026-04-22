@@ -20,7 +20,23 @@ An autonomous multi-agent publishing system. 13 AI agents scan the news, decide 
 
 Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships, Audio Producer narrates beat-by-beat via ElevenLabs, Audio Auditor verifies, Publisher second-commits the audio URLs into frontmatter. Audio runs in a ship-and-retry posture: text publishes the moment Integrator approves (a newspaper never skips a day); audio lands as a second commit when it's ready, or surfaces a retry button on the admin dashboard if it fails.
 
-The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec), **P1.5 Zita learning** (blocked on reader + Zita traffic). P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
+The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec). **P1.5 Zita learning** shipped as the Learner skeleton in Zita improvement plan Phase 5 (2026-04-21) — no longer pending. P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
+
+## Multi-piece cadence plan — status (2026-04-22)
+Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md`. **Phases 1–6 shipped 2026-04-21** — 11 commits, origin at `54a987d`. Production cadence unchanged: `interval_hours=24` (one piece per day at 02:00 UTC). The admin knob is live at `/dashboard/admin/settings/` and flipping it is architecturally safe for the pipeline.
+
+**One FOLLOWUPS item remains before readers see correct data at multi-per-day:** [`writeLearning` doesn't persist `piece_id`](docs/FOLLOWUPS.md) — the made-drawer's per-piece "What the system learned" section queries `WHERE piece_date = ?` and would pool learnings across same-date pieces. Cross-cutting fix (4 writer callers + 1 reader query). **Not a pipeline blocker**; a reader-view correctness blocker.
+
+Phases shipped in order (each has its own DECISIONS entry):
+- **Phase 1** — Identity foundations (`piece_id = daily_pieces.id`, audio PK rebuild, `pipeline_log.run_id` walk-back after caught same-day regression).
+- **Phase 2** — `admin_settings` table + Director reads `interval_hours`.
+- **Phase 3** — Hourly cron + runtime gate anchored to hour 2 UTC.
+- **Phase 4** — URL `/daily/{date}/{slug}/` + `publishedAt` tiebreaker.
+- **Multi-per-day unblocker batch** (between Phase 4 and Phase 5, three separate commits): pre-run DELETE removed, audio pipeline piece_id scoping + R2 key + latent `persistBeatRow` bug fix, Learner time-window filter.
+- **Phase 5** — Admin settings UI with observer-event audit trail.
+- **Phase 6** — Zita synthesis timing (relative delay) + piece_id scoping.
+
+Phase 7 scope (cosmetic, deferred — not blockers): "one piece per day" / "every morning at 2am UTC" copy in README + book chapters; "days running" stat rename; observer dashboard grouping by piece_id; `reset-today.sh --piece-id` flag; admin deep-dive route `/dashboard/admin/piece/{date}/` → piece-id keyed; Curator prompt label "Already published in last 30 days" wording.
 
 ## Multi-piece cadence — Phase 6 Zita synthesis timing + scoping (2026-04-21)
 Zita synthesis is now piece-scoped on both timing and input. Previous absolute clock target (01:45 UTC day+1) would have stacked N pieces' synth jobs on one clock at multi-per-day AND given same-date afternoon pieces a truncated reader window. Relative delay of `publish + 85500s` (23h45m) per piece gives every piece the same ~24h window regardless of publish time. Learner's SELECT switches from `WHERE piece_date = ?` to `WHERE piece_id = ?` to stop cross-piece pooling on shared dates.
@@ -56,7 +72,7 @@ Five files touched to land this:
 
 **Build verified:** `pnpm build` produces all 5 pages at the new URL shape. **Preview verified (localhost:4321):** homepage hero + recent list + library + per-piece page all render; hero title sorts correctly by `publishedAt DESC` with a same-date tiebreaker; old `/daily/2026-04-21/` URL returns 404 as designed; zero console errors.
 
-**Not yet shipped:** Drafter does not write `publishedAt` in the initial draft (it's spliced by Director at publish time). Admin deep-dive URL stays date-keyed — fine at `interval_hours=24`; Phase 5 rework needed before multi-per-day flip.
+**Not yet shipped:** Drafter does not write `publishedAt` in the initial draft (it's spliced by Director at publish time). Admin deep-dive URL stays date-keyed — fine at `interval_hours=24`; at multi-per-day it shows the first matching piece for a date (UX degradation, not a correctness issue). Piece-id-keyed rework deferred to Phase 7.
 
 ## Multi-piece cadence — Phase 3 hourly cron + runtime gate (2026-04-21)
 Behavioural phase. Cron changed from `'0 2 * * *'` to `'0 * * * *'` in `onStart`. [`dailyRun`](agents/src/director.ts) now reads `admin_settings.interval_hours` (Phase 2 helper), computes `(hour - 2 + 24) % intervalHours`, and bails silently when it's not this slot's turn. Anchored to hour 2 UTC so the 02:00 ritual is preserved at every allowed interval. With the default `interval_hours=24`, only the 02:00 slot fires — zero behavioural change until an admin flips the value.
@@ -72,7 +88,7 @@ No migration. No new column. No query changes. Method name stays `dailyRun` (cal
 
 **Verified:** agents typecheck clean on touched file (18 pre-existing SubAgent errors in `server.ts` unchanged). `interval_hours=24` still seeded. Gate math verified: `(2-2+24)%24=0` passes, `(3-2+24)%24=1` bails, `(2-2+24)%4=0` passes (the 4h slot fires at 02/06/10/14/18/22), `(3-2+24)%4=1` bails.
 
-**Flip is blocked on 3 follow-ups** (FOLLOWUPS.md "Unblock multi-per-day flip"): pre-run DELETE at [director.ts:109](agents/src/director.ts), audio DELETE at [director.ts:783](agents/src/director.ts), Learner input scope at [learner.ts:338](agents/src/learner.ts). All tolerate 1/day fine; all pool across pieces at multi/day. Must be fixed before flipping `interval_hours` below 24.
+**At Phase 3 ship time the flip was blocked on 3 follow-ups** (FOLLOWUPS.md "Unblock multi-per-day flip" — now `[resolved]`): pre-run DELETE at [director.ts:109](agents/src/director.ts), audio DELETE at [director.ts:783](agents/src/director.ts), Learner input scope at [learner.ts:338](agents/src/learner.ts). All three resolved same-day in commits `ecedb87` + `900905d` + `30ddbdd` before Phase 5 shipped the admin UI. See the top-level "Multi-piece cadence plan — status" section for current blocker state.
 
 ## Multi-piece cadence — Phase 2 admin_settings plumbing (2026-04-21)
 Second phase of the cadence plan. Pure plumbing — zero behavioural change. Adds the `admin_settings` key/value table, seeds `interval_hours=24` (preserving current 1-piece/day cadence), and teaches Director to read the value once per run. No gate yet; no UI; nothing uses the value. Phase 3 adds the hourly cron + runtime gate that actually consumes it.
