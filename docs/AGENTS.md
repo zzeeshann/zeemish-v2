@@ -41,7 +41,7 @@ Learner: runs off-pipeline on reader engagement data
 - **Sources:** TOP, TECHNOLOGY, SCIENCE, BUSINESS, HEALTH, WORLD feeds
 - **Output:** 30–50 daily candidates in `daily_candidates` table
 - **No API key** — uses free Google News RSS
-- **Method:** `scan()`
+- **Method:** `scan(pieceId)` — Director passes the run-scoped UUID pre-allocated at the top of `triggerDailyPiece`; Scanner stamps it onto every candidate row at INSERT time so the admin per-piece deep-dive can filter cleanly at multi-per-day cadence.
 - **File:** `agents/src/scanner.ts`
 
 ### 2. DirectorAgent
@@ -49,7 +49,8 @@ Learner: runs off-pipeline on reader engagement data
 - **State:** `{ status: 'idle' | 'running' | 'error', currentPhase, currentTask, lastDailyPiece, error }`
 - **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (hourly cron; gates on `admin_settings.interval_hours` — at default 24 only the 02:00 UTC slot fires)
 - **Spawns:** Scanner, Curator, Drafter, auditors, Integrator, Publisher, Observer as sub-agents
-- **Writes `pipeline_log`:** step-by-step log visible in admin dashboard
+- **Writes `pipeline_log`:** step-by-step log visible in admin dashboard. Each row carries `piece_id` (added migration 0018) so multi-per-day runs stay separate at the admin deep-dive level; `run_id` stays `YYYY-MM-DD` for day-grouping views.
+- **Piece_id allocation:** `pieceId = crypto.randomUUID()` at the top of `triggerDailyPiece()` — pre-allocated before Scanner runs so every `pipeline_log` / `audit_results` / `daily_candidates` row carries it from the first write. The same UUID becomes `daily_pieces.id` at the publish step and is spliced into MDX frontmatter. Orphan piece_ids (scanner-skipped or pre-publish errors) are acceptable — their rows don't render on any piece's admin page because there's no matching `daily_pieces` row. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
 - **File:** `agents/src/director.ts`
 
 ### 3. CuratorAgent
@@ -133,10 +134,10 @@ Learner: runs off-pipeline on reader engagement data
 
 ### 12. LearnerAgent
 - **Role:** Writes patterns into the `learnings` database so tomorrow's Drafter can see what today's pipeline and readers taught us. All four signal sources are wired as of 2026-04-21:
-  - **Producer-side (P1.3, wired 2026-04-19):** `analysePiecePostPublish(date)` reads the full quality record for a just-published piece — `daily_pieces`, `audit_results`, `pipeline_log`, `daily_candidates` — and writes `source='producer'` learnings. Fired by Director off-pipeline immediately after `publishing done`, via a 1-second `this.schedule(...)` so it never blocks the ship. Caps writes at 10 per run; overflow logs to observer_events. Non-retriable by design: a DB/Claude/JSON failure logs to observer_events and moves on.
+  - **Producer-side (P1.3, wired 2026-04-19):** `analysePiecePostPublish(pieceId, date)` reads the full quality record for a just-published piece — `daily_pieces`, `audit_results`, `pipeline_log`, `daily_candidates` — and writes `source='producer'` learnings. All three input queries scope by `piece_id` (migrations 0014 + 0018 + 0019, 2026-04-22 piece_id schema fix) for unambiguous multi-per-day isolation. Fired by Director off-pipeline immediately after `publishing done`, via a 1-second `this.schedule(...)` so it never blocks the ship. Caps writes at 10 per run; overflow logs to observer_events. Non-retriable by design: a DB/Claude/JSON failure logs to observer_events and moves on.
   - **Reader-side (pending traffic):** `analyse(courseId, days)` produces an engagement report from `engagement`; `analyseAndLearn(lessonData)` extracts learnings and writes `source='reader'`. Only fires when readers generate engagement events (no readers on the daily pieces yet).
-  - **Self-reflection (P1.4, wired 2026-04-19):** Drafter's own `reflect(brief, mdx, date)` post-publish review, `source='self-reflection'`. Fired by Director off-pipeline immediately after `publishing done`.
-  - **Zita (P1.5, wired 2026-04-21):** `analyseZitaPatternsDaily(date)` reads `zita_messages WHERE piece_date = ?`, groups by reader, synthesises question patterns. Guarded no-op below 5 user messages (returns `{skipped: true}` without firing a Claude call). Scheduled at **01:45 UTC on day+1** — not publish+1h like producer/self-reflection, because Zita synthesis needs reader traffic that takes a day. Writes `source='zita'` rows via `writeLearning(..., 60, 'zita', date)`. Same 10-row cap + non-retriable posture. See DECISIONS 2026-04-21 "P1.5 Learner skeleton".
+  - **Self-reflection (P1.4, wired 2026-04-19):** Drafter's own `reflect(brief, mdx, date, pieceId)` post-publish review, `source='self-reflection'`. Fired by Director off-pipeline immediately after `publishing done`.
+  - **Zita (P1.5, wired 2026-04-21):** `analyseZitaPatternsDaily(pieceId, date)` reads `zita_messages WHERE piece_id = ?`, groups by reader, synthesises question patterns. Guarded no-op below 5 user messages (returns `{skipped: true}` without firing a Claude call). Scheduled at **publish + 23h45m** (relative delay per piece, not an absolute clock) so every piece gets the same ~24h window regardless of publish time at multi-per-day. Writes `source='zita'` rows via `writeLearning(..., 60, 'zita', date, pieceId)`. Same 10-row cap + non-retriable posture. See DECISIONS 2026-04-21 "P1.5 Learner skeleton" and 2026-04-21 "Multi-piece cadence — Phase 6 Zita synthesis timing".
 - **Output:** Producer post-publish result (`{date, written, overflowCount, considered}`) returned to Director for overflow logging; Zita synthesis returns the same shape plus `{skipped, userMsgCount, tokensIn, tokensOut, durationMs}` for cost metering. All learning rows written to `learnings` with `source` populated.
 - **Does NOT touch published content.** Published pieces are permanent. All improvements feed forward.
 - **Reader surfaces:** Two public views into what the loop produces. (1) `/dashboard/` "What we've learned so far" panel — counts by source plus the latest observation across all pieces, fed by `/api/dashboard/memory`. (2) Per-piece "What the system learned from this piece" section inside the `/daily/[date]/` How-this-was-made drawer — the specific learnings written about that piece, grouped by source, fed by `/api/daily/[date]/made`'s extended envelope. Both surfaces join on `learnings.piece_date` (added in migration 0012) + `learnings.source` (migration 0011).

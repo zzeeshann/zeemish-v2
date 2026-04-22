@@ -133,7 +133,7 @@ One row per audit pass per draft — durable audit trail. Written by DirectorAge
 | passed | INTEGER | 0 or 1 |
 | score | INTEGER | 0-100 for voice auditor, null for others |
 | notes | TEXT | JSON: violations, issues, or claims |
-| piece_id | TEXT | `daily_pieces.id` (UUID) this audit is about. Added migration 0014 (cadence Phase 1). Nullable; backfilled for the 3 prod rows via `date(created_at/1000,'unixepoch') → daily_pieces.date → daily_pieces.id`. Indexed via `idx_audit_results_piece`. Existing `task_id` / `draft_id` stay alongside — they're per-round identifiers that don't cleanly map to a single piece without the FK. |
+| piece_id | TEXT | `daily_pieces.id` (UUID) this audit is about. Added migration 0014 (cadence Phase 1), writer-side threading + full backfill via migrations 0018+0019 (2026-04-22 piece_id schema fix). Director pre-allocates pieceId at run-start and `saveAuditResults(taskId, pieceId, round, …)` writes it on every audit row. Initial backfill (0014) covered 3 prod rows via date-join; 0019 completed the remaining 9 rows (2026-04-22 multi-per-day split by midpoint). Indexed via `idx_audit_results_piece`. Existing `task_id` / `draft_id` stay alongside — they're per-round identifiers that don't cleanly map to a single piece without the FK. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables". |
 | created_at | INTEGER | |
 
 Indexes: `idx_audit_task` on `task_id`, `idx_audit_created` on `created_at`, `idx_audit_results_piece` on `piece_id`.
@@ -170,7 +170,7 @@ News candidates from the Scanner, evaluated by the Director.
 | url | TEXT | Link to original story |
 | teachability_score | INTEGER | 0-100, set by Director |
 | selected | INTEGER | 1 if Director picked this story. **Historical data-flow quirk:** all 250 prod rows have `selected=0` despite 5 pieces having been published — see FOLLOWUPS "`daily_candidates.selected` never flipped on historical runs". |
-| piece_id | TEXT | `daily_pieces.id` (UUID) for the candidate Director picked. Added migration 0014 (cadence Phase 1). Nullable — unselected candidates carry NULL, the selected one gets set atomically with `selected=1`. No historical backfill (0 historical rows had `selected=1`). Indexed via `idx_candidates_piece_id`. |
+| piece_id | TEXT | `daily_pieces.id` (UUID) for the run that produced this candidate batch. Added migration 0014 (cadence Phase 1), semantic extended by migrations 0018+0019 (2026-04-22 piece_id schema fix). Scanner now writes piece_id on **every** candidate row at INSERT time (not just the picked one) — Director pre-allocates pieceId at the top of `triggerDailyPiece` and passes it into `scanner.scan(pieceId)`. All 350 historical rows backfilled via 0019 (pre-2026-04-22 via date-join, 2026-04-22 via midpoint split between the two same-date pieces). Indexed via `idx_candidates_piece_id`. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables". |
 | created_at | INTEGER | |
 
 Migrations: `0006_daily_pieces.sql`, `0014_piece_id_fks.sql` (added `piece_id`).
@@ -225,13 +225,14 @@ Step-by-step record of each daily piece run. The admin dashboard polls this for 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | TEXT PK | UUID |
-| run_id | TEXT | `YYYY-MM-DD` — the calendar day of this step's run. **Semantic walk-back 2026-04-21:** Phase 1's briefing had proposed shifting run_id to piece_id UUIDs, and the backfill ran, but four site-worker queries (`made.ts`, admin piece deep-dive, dashboard pipeline API + index) had embedded `run_id = YYYY-MM-DD` assumptions. Backfill rolled back from `pipeline_log_backup_20260421` the same day. Revised architecture: run_id stays date-shape permanently; a separate `piece_id TEXT` column will be added in a future migration for per-piece filtering. See DECISIONS 2026-04-21 "Roll back `pipeline_log.run_id` backfill". |
+| run_id | TEXT | `YYYY-MM-DD` — the calendar day of this step's run. **Semantic walk-back 2026-04-21:** Phase 1's briefing had proposed shifting run_id to piece_id UUIDs, and the backfill ran, but four site-worker queries (`made.ts`, admin piece deep-dive, dashboard pipeline API + index) had embedded `run_id = YYYY-MM-DD` assumptions. Backfill rolled back from `pipeline_log_backup_20260421` the same day. Revised architecture: run_id stays date-shape permanently; `piece_id` is added as an additive column (below). See DECISIONS 2026-04-21 "Roll back `pipeline_log.run_id` backfill". |
+| piece_id | TEXT | `daily_pieces.id` (UUID) — the piece this step belongs to. Added migration 0018, backfilled via 0019 (date-join for pre-2026-04-22; midpoint-split for 2026-04-22 multi-per-day rows). Director pre-allocates `pieceId` at the top of `triggerDailyPiece` and threads through every `logStep()` call so every row carries it going forward. Nullable at schema level (defensive for orphan pre-0018 rows); populated on every new row. Indexed via `idx_pipeline_log_piece`. Admin per-piece deep-dive scopes by this; admin home pipeline history continues to group by `run_id` for day-view semantics. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables". |
 | step | TEXT | scanning, curating, drafting, auditing_r1, publishing, done, error |
 | status | TEXT | running, done, failed |
 | data | TEXT | JSON with step-specific data (scores, counts, headlines) |
 | created_at | INTEGER | |
 
-Migrations: `0007_pipeline_log.sql` (initial). Migration 0014's proposed run_id semantic shift was reverted same-day — no net schema or data change to this table.
+Migrations: `0007_pipeline_log.sql` (initial). Migration 0014's proposed run_id semantic shift was reverted same-day — no net schema or data change. `0018_pipeline_log_piece_id.sql` added the `piece_id TEXT` column + `idx_pipeline_log_piece` (additive, no PK rebuild). `0019_piece_id_backfill.sql` populated all 153 historical rows.
 
 ### admin_settings
 Key/value table for admin-configurable system state. One row per setting. First consumer is `interval_hours` read by Director (Phase 2 of the cadence plan); future settings (rate limits, feature flags, voice overrides, scanner feed overrides) live here too.
@@ -250,7 +251,7 @@ Seeded values: `interval_hours = '24'` (preserves current 1-piece/day production
 
 Migration: `0016_admin_settings.sql`
 
-## Migrations summary (17 migrations, 14 tables)
+## Migrations summary (19 migrations, 14 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -268,3 +269,5 @@ Migration: `0016_admin_settings.sql`
 - `0015_daily_piece_audio_piece_id_pk.sql` — multi-piece cadence Phase 1, PK rebuild. `daily_piece_audio` PK switched from `(date, beat_name)` to `(piece_id, beat_name)` via snapshot → create-new → copy → drop-old → rename, all auto-applied. 32 rows backfilled via correlated subquery on `daily_pieces.date`. `daily_piece_audio_backup_20260421` snapshot held for rollback through 2026-04-28 via FOLLOWUPS.
 - `0016_admin_settings.sql` — multi-piece cadence Phase 2. Created `admin_settings(key, value, updated_at)` — first admin-configurable surface in Zeemish v2. Seeded `interval_hours='24'` via `INSERT OR IGNORE` (preserves current 1-piece/day cadence). Read by Director at start of `triggerDailyPiece`; gate logic lands in Phase 3. Future settings (rate limits, feature flags, voice overrides) will use the same table.
 - `0017_engagement_piece_id.sql` — multi-piece cadence Phase 7 (FOLLOWUPS wrap). Rebuilt `engagement` with PK `(piece_id, course_id, date)` via snapshot → create-new → backfill-join → drop-old → rename, all auto-applied. 13 historical rows backfilled from `daily_pieces` via `e.lesson_id = dp.date` join (unambiguous at 1/day — 5 piece_ids, 0 NULLs). `lesson_id` kept as a plain column for display-compat. `engagement_backup_20260422` snapshot held for rollback through 2026-04-29 via FOLLOWUPS. Unblocks reader-path attribution at multi-per-day — `Learner.analyseAndLearn` now reads piece_id directly off the engagement row instead of the pre-Phase-7 partial-fix date-lookup.
+- `0018_pipeline_log_piece_id.sql` — multi-per-day piece_id schema fix Phase 1. Added nullable `piece_id TEXT` to `pipeline_log` + `idx_pipeline_log_piece`. Completes the piece_id column coverage across all three day-keyed tables (0014 had `audit_results` + `daily_candidates`; this finishes the set). Additive ALTER, no snapshot needed. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
+- `0019_piece_id_backfill.sql` — multi-per-day piece_id schema fix Phase 2. Manual (not auto-applied) — commented UPDATEs run via `wrangler d1 execute`, same pattern as 0012 and 0014 Step 2. Two strategies: pre-2026-04-22 rows via `daily_pieces.date` join (unambiguous at 1/day), 2026-04-22 rows via midpoint split at timestamp `1776850364493` between the two pieces' `published_at`. 512 null rows populated across the three tables (9 `audit_results` + 153 `pipeline_log` + 350 `daily_candidates`). 0 NULL remaining across all three. Verified row-by-row against production D1.
