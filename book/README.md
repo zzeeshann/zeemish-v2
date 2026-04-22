@@ -4,7 +4,7 @@
 
 ---
 
-This book is for someone who knows a little about computers and a little about programming, and wants to understand how a system like Zeemish actually works — end to end, from the news arriving at 2am to the piece appearing on the site.
+This book is for someone who knows a little about computers and a little about programming, and wants to understand how a system like Zeemish actually works — end to end, from the news arriving on a scheduled cron (default 02:00 UTC, admin-configurable) to the piece appearing on the site.
 
 It's also for anyone who has heard the words "AI agent," "Cloudflare Worker," "GitHub," or "database" and wondered what they actually mean, and whether the explanations online are deliberately making them sound harder than they are. They are.
 
