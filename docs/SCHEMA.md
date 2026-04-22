@@ -84,20 +84,21 @@ What Zishan should know about — published lessons, escalations, errors.
 Migration: `0002_observer_events.sql`
 
 ### engagement
-Reader engagement metrics, aggregated per lesson per day.
+Reader engagement metrics, aggregated per piece per day.
 
 | Column | Type | Notes |
 |--------|------|-------|
-| lesson_id | TEXT | e.g. "body/3" |
-| course_id | TEXT | e.g. "body" |
-| date | TEXT | YYYY-MM-DD |
+| piece_id | TEXT NOT NULL | `daily_pieces.id` (UUID). Primary attribution axis since migration 0017. For non-daily content, lesson-shell falls back to the old lesson_id semantics; for daily pieces, sourced from `<lesson-shell data-piece-id>` (injected by rehype-beats from MDX frontmatter). |
+| lesson_id | TEXT | Retained as a plain column for display-compat with pre-0017 admin widgets. On daily pieces this holds the piece_date; on legacy/lesson content, the lesson identifier. No longer part of the PK. |
+| course_id | TEXT | e.g. "daily", "body" |
+| date | TEXT | YYYY-MM-DD — activity date (when the reader hit the page), not publish date |
 | views | INTEGER | Default 0 |
 | completions | INTEGER | Default 0 |
 | avg_time_seconds | INTEGER | |
 | drop_off_beat | TEXT | Most common drop-off point |
 | audio_plays | INTEGER | Default 0 |
 
-PK: (lesson_id, course_id, date). Migration: `0003_engagement_learnings.sql`
+PK: **(piece_id, course_id, date)** since migration 0017. Indexes: `idx_engagement_course` on `course_id`, `idx_engagement_date` on `date`, `idx_engagement_piece` on `piece_id`. Migrations: `0003_engagement_learnings.sql` (initial), `0017_engagement_piece_id.sql` (PK rebuild + backfill).
 
 ### learnings
 Cross-agent learnings database — patterns that work or don't. Drafter reads the 10 most recent rows (across all sources / categories) at runtime and includes them in its prompt — the loop the system uses to improve on itself.
@@ -249,7 +250,7 @@ Seeded values: `interval_hours = '24'` (preserves current 1-piece/day production
 
 Migration: `0016_admin_settings.sql`
 
-## Migrations summary (16 migrations, 14 tables)
+## Migrations summary (17 migrations, 14 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -266,3 +267,4 @@ Migration: `0016_admin_settings.sql`
 - `0014_piece_id_fks.sql` — multi-piece cadence Phase 1. Added nullable `piece_id TEXT` FK columns + indexes to `audit_results`, `learnings`, `zita_messages`, `daily_candidates`. Auto-applied ALTERs; backfill UPDATEs commented for manual `wrangler d1 execute` runs (all 4 tables + `pipeline_log.run_id` semantic shift from `YYYY-MM-DD` strings to `daily_pieces.id` UUIDs). Applied 2026-04-21. `daily_candidates` has no historical backfill — 250 rows, 0 with `selected=1` (separate FOLLOWUPS investigation).
 - `0015_daily_piece_audio_piece_id_pk.sql` — multi-piece cadence Phase 1, PK rebuild. `daily_piece_audio` PK switched from `(date, beat_name)` to `(piece_id, beat_name)` via snapshot → create-new → copy → drop-old → rename, all auto-applied. 32 rows backfilled via correlated subquery on `daily_pieces.date`. `daily_piece_audio_backup_20260421` snapshot held for rollback through 2026-04-28 via FOLLOWUPS.
 - `0016_admin_settings.sql` — multi-piece cadence Phase 2. Created `admin_settings(key, value, updated_at)` — first admin-configurable surface in Zeemish v2. Seeded `interval_hours='24'` via `INSERT OR IGNORE` (preserves current 1-piece/day cadence). Read by Director at start of `triggerDailyPiece`; gate logic lands in Phase 3. Future settings (rate limits, feature flags, voice overrides) will use the same table.
+- `0017_engagement_piece_id.sql` — multi-piece cadence Phase 7 (FOLLOWUPS wrap). Rebuilt `engagement` with PK `(piece_id, course_id, date)` via snapshot → create-new → backfill-join → drop-old → rename, all auto-applied. 13 historical rows backfilled from `daily_pieces` via `e.lesson_id = dp.date` join (unambiguous at 1/day — 5 piece_ids, 0 NULLs). `lesson_id` kept as a plain column for display-compat. `engagement_backup_20260422` snapshot held for rollback through 2026-04-29 via FOLLOWUPS. Unblocks reader-path attribution at multi-per-day — `Learner.analyseAndLearn` now reads piece_id directly off the engagement row instead of the pre-Phase-7 partial-fix date-lookup.
