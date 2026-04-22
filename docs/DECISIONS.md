@@ -2,6 +2,127 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: piece_id columns on day-keyed tables (audit_results / pipeline_log / daily_candidates)
+
+**Context:** Supersedes the earlier 2026-04-22 entry "Time-window scoping for admin per-piece deep-dive at multi-per-day" below. That entry shipped a midpoint-between-publishes bandaid on the astro-side admin page to isolate per-piece data without a schema change. User pushed back ("you are going round and round") — the bandaid was correct-for-now but the root cause was schema-level: three tables had no `piece_id` column. This entry is the proper fix, shipped across 5 phases with pauses between each.
+
+**The bug (recap):** at `interval_hours < 24`, two pieces publishing on the same date shared the same `audit_results.task_id = 'daily/<date>'`, `pipeline_log.run_id = '<date>'`, and `daily_candidates.date = '<date>'`. The admin per-piece deep-dive page pooled both pieces' rows. Worse, [`director.ts:950`](../agents/src/director.ts:950) built identical `draft_id = 'daily/<date>-r<N>'` for both pieces' round 1, so group-by-draft_id collided the two pieces with D1's last-writer-wins, surfacing air-traffic's facts on the tobacco admin page (screenshot evidence).
+
+**Decision:** add nullable `piece_id TEXT` to all three tables. Director pre-allocates `pieceId` at the top of `triggerDailyPiece()` (not publish-time, as before) so every logStep / saveAuditResults / scanner candidate INSERT carries it from the first write. Readers scope by `WHERE piece_id = ?` for unambiguous multi-per-day isolation. `run_id` stays `YYYY-MM-DD` permanently (Phase 3 walk-back from 2026-04-21 preserved) — `piece_id` is additive, not a replacement, so day-aggregation consumers keep working.
+
+**Phase log (5 phases, 4 pauses, plan at `~/.claude/plans/glowing-snacking-shell.md`):**
+
+| Phase | What shipped | Migration | Verify |
+|---|---|---|---|
+| 1 | `migrations/0018_pipeline_log_piece_id.sql` — ALTER + index. Scoped DOWN from the original plan after `PRAGMA` revealed 0014 had already added the column to `audit_results` + `daily_candidates` | 0018 | `PRAGMA table_info(pipeline_log)` shows column |
+| 2 | `migrations/0019_piece_id_backfill.sql` — 9 UPDATEs covering 9 + 153 + 350 = 512 null rows. Two strategies: pre-2026-04-22 joined on date (unambiguous at 1/day); 2026-04-22 split by midpoint (1776850364493) between the two pieces' published_at | 0019 (manual) | `SELECT COUNT(*) WHERE piece_id IS NULL` returns 0 across all three tables |
+| 3 | Agents worker writer threading. Moved `const pieceId = crypto.randomUUID()` from line 322 (mid-publish) to top of `triggerDailyPiece()`. `logStep()` + `saveAuditResults()` + `scanner.scan()` + `learner.analysePiecePostPublish()` all thread piece_id. retryAudio's publish-step lookup gains `AND piece_id = ?`. Removed `LEARNER_PIPELINE_LOOKBACK_MS` / `LOOKAHEAD_MS` — no longer needed | — | typecheck clean on touched files (18 pre-existing `server.ts` SubAgent errors unchanged) |
+| 4 | Site worker reader repointing. Three queries on `[date]/[slug].astro` switch to `WHERE piece_id = ?`. Midpoint bandaid deleted. `/api/daily/[date]/made.ts` 5 queries prefer piece_id. `made-by.ts` `loadMadeTeaser` takes optional pieceId. `/api/dashboard/pipeline.ts` returns `groups[]` + `headlines{}` keyed by piece_id. `admin.astro` renders today's run as collapsible per-piece `<details>` blocks — closes Bug A (flat 26-step blob) | — | `pnpm build` clean, preview API returns new shape |
+| 5 | This DECISIONS entry + FOLLOWUPS closes + CLAUDE.md section | — | docs committed alongside code per feedback rule |
+
+**Writer-side topology after Phase 3:**
+
+```ts
+// director.ts
+async triggerDailyPiece(force = false): Promise<...> {
+  const pieceId = crypto.randomUUID();        // pre-allocated at run-start
+  // ... slot guard, interval read ...
+  await this.logStep(today, pieceId, 'scanning', 'running', { intervalHours });
+  const candidates = await scanner.scan(pieceId);
+  // ... curator, drafter, auditors (saveAuditResults takes pieceId) ...
+  // daily_pieces INSERT uses the SAME pieceId (no fresh UUID)
+}
+
+private async logStep(runId, pieceId, step, status, data) {
+  INSERT INTO pipeline_log (..., piece_id) VALUES (..., ?);
+}
+
+private async saveAuditResults(taskId, pieceId, round, voice, structure, facts) {
+  INSERT INTO audit_results (..., piece_id) VALUES (..., ?);  // x3 batched
+}
+```
+
+Orphan piece_ids (runs that skip or error before publish) have rows in pipeline_log / audit_results / daily_candidates with a piece_id that never becomes `daily_pieces.id`. Accepted — those rows don't render on any piece's admin page (no daily_pieces row to JOIN on) but stay visible on day-aggregation views via `run_id`.
+
+**Trade-offs considered:**
+
+1. **Why pre-allocate at run-start vs publish-time?** — so every earlier write carries piece_id. Alternative: two-pass — write with NULL, back-fill at publish. More complex, introduces a window where readers might see half-populated rows, and orphan rows (scanner-skipped runs) would have no piece_id to group by. Pre-allocation is cleaner.
+
+2. **Why keep `run_id = YYYY-MM-DD`?** — the 2026-04-21 walk-back lesson. Four site-worker consumers embedded date assumptions; changing run_id broke them. Adding piece_id alongside preserves the day-grouping views (admin pipeline history, lifetime runs) while enabling per-piece isolation.
+
+3. **Why fall back to date-keyed queries when pieceId is null?** — defensive. Post-Phase-7 every MDX has pieceId in frontmatter, but a stale cached reader bundle or a typo'd URL might still hit the page without one. Empty result would be more confusing than the day-view fallback.
+
+4. **Why not delete the superseded DECISIONS entry?** — append-only rule. The bandaid is part of the session's history and the mid-session course-correction is valuable context for future operators.
+
+**Verified end-to-end against production D1 (2026-04-22):**
+- `audit_results`: air-traffic 6 rows (r1+r2 × 3 auditors), tobacco 3 rows (r1 × 3 auditors), 0 NULL.
+- `pipeline_log`: air-traffic 23 rows including the 04:19 audio retry, tobacco 19 rows, 0 NULL.
+- `daily_candidates`: 50 / 50 per piece, 0 NULL.
+- All three new queries `WHERE piece_id = ?` return the expected row counts via `wrangler d1 execute --remote`.
+
+**Rollback:**
+- Full session: `git reset --hard 8902df9`.
+- Phase 1 migration: `ALTER TABLE pipeline_log DROP COLUMN piece_id` (D1 supports DROP COLUMN as of 2024).
+- Phase 2 backfill: `UPDATE <table> SET piece_id = NULL`; readers keep a date-keyed fallback so partial NULL coverage doesn't crash.
+- Phase 3 + 4: `git revert <sha>` per phase.
+
+**Post-ship verification (pending deploy):**
+- Hit `https://zeemish.io/dashboard/admin/piece/2026-04-22/uk-bill-bans-.../` → AUDIT ROUNDS (1), voice 92/100, tobacco facts only, 50 candidates.
+- Hit `https://zeemish.io/dashboard/admin/piece/2026-04-22/12-5-billion-.../` → AUDIT ROUNDS (2), voice 95/100, COBOL/NATS facts, 50 candidates.
+- Hit `https://zeemish.io/dashboard/admin/` → Today's Run shows two collapsible per-piece blocks.
+
+## 2026-04-22: Time-window scoping for admin per-piece deep-dive at multi-per-day
+
+**Context:** User flipped `interval_hours=12` overnight; 2026-04-22 shipped two pieces (air-traffic at 02:00 UTC, tobacco at 14:00 UTC after the slot-aware-guard fix). Visiting `/dashboard/admin/piece/2026-04-22/uk-bill-bans-.../` showed the tobacco piece header but air-traffic's audit rounds: Round 2 (final) with voice note "Close adds extra sentence" and fact claims about $12.5 billion / NATS / COBOL. Scanner candidates count showed 100 (two runs pooled). Operator can't trust the page.
+
+**Root cause:** three queries on [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/%5Bdate%5D/%5Bslug%5D.astro) scope by date, not piece_id — `audit_results.task_id = 'daily/<date>'`, `pipeline_log.run_id = '<date>'`, `daily_candidates.date = '<date>'`. None of those tables has a piece_id column. Worse, [`director.ts:950`](../agents/src/director.ts:950) builds `draft_id = 'daily/<date>-r<N>'` — both same-date pieces have identical draft_ids at round 1, so the page's group-by-draft_id collides the two pieces' rows with D1's last-writer-wins.
+
+The file's own pre-fix comment (lines 117-120) called this "intentional — show the day's activity, matching the Phase 3 walk-back". That reasoning breaks at multi-per-day: the page header names one piece, the body shows another. Not a day view, a misattribution.
+
+**Decision:** time-window scope the 3 day-keyed queries at query time. No schema change. No agent/migration work. Pure astro-site worker fix, reverts cleanly.
+
+```ts
+const sameDayPieces = /* SELECT id, published_at FROM daily_pieces WHERE date = ? ORDER BY published_at ASC */;
+const thisIdx = pieceId ? sameDayPieces.findIndex((p) => p.id === pieceId) : -1;
+const isMultiPerDay = sameDayPieces.length > 1 && thisIdx >= 0 && piece?.published_at != null;
+// Midpoint between consecutive pieces' published_at values partitions
+// the day into non-overlapping intervals. Self-scaling: tighter windows
+// at short intervals, wider windows (absorbing audio retries) at long.
+const prevMid = isMultiPerDay && thisIdx > 0
+  ? Math.floor((sameDayPieces[thisIdx - 1].published_at + piece.published_at) / 2) : null;
+const nextMid = isMultiPerDay && thisIdx < sameDayPieces.length - 1
+  ? Math.floor((piece.published_at + sameDayPieces[thisIdx + 1].published_at) / 2) : null;
+const windowStart = prevMid ?? 0;
+const windowEnd = nextMid ?? Number.MAX_SAFE_INTEGER;
+```
+
+Then `audit_results / pipeline_log / daily_candidates` all gain `AND created_at >= ? AND created_at < ?` bound on `(windowStart, windowEnd)`. observer_events keeps its 36h window (legitimate day view of operator events). Audio + Zita sections already piece-scoped via `piece_id` — unchanged.
+
+**False start corrected mid-session:** first pass used a fixed 30min post-publish buffer (`windowStart = prev.published_at + 30min`, `windowEnd = this.published_at + 30min`). User pushed back asking for deep verification against real data. Running the queries via `wrangler d1 execute --remote` against 2026-04-22 rows turned up an air-traffic audio retry at 04:19:14 UTC — **37min after its publish at 03:42:38**, outside the 30min buffer. Those retry rows would have leaked into tobacco's window. Switched to midpoint partitioning: midpoint between air-traffic (03:42:38) and tobacco (18:42:50) is 11:12 UTC, so air-traffic's window is [0, 11:12) and comfortably contains retries up to half the inter-publish gap.
+
+**Verified against real D1 data for 2026-04-22 (both pieces):**
+- `audit_results` — air-traffic window returns 6 rows (r1+r2 × 3 auditors); tobacco returns 3 rows (r1 × 3 auditors). Zero crossover.
+- `pipeline_log` — air-traffic window returns 23 rows including the 04:19 audio retry; tobacco returns 18 rows. Zero crossover.
+- `daily_candidates` — 50 per piece (two scanner runs). Zero crossover.
+
+**Trade-offs considered:**
+
+1. **Why not `audit_results.piece_id` column?** — correct long-term fix, but requires: migration + backfill, director allocates piece_id at run-start (not publish-time, which is Phase 1's pattern), threading it through every `saveAuditResults` + `logStep` + `daily_candidates` INSERT, and parallel code changes across the agents worker. Wants its own plan doc with pause points. Filed in FOLLOWUPS. Time-window scope unblocks the operator today.
+
+2. **Why `published_at` midpoints instead of scanner-start timestamps?** — scanner-start partitioning would be perfect (actual run boundaries), but requires joining on pipeline_log to find each piece's first `scanning running` row and trusting the sort order matches publish order. Midpoint gives a clean formula on a single `daily_pieces` query and absorbs audio retries up to half the gap — at interval_hours=1 (minimum) that's 30min, which matches the fixed-buffer approach at its tightest. At interval_hours=12 it stretches to ~6h.
+
+3. **Why midpoint and not fixed post-publish buffer?** — verified-against-data call. Real 2026-04-22 run had a 37min audio retry outside a 30min buffer. Bumping the buffer to 60min or 90min is arbitrary and still breaks on heavier retries. Midpoint self-scales to the gap between runs.
+
+4. **At `interval_hours=24`, any change?** — no. `sameDayPieces.length === 1`, `isMultiPerDay === false`, both midpoints return null → `windowStart=0`, `windowEnd=MAX_SAFE_INTEGER`. Queries functionally identical to pre-fix. All historical pieces unaffected.
+
+5. **What about `admin.astro` (the Today's Run panel on the admin home)?** — shows all same-day pipeline rows in one flat stream. Cosmetic, data is correct, operator can read it. Deferred to FOLLOWUPS for a collapsible two-run UI.
+
+**Residual edge case:** at multi-per-day a manual audio retry fired *later than half the inter-publish gap* would attribute to the wrong piece on the timeline section. The Audio section on the page reads `daily_piece_audio` directly (piece-scoped via migration 0015) so audio state is always correct — only the pipeline timeline loses the retry row. Documented, accepted.
+
+**Verified:** build clean. Query math validated against production D1 row-by-row via `wrangler d1 execute --remote` (row counts and content match expected partitions for both pieces). Browser verification of the rendered admin page requires session cookies that aren't available in dev preview — relying on the query verification as proof of correctness.
+
+**Not scoped:** Bug A (Today's Run flat list), proper piece_id columns on audit_results/pipeline_log/daily_candidates, Director piece_id-at-run-start refactor, admin home pipeline-history per-piece grouping. All filed in FOLLOWUPS.
+
 ## 2026-04-22: Slot-aware guard for multi-per-day cadence
 
 **Context:** User flipped `admin_settings.interval_hours=12` evening of 2026-04-21. The 02:00 UTC run on 2026-04-22 fired and published the ATC piece as expected. The 14:00 UTC slot should have produced a second piece — nothing appeared, no pipeline_log entry, no observer event. User asked "why didn't 2pm run, check the issue, don't guess".

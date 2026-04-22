@@ -33,8 +33,15 @@ const RSS_FEEDS: Record<string, string> = {
 export class ScannerAgent extends Agent<Env, ScannerState> {
   initialState: ScannerState = { lastScanned: null, candidateCount: 0 };
 
-  /** Scan all RSS feeds and store candidates */
-  async scan(): Promise<NewsCandidate[]> {
+  /** Scan all RSS feeds and store candidates. `pieceId` is the
+   *  run-scoped UUID pre-allocated by Director at the top of
+   *  triggerDailyPiece — stamped onto every candidate row so the
+   *  admin per-piece view can filter candidates by piece_id at
+   *  multi-per-day cadence. Orphan piece_ids (scanner-skipped runs)
+   *  are acceptable; readers filter on daily_pieces.id JOIN where
+   *  needed. See DECISIONS 2026-04-22 "piece_id columns on day-keyed
+   *  tables". */
+  async scan(pieceId: string): Promise<NewsCandidate[]> {
     const today = new Date().toISOString().slice(0, 10);
     const allCandidates: NewsCandidate[] = [];
     const seenHeadlines = new Set<string>();
@@ -72,10 +79,10 @@ export class ScannerAgent extends Agent<Env, ScannerState> {
       try {
         await this.env.DB
           .prepare(
-            `INSERT OR IGNORE INTO daily_candidates (id, date, headline, source, category, summary, url, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT OR IGNORE INTO daily_candidates (id, date, headline, source, category, summary, url, created_at, piece_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(candidate.id, today, candidate.headline, candidate.source, candidate.category, candidate.summary, candidate.url, now)
+          .bind(candidate.id, today, candidate.headline, candidate.source, candidate.category, candidate.summary, candidate.url, now, pieceId)
           .run();
       } catch { /* continue */ }
     }

@@ -550,6 +550,31 @@ function shortDate(iso: string): string {
     return last.status === 'running';
   }
 
+  function renderGroup(group: { pieceId: string | null; steps: any[] }, headline: { headline: string; published_at: number | null } | undefined, openByDefault: boolean): string {
+    const stepsHtml = group.steps.map(renderStep).join('');
+    const pieceLabel = headline
+      ? escapeHtml(headline.headline)
+      : group.pieceId
+        ? `<code class="text-xs">${escapeHtml(group.pieceId.slice(0, 8))}…</code>`
+        : '<span class="text-zee-muted italic">legacy (pre-piece_id)</span>';
+    const publishedDisplay = headline?.published_at
+      ? new Date(headline.published_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const summary = `
+      <summary class="cursor-pointer list-none flex items-center justify-between gap-3 py-2">
+        <div class="flex-1 min-w-0">
+          <span class="text-sm font-medium leading-tight block truncate">${pieceLabel}</span>
+          ${publishedDisplay ? `<span class="text-xs text-zee-muted tabular-nums">published ${publishedDisplay} UTC · ${group.steps.length} steps</span>` : `<span class="text-xs text-zee-muted">${group.steps.length} steps</span>`}
+        </div>
+        <span class="text-xs text-zee-muted group-open:rotate-90 transition-transform">▸</span>
+      </summary>
+    `;
+    return `<details class="group border-b border-zee-border/40 last:border-b-0" ${openByDefault ? 'open' : ''}>
+      ${summary}
+      <div class="pb-2 pl-1">${stepsHtml}</div>
+    </details>`;
+  }
+
   async function pollPipeline() {
     if (!stepsEl) return;
     try {
@@ -562,7 +587,19 @@ function shortDate(iso: string): string {
         return;
       }
 
-      stepsEl.innerHTML = data.steps.map(renderStep).join('');
+      // If groups came back (new API shape, Phase 4+), render one
+      // collapsible block per piece_id. Newest open by default,
+      // older ones closed for compactness. Falls back to flat-stream
+      // render if groups is empty (legacy API or all-null piece_id
+      // in response).
+      if (Array.isArray(data.groups) && data.groups.length > 0) {
+        const newestIdx = data.groups.length - 1;
+        stepsEl.innerHTML = data.groups
+          .map((g: any, i: number) => renderGroup(g, data.headlines?.[g.pieceId], i === newestIdx))
+          .join('');
+      } else {
+        stepsEl.innerHTML = data.steps.map(renderStep).join('');
+      }
 
       const running = pipelineIsRunning(data.steps);
       if (!running && pollInterval) {

@@ -58,6 +58,29 @@ Non-scoped: local-time cron anchoring (confirmed UTC with user), `daily_pieces(p
 
 See DECISIONS 2026-04-22 "Slot-aware guard for multi-per-day cadence" for the full trade-offs.
 
+## piece_id columns on day-keyed tables — schema-level fix for multi-per-day admin misattribution (2026-04-22 PM)
+Same session discovered the per-piece admin page (`/dashboard/admin/piece/<date>/<slug>/`) was misattributing audit rounds, pipeline steps, and scanner candidates at multi-per-day. Tobacco piece page showed air-traffic's fact claims + voice notes + 100 candidates because 3 queries scoped by date not piece_id: `audit_results.task_id='daily/<date>'`, `pipeline_log.run_id='<date>'`, `daily_candidates.date='<date>'`. Director also built identical `draft_id`s for both pieces (`daily/<date>-r<N>`), so the page's group-by-draft_id collided them with D1's last-writer-wins.
+
+Initial fix in-session was an astro-side time-window bandaid (midpoint between publishes); user pushed back ("you are going round and round") and the session pivoted to a proper 5-phase schema fix. Plan file `~/.claude/plans/glowing-snacking-shell.md`. Deployed as:
+
+1. **Migration 0018** — `ALTER TABLE pipeline_log ADD COLUMN piece_id TEXT` + index. Scoped DOWN from the original plan after `PRAGMA` showed 0014 had already added the column to `audit_results` + `daily_candidates`.
+2. **Migration 0019** — manual backfill of 512 null rows: pre-2026-04-22 via date-join (unambiguous at 1/day), 2026-04-22 via midpoint split at timestamp 1776850364493 between the two pieces' `published_at`.
+3. **Agents-worker writer threading** — Director pre-allocates `pieceId` at the top of `triggerDailyPiece()` (moved from publish-time). `logStep()` + `saveAuditResults()` + `scanner.scan()` + `learner.analysePiecePostPublish()` all thread piece_id. `retryAudio()`'s publish-step lookup gains `AND piece_id = ?`. Learner drops the `LEARNER_PIPELINE_LOOKBACK_MS` time-window — piece_id scope replaces it.
+4. **Site-worker reader repointing** — 3 queries on `[date]/[slug].astro` + 5 queries on `/api/daily/[date]/made.ts` + `made-by.ts` teaser counts all switch to `WHERE piece_id = ?`. Midpoint bandaid deleted. `/api/dashboard/pipeline.ts` now returns `groups[]` + `headlines{}` keyed by piece_id; `admin.astro` renders Today's Run as collapsible per-piece `<details>` blocks (closes Bug A — no more flat 26-step blob).
+5. **Docs** — this entry + DECISIONS 2026-04-22 "piece_id columns on day-keyed tables" + FOLLOWUPS closes.
+
+**Verified against production D1 for 2026-04-22** (row-by-row via `wrangler d1 execute --remote`): audit_results air-traffic 6 / tobacco 3 / zero NULL; pipeline_log 23 / 19 including the 04:19 audio retry / zero NULL; daily_candidates 50 / 50 / zero NULL. Midpoint bandaid removed; pages now bind by piece_id directly.
+
+**Trade-offs:**
+- `pipeline_log.run_id` stays `YYYY-MM-DD` permanently (Phase 3 walk-back preserved) — piece_id is additive, so day-aggregation views (admin pipeline history, lifetime runs) keep working.
+- Orphan piece_ids (scanner-skipped runs, pre-publish errors) have rows with no matching `daily_pieces.id` row. Accepted — those rows don't render on any piece's admin page.
+- Audio + Zita sections were already piece-scoped via `daily_piece_audio.piece_id` (migration 0015) and `zita_messages.piece_id` (0013 + 0014). Untouched.
+- observer_events keeps its 36h day window (legitimate day view of operator events).
+
+Audio retry-fresh DELETE on pipeline_log is moot — the prior DELETE-audio-step row wipe was removed in an earlier 2026-04-21 commit (`ecedb87` / `900905d`); the path now relies on `daily_piece_audio` which is piece-scoped.
+
+See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables" for full phase log and rollback procedure.
+
 ## Multi-piece cadence — Phase 6 Zita synthesis timing + scoping (2026-04-21)
 Zita synthesis is now piece-scoped on both timing and input. Previous absolute clock target (01:45 UTC day+1) would have stacked N pieces' synth jobs on one clock at multi-per-day AND given same-date afternoon pieces a truncated reader window. Relative delay of `publish + 85500s` (23h45m) per piece gives every piece the same ~24h window regardless of publish time. Learner's SELECT switches from `WHERE piece_date = ?` to `WHERE piece_id = ?` to stop cross-piece pooling on shared dates.
 

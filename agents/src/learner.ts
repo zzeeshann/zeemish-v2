@@ -23,25 +23,6 @@ const ZITA_SYNTHESIS_MIN_USER_MESSAGES = 5;
  *  and reasoning as PRODUCER_LEARNINGS_WRITE_CAP. */
 const ZITA_LEARNINGS_WRITE_CAP = 10;
 
-/**
- * Time-window (milliseconds) around `daily_pieces.published_at` used to
- * isolate this piece's pipeline_log rows from neighbouring runs on the
- * same date at multi-per-day cadence. `run_id` stays `YYYY-MM-DD` (per
- * the 2026-04-21 walk-back) so per-piece filtering happens via
- * `created_at BETWEEN (published_at - LOOKBACK) AND (published_at +
- * LOOKAHEAD)`.
- *
- * Chosen generous: nominal pipelines run ~2min, but stressed pipelines
- * (Anthropic latency spikes, ElevenLabs retry storms, DO alarm
- * re-dispatch) have historically pushed past 5min. At `interval_hours=1`
- * the inter-run gap is 60min — a 20min total window leaves 40min safety
- * margin on both sides. Tight windows that work at normal latency and
- * fail under stress are the silent-data-loss shape to avoid. See
- * DECISIONS 2026-04-21 "Scope Learner synthesis input by time window".
- */
-const LEARNER_PIPELINE_LOOKBACK_MS = 600_000;   // 10 min
-const LEARNER_PIPELINE_LOOKAHEAD_MS = 600_000;  // 10 min
-
 /** Producer-side analysis output from Claude. Category/observation
  *  shape mirrors the prompt's JSON contract. */
 interface ProducerLearning {
@@ -345,47 +326,39 @@ Extract learnings for future pieces. What should the Drafter do differently next
       throw new Error(`analysePiecePostPublish: no daily_pieces row for id ${pieceId}`);
     }
 
+    // All three day-keyed tables now carry `piece_id` (migration 0018
+    // + 0014). Scope by piece_id directly — no more time-window
+    // heuristic. Multi-per-day isolation is exact. See DECISIONS
+    // 2026-04-22 "piece_id columns on day-keyed tables".
     const auditsRes = await this.env.DB
       .prepare(
         `SELECT auditor, passed, score, notes, created_at
          FROM audit_results
-         WHERE task_id LIKE ?
+         WHERE piece_id = ?
          ORDER BY created_at ASC`,
       )
-      .bind(`daily/${date}%`)
+      .bind(pieceId)
       .all<{ auditor: string; passed: number; score: number | null; notes: string | null; created_at: number }>();
 
     const candsRes = await this.env.DB
       .prepare(
         `SELECT headline, source, teachability_score, selected
          FROM daily_candidates
-         WHERE date = ?
+         WHERE piece_id = ?
          ORDER BY selected DESC, teachability_score DESC
          LIMIT 8`,
       )
-      .bind(date)
+      .bind(pieceId)
       .all<{ headline: string; source: string; teachability_score: number | null; selected: number }>();
 
-    // pipeline_log.run_id stays YYYY-MM-DD (cadence Phase 3 walk-back).
-    // At multi-per-day multiple pieces share a date, so we bound by
-    // `created_at` around this piece's `published_at` to isolate this
-    // run from neighbouring ones. If published_at is NULL (legacy rows
-    // pre-Phase-4), fall back to unbounded date filter — same as the
-    // pre-Phase-5 behaviour.
-    const windowStart = piece.published_at != null
-      ? piece.published_at - LEARNER_PIPELINE_LOOKBACK_MS
-      : 0;
-    const windowEnd = piece.published_at != null
-      ? piece.published_at + LEARNER_PIPELINE_LOOKAHEAD_MS
-      : Number.MAX_SAFE_INTEGER;
     const logRes = await this.env.DB
       .prepare(
         `SELECT step, status, data, created_at
          FROM pipeline_log
-         WHERE run_id = ? AND created_at BETWEEN ? AND ?
+         WHERE piece_id = ?
          ORDER BY created_at ASC`,
       )
-      .bind(date, windowStart, windowEnd)
+      .bind(pieceId)
       .all<{ step: string; status: string; data: string | null; created_at: number }>();
 
     // ── 2. Build a compact, readable context for Claude ──────────

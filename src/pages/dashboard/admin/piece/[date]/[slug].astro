@@ -112,12 +112,13 @@ let zitaMessages: ZitaMessage[] = [];
 
 // Resolve piece_id from (date, slug) via the content collection. The
 // filename convention is `YYYY-MM-DD-{slug}.mdx`, so deriveSlug(entry.id)
-// matches the URL slug. Per-piece queries (daily_pieces, audio, zita)
-// bind on piece_id so multi-per-day same-date pieces stay separate.
-// Day-scoped queries (audit_results, pipeline_log, candidates,
-// observer_events) intentionally keep date binding — those sections
-// show the day's pipeline activity, not just this piece's, matching
-// the Phase 3 walk-back + Phase 6 reasoning.
+// matches the URL slug. All piece-scoped queries below bind on
+// piece_id — including the three day-keyed tables (audit_results,
+// pipeline_log, daily_candidates) which gained a piece_id column in
+// migration 0018 and were backfilled for historical rows in 0019.
+// observer_events stays on a 36h day window (legitimate day view of
+// operator events). See DECISIONS 2026-04-22 "piece_id columns on
+// day-keyed tables".
 const collectionEntries = await getCollection('dailyPieces');
 const entry = collectionEntries.find(
   (p) => p.data.date === date && deriveSlug(p.id) === slug,
@@ -142,23 +143,49 @@ try {
       .first<Piece>();
   }
 
-  const auditsRes = await db
-    .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC')
-    .bind(`daily/${date}`)
-    .all<AuditRow>();
-  audits = auditsRes.results;
+  // Piece-scoped queries. All three tables have piece_id populated
+  // (migration 0018 + 0019 backfill). If pieceId is somehow null
+  // (MDX without pieceId frontmatter — shouldn't happen post-Phase-7),
+  // we fall back to date-keyed queries that will show "the day's
+  // activity" — imperfect at multi-per-day but better than an empty
+  // page.
+  if (pieceId) {
+    const auditsRes = await db
+      .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE piece_id = ? ORDER BY created_at ASC')
+      .bind(pieceId)
+      .all<AuditRow>();
+    audits = auditsRes.results;
 
-  const pipelineRes = await db
-    .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC')
-    .bind(date)
-    .all<PipelineRow>();
-  pipeline = pipelineRes.results;
+    const pipelineRes = await db
+      .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE piece_id = ? ORDER BY created_at ASC')
+      .bind(pieceId)
+      .all<PipelineRow>();
+    pipeline = pipelineRes.results;
 
-  const candsRes = await db
-    .prepare('SELECT id, headline, source, category, summary, url, teachability_score, selected, created_at FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC')
-    .bind(date)
-    .all<CandidateRow>();
-  candidates = candsRes.results;
+    const candsRes = await db
+      .prepare('SELECT id, headline, source, category, summary, url, teachability_score, selected, created_at FROM daily_candidates WHERE piece_id = ? ORDER BY teachability_score DESC')
+      .bind(pieceId)
+      .all<CandidateRow>();
+    candidates = candsRes.results;
+  } else {
+    const auditsRes = await db
+      .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC')
+      .bind(`daily/${date}`)
+      .all<AuditRow>();
+    audits = auditsRes.results;
+
+    const pipelineRes = await db
+      .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC')
+      .bind(date)
+      .all<PipelineRow>();
+    pipeline = pipelineRes.results;
+
+    const candsRes = await db
+      .prepare('SELECT id, headline, source, category, summary, url, teachability_score, selected, created_at FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC')
+      .bind(date)
+      .all<CandidateRow>();
+    candidates = candsRes.results;
+  }
 
   // observer_events for this calendar day (UTC). Director writes one
   // summary per run; we widen to a 36h window around the date so we catch

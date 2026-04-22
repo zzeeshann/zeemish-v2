@@ -136,6 +136,18 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     try {
     const today = new Date().toISOString().slice(0, 10);
 
+    // Pre-allocate piece_id at run-start so every logStep + audit row
+    // + candidate row carries it from the first write. Scanner-skipped
+    // and pre-publish errors leave orphan piece_ids (no matching
+    // daily_pieces row); readers that care JOIN on daily_pieces.id to
+    // filter. Moved here in 2026-04-22 from its former slot in the
+    // publish step so pipeline_log / audit_results / daily_candidates
+    // all inherit it without a second pass. The daily_pieces INSERT
+    // below still uses this same UUID so identity agrees across all
+    // tables. See DECISIONS 2026-04-22 "piece_id columns on day-keyed
+    // tables".
+    const pieceId = crypto.randomUUID();
+
     // Cadence config — read above the guard below because the guard's
     // slot-start math depends on intervalHours. Phase 3's hourly-cron
     // gate has already rejected non-slot hours before we reach here.
@@ -173,13 +185,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // ─── Phase 1: Scanner ────────────────────────────────────────────
     this.enterPhase('scanner', `daily/${today}`);
-    await this.logStep(today, 'scanning', 'running', { intervalHours });
+    await this.logStep(today, pieceId,'scanning', 'running', { intervalHours });
     const scanner = await this.subAgent(ScannerAgent, 'scanner');
-    const candidates = await scanner.scan();
-    await this.logStep(today, 'scanning', 'done', { candidateCount: candidates.length });
+    const candidates = await scanner.scan(pieceId);
+    await this.logStep(today, pieceId,'scanning', 'done', { candidateCount: candidates.length });
 
     if (candidates.length === 0) {
-      await this.logStep(today, 'skipped', 'done', { reason: 'No candidates found' });
+      await this.logStep(today, pieceId,'skipped', 'done', { reason: 'No candidates found' });
       const observer = await this.subAgent(ObserverAgent, 'observer');
       await observer.logError('daily', 0, 'Scanner found no candidates');
       this.exitToIdle();
@@ -188,13 +200,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // ─── Phase 2: Curator ────────────────────────────────────────────
     this.enterPhase('curator');
-    await this.logStep(today, 'curating', 'running', {});
+    await this.logStep(today, pieceId,'curating', 'running', {});
     const curator = await this.subAgent(CuratorAgent, 'curator');
     const recentPieces = await this.getRecentDailyPieces(30);
     const curatorResult = await curator.curate(candidates, recentPieces);
 
     if (curatorResult.skip) {
-      await this.logStep(today, 'skipped', 'done', { reason: curatorResult.reason });
+      await this.logStep(today, pieceId,'skipped', 'done', { reason: curatorResult.reason });
       const observer = await this.subAgent(ObserverAgent, 'observer');
       await observer.logError('daily', 0, curatorResult.reason);
       this.exitToIdle();
@@ -207,7 +219,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // date-force in MDX frontmatter can never drift from Director's run date,
     // regardless of what Claude put in the brief.
     brief.date = today;
-    await this.logStep(today, 'curating', 'done', {
+    await this.logStep(today, pieceId,'curating', 'done', {
       headline: brief.headline, subject: brief.underlyingSubject, newsSource: brief.newsSource,
     });
 
@@ -221,10 +233,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // ─── Phase 3: Drafter ────────────────────────────────────────────
     this.enterPhase('drafter');
-    await this.logStep(today, 'drafting', 'running', {});
+    await this.logStep(today, pieceId,'drafting', 'running', {});
     const drafter = await this.subAgent(DrafterAgent, 'drafter');
     const { mdx, wordCount } = await drafter.draft(brief);
-    await this.logStep(today, 'drafting', 'done', {
+    await this.logStep(today, pieceId,'drafting', 'done', {
       wordCount, beatCount: brief.beats?.length ?? 0,
     });
 
@@ -239,14 +251,14 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     for (let round = 1; round <= MAX_REVISIONS; round++) {
       totalRounds = round;
-      await this.logStep(today, `auditing_r${round}`, 'running', { round });
+      await this.logStep(today, pieceId,`auditing_r${round}`, 'running', { round });
       const [voiceResult, structureResult, factResult] = await Promise.all([
         (await this.subAgent(VoiceAuditorAgent, `voice-daily-r${round}`)).audit(currentMdx),
         (await this.subAgent(StructureEditorAgent, `struct-daily-r${round}`)).review(currentMdx),
         (await this.subAgent(FactCheckerAgent, `fact-daily-r${round}`)).check(currentMdx),
       ]);
 
-      await this.saveAuditResults(taskId, round, voiceResult, structureResult, factResult);
+      await this.saveAuditResults(taskId, pieceId, round, voiceResult, structureResult, factResult);
 
       // "No silent failure" (architecture §3.2): if the fact-checker's web
       // search was down, surface it via Observer. Pipeline continues with
@@ -266,7 +278,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       if (!structureResult.passed) failedGates.push('structure');
       if (!factResult.passed) failedGates.push('facts');
 
-      await this.logStep(today, `auditing_r${round}`, failedGates.length === 0 ? 'done' : 'failed', {
+      await this.logStep(today, pieceId,`auditing_r${round}`, failedGates.length === 0 ? 'done' : 'failed', {
         round, voiceScore: lastVoiceScore,
         voicePassed: voiceResult.passed, factsPassed: factResult.passed, structurePassed: structureResult.passed,
         violations: voiceResult.violations?.slice(0, 3),
@@ -280,11 +292,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       // ─── Integrator: revise if any gate failed ──────────────────────
       if (round < MAX_REVISIONS) {
         this.enterPhase('integrator');
-        await this.logStep(today, `revising_r${round}`, 'running', { round, failedGates });
+        await this.logStep(today, pieceId,`revising_r${round}`, 'running', { round, failedGates });
         const integrator = await this.subAgent(IntegratorAgent, `integrator-daily-${today}`);
         const revision = await integrator.revise(currentMdx, voiceResult, structureResult, factResult);
         currentMdx = revision.revisedMdx;
-        await this.logStep(today, `revising_r${round}`, 'done', { round });
+        await this.logStep(today, pieceId,`revising_r${round}`, 'done', { round });
         this.enterPhase('auditors'); // back to audit for next round
       }
     }
@@ -313,13 +325,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       `$1\nvoiceScore: ${lastVoiceScore}$2`,
     );
 
-    // Piece_id + publishedAt are captured here (BEFORE the frontmatter
-    // splice + publish commit) because both need to flow into the MDX
-    // frontmatter AND into the daily_pieces INSERT below. The same
-    // local values feed both sources so identity + timestamp agree.
-    // piece_id also threads through the audio pipeline + the off-pipeline
-    // learning/reflection/zita schedule payloads.
-    const pieceId = crypto.randomUUID();
+    // publishedAt captured here (BEFORE the frontmatter splice + publish
+    // commit) because it needs to flow into the MDX frontmatter AND into
+    // the daily_pieces INSERT below. pieceId was pre-allocated at the
+    // top of this method so every earlier logStep / audit row already
+    // carries it.
     const publishedAtMs = Date.now();
     currentMdx = currentMdx.replace(
       /^(---\n[\s\S]*?)(\n---\n)/,
@@ -355,7 +365,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     this.enterPhase('publisher');
-    await this.logStep(today, 'publishing', 'running', { qualityFlag });
+    await this.logStep(today, pieceId,'publishing', 'running', { qualityFlag });
     const publisher = await this.subAgent(PublisherAgent, `publisher-daily-${today}`);
     const slug = brief.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
     const filePath = `content/daily-pieces/${today}-${slug}.mdx`;
@@ -379,8 +389,8 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, publishedAtMs, publishedAtMs)
       .run().catch(() => {});
 
-    await this.logStep(today, 'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath, qualityFlag });
-    await this.logStep(today, 'done', 'done', {
+    await this.logStep(today, pieceId,'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath, qualityFlag });
+    await this.logStep(today, pieceId,'done', 'done', {
       headline: brief.headline,
       date: today,
       voiceScore: lastVoiceScore,
@@ -669,7 +679,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const MAX_BEATS_PER_CHUNK = 2;
     const MAX_CHUNK_ITERATIONS = 10; // safety belt for runaway loops
     this.enterPhase('audio-producer');
-    await this.logStep(date, 'audio-producing', 'running', {});
+    await this.logStep(date, pieceId,'audio-producing', 'running', {});
     let totalBeats = 0;
     let totalCharacters = 0;
     let chunkIterations = 0;
@@ -696,11 +706,11 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const reason = err instanceof AudioBudgetExceededError
         ? `Over ${err.cap}-char cap (would spend ${err.totalChars} chars)`
         : err instanceof Error ? err.message : 'Producer failed';
-      await this.logStep(date, 'audio-producing', 'failed', { reason });
+      await this.logStep(date, pieceId,'audio-producing', 'failed', { reason });
       await observer.logAudioFailure(date, title, 'producer', reason);
       return;
     }
-    await this.logStep(date, 'audio-producing', 'done', {
+    await this.logStep(date, pieceId,'audio-producing', 'done', {
       beatCount: totalBeats,
       totalCharacters,
       durationEstimate: Math.round((totalCharacters / 5 / 150) * 60),
@@ -709,10 +719,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
     // ─── audio-auditor ──────────────────────────────────────────────
     this.enterPhase('audio-auditor');
-    await this.logStep(date, 'audio-auditing', 'running', {});
+    await this.logStep(date, pieceId,'audio-auditing', 'running', {});
     const auditor = await this.subAgent(AudioAuditorAgent, `audio-auditor-${date}`);
     const auditResult = await auditor.audit({ pieceId, date });
-    await this.logStep(date, 'audio-auditing', auditResult.passed ? 'done' : 'failed', {
+    await this.logStep(date, pieceId,'audio-auditing', auditResult.passed ? 'done' : 'failed', {
       passed: auditResult.passed,
       beatCount: auditResult.beatCount,
       totalCharacters: auditResult.totalCharacters,
@@ -734,7 +744,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // set of beats regardless of how many chunks produced them, plus
     // any beats from prior partial runs picked up via R2 head-check.
     this.enterPhase('audio-publisher');
-    await this.logStep(date, 'audio-publishing', 'running', {});
+    await this.logStep(date, pieceId,'audio-publishing', 'running', {});
     const allBeatsRes = await this.env.DB
       .prepare(
         `SELECT beat_name, public_url FROM daily_piece_audio
@@ -754,7 +764,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         .bind(pieceId)
         .run()
         .catch(() => {});
-      await this.logStep(date, 'audio-publishing', 'done', {
+      await this.logStep(date, pieceId,'audio-publishing', 'done', {
         commitUrl: publishResult.commitUrl,
         beatCount: finalBeatCount,
       });
@@ -767,7 +777,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Publisher failed';
-      await this.logStep(date, 'audio-publishing', 'failed', { reason });
+      await this.logStep(date, pieceId,'audio-publishing', 'failed', { reason });
       await observer.logAudioFailure(date, title, 'publisher', reason);
     }
   }
@@ -799,21 +809,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     if (!piece) throw new Error(`retryAudio: no piece with id ${pieceId}`);
     const { date } = piece;
 
-    // filePath lives in the publishing.done step's data column. run_id
-    // stays YYYY-MM-DD (cadence Phase 3 walk-back). At multi-per-day
-    // this SELECT returns the latest publishing.done across the day's
-    // pieces via ORDER BY created_at DESC — acceptable because retry
-    // always targets the most-recently-published piece on that date in
-    // practice, and the filePath string itself encodes the slug which
-    // is piece-specific. If ever ambiguous, move to filtering by
-    // pipeline_log.data's {date, piece_id, filePath} payload.
+    // filePath lives in the publishing.done step's data column.
+    // run_id stays YYYY-MM-DD (cadence Phase 3 walk-back) but we now
+    // additionally scope by `piece_id = ?` (migration 0018) so
+    // multi-per-day same-date pieces don't collide. One row per piece
+    // by construction — LIMIT 1 is defensive, not load-bearing.
     const pubRow = await this.env.DB
       .prepare(
         `SELECT data FROM pipeline_log
-         WHERE run_id = ? AND step = 'publishing' AND status = 'done'
+         WHERE run_id = ? AND piece_id = ?
+           AND step = 'publishing' AND status = 'done'
          ORDER BY created_at DESC LIMIT 1`,
       )
-      .bind(date)
+      .bind(date, pieceId)
       .first<{ data: string | null }>();
     if (!pubRow?.data) throw new Error(`retryAudio: no publishing.done row for ${date}`);
     let filePath: string | null = null;
@@ -938,9 +946,14 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     } catch { return []; }
   }
 
-  /** Save audit results to D1 for durable audit trail */
+  /** Save audit results to D1 for durable audit trail. `pieceId` is the
+   *  run-scoped UUID (pre-allocated at the top of triggerDailyPiece); it
+   *  scopes rows per-piece at multi-per-day cadence — same UUID that
+   *  ends up as daily_pieces.id for this run. See DECISIONS 2026-04-22
+   *  "piece_id columns on day-keyed tables". */
   private async saveAuditResults(
     taskId: string,
+    pieceId: string,
     round: number,
     voice: VoiceAuditResult,
     structure: StructureAuditResult,
@@ -951,29 +964,35 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     try {
       await this.env.DB.batch([
         this.env.DB.prepare(
-          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ).bind(crypto.randomUUID(), taskId, draftId, 'voice', voice.passed ? 1 : 0, voice.score, JSON.stringify(voice.violations), now),
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'voice', voice.passed ? 1 : 0, voice.score, JSON.stringify(voice.violations), now, pieceId),
         this.env.DB.prepare(
-          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ).bind(crypto.randomUUID(), taskId, draftId, 'structure', structure.passed ? 1 : 0, null, JSON.stringify(structure.issues), now),
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'structure', structure.passed ? 1 : 0, null, JSON.stringify(structure.issues), now, pieceId),
         this.env.DB.prepare(
-          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        ).bind(crypto.randomUUID(), taskId, draftId, 'fact', facts.passed ? 1 : 0, null, JSON.stringify(facts.claims), now),
+          'INSERT INTO audit_results (id, task_id, draft_id, auditor, passed, score, notes, created_at, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).bind(crypto.randomUUID(), taskId, draftId, 'fact', facts.passed ? 1 : 0, null, JSON.stringify(facts.claims), now, pieceId),
       ]);
     } catch { /* audit logging shouldn't break the pipeline */ }
   }
 
-  /** Write a step to the pipeline_log table for the admin monitor */
+  /** Write a step to the pipeline_log table for the admin monitor.
+   *  `runId` stays YYYY-MM-DD for day-grouping consumers (Phase 3
+   *  walk-back); `pieceId` is the additive per-piece axis introduced
+   *  in migration 0018 to isolate multi-per-day runs. Orphan piece_ids
+   *  (runs that skip or error before publishing) are acceptable —
+   *  readers filter on daily_pieces.id JOIN where needed. */
   private async logStep(
     runId: string,
+    pieceId: string,
     step: string,
     status: string,
     data: Record<string, unknown>,
   ): Promise<void> {
     try {
       await this.env.DB
-        .prepare('INSERT INTO pipeline_log (id, run_id, step, status, data, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(crypto.randomUUID(), runId, step, status, JSON.stringify(data), Date.now())
+        .prepare('INSERT INTO pipeline_log (id, run_id, step, status, data, created_at, piece_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(crypto.randomUUID(), runId, step, status, JSON.stringify(data), Date.now(), pieceId)
         .run();
     } catch { /* pipeline log shouldn't break the pipeline */ }
   }

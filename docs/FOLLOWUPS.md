@@ -27,20 +27,62 @@ Format per entry:
 
 ---
 
+## [resolved] 2026-04-22: Admin Today's Run panel shows both pieces' steps as one flat stream at multi-per-day
+
+**Surfaced:** 2026-04-22 PM during multi-per-day audit (two pieces shipped today at `interval_hours=12`). [`/api/dashboard/pipeline`](../src/pages/api/dashboard/pipeline.ts) returns all `pipeline_log` rows where `run_id = '<date>'`, which pools both pieces' ~13 steps each into one 26-step list with no visual break. Admin home (`/dashboard/admin/`) renders that list as-is — an operator reading top-to-bottom sees `audio-publishing ✓` run into `Scanner reads the news ·` with no hint that's a second run.
+
+**Hypothesis:** cosmetic-only. Data is correct (per-piece admin deep-dive is piece-scoped as of DECISIONS 2026-04-22 "Time-window scoping for admin per-piece deep-dive"). Just needs UI grouping. Two paths:
+
+1. **Frontend only:** in [`admin.astro`'s pollPipeline handler](../src/pages/dashboard/admin.astro), detect run boundaries by step name transitions (e.g. current step is `publishing done` or `audio-publishing done` or a new `scanning running` arrives while prior run terminated) and render as collapsible `<details>` blocks, one per run.
+2. **Backend + frontend:** add `pipeline_log.piece_id` (blocked on the bigger schema item below), scope the API response by run, client renders clean groups.
+
+Path 1 is shippable today; path 2 comes for free if the schema work lands.
+
+**Priority:** Low. Scrollable, data is honest, per-piece deep-dive is the authoritative per-piece view.
+
+**Resolved:** 2026-04-22 via Phase 4 of the multi-per-day piece_id schema fix (path 2 — came for free once `pipeline_log.piece_id` landed in migration 0018). `/api/dashboard/pipeline` now returns `groups[]` and `headlines{}` keyed by piece_id; `admin.astro`'s poller renders each run as a collapsible `<details>` block titled with the piece headline + publish time, newest open by default. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
+
+---
+
+## [resolved] 2026-04-22: Day-keyed tables (`audit_results`, `pipeline_log`, `daily_candidates`) lack `piece_id` — time-window scoping is the stopgap
+
+**Surfaced:** 2026-04-22 during the admin per-piece deep-dive misattribution fix (DECISIONS 2026-04-22 "Time-window scoping for admin per-piece deep-dive"). The astro-site side of that bug landed via a `published_at`-bounded window on the 3 day-keyed queries. Acceptable stopgap at multi-per-day but not a proper fix:
+
+1. **`audit_results`** — no `piece_id` column. Rows written by [`director.ts:942`](../agents/src/director.ts:942) with `task_id='daily/<date>'` and `draft_id='daily/<date>-r<N>'`. Both same-date pieces write identical draft_ids at round 1, so the admin page's group-by-draft_id (pre-fix) collided them with D1 last-writer-wins. Time-window scope side-steps the collision but doesn't remove the ambiguity in the table itself.
+2. **`pipeline_log`** — no `piece_id` column (Phase 3 walk-back kept `run_id = YYYY-MM-DD` permanently after the 2026-04-21 site-worker consumer regression). Same pooling problem across all admin + dashboard + Learner + retry-audio consumers.
+3. **`daily_candidates`** — no `piece_id` column. Two scanner runs on the same date write 50 rows each; candidates look pooled on the per-piece deep-dive without a time window.
+
+**Hypothesis / real fix:**
+- Migration: add nullable `piece_id TEXT` to all three tables. No PK rebuild needed (each already has its own primary key).
+- Backfill: join `daily_pieces` on `date` at 1/day (unambiguous). At multi-per-day use time windows between `published_at` boundaries for the 2026-04-22 rows specifically — same logic that the astro-side stopgap uses.
+- Director change: allocate `piece_id` at run start (currently allocated inside the publish step at [director.ts:286](../agents/src/director.ts:286)). Thread it through `saveAuditResults`, `logStep`, `daily_candidates` INSERT. Pre-allocation means pieces that never publish (scanner-skipped, error before publish) still have a piece_id for their rows — needs a "draft pieces" story or accept orphaned rows with a piece_id that never becomes a `daily_pieces.id`.
+- Astro side: swap the 3 time-window queries for `WHERE piece_id = ?` direct lookups.
+- Phase 3's `pipeline_log.run_id = YYYY-MM-DD` semantic is preserved — run_id stays date for the day-grouping view (admin pipeline history, reset-today.sh, etc.); `piece_id` is the additive per-piece axis.
+
+**Investigation hints:**
+- Director pre-allocation is the hard part. Current flow: Scanner → Curator → Drafter → audits → Integrator → Publisher (which allocates the UUID + INSERTs the piece). Moving allocation to run-start means the UUID exists before we know if a piece will even ship.
+- Consumer audit beyond the admin page: `made.ts`, dashboard home, Learner's post-publish synthesis (time-window currently in `analysePiecePostPublish`), reset-today.sh `--piece-id`, audio retry-fresh DELETE, engagement writes (engagement.piece_id already shipped as migration 0017).
+- Parallel site-worker query updates must land in the same deploy window to avoid the 2026-04-21 run_id regression pattern.
+
+**Priority:** Medium. Time-window scope on admin per-piece is correct-enough that this isn't urgent. Promote to blocker only if operator trust in a same-date piece view slips, or if the 30min buffer edge case (manual audio retry hours later attributing to wrong piece in pipeline timeline) bites.
+
+**Resolved:** 2026-04-22 via the full 5-phase schema fix in this session. Migration 0018 added `piece_id` to `pipeline_log` (0014 had already added it to the other two); migration 0019 backfilled 512 historical rows (9 audit_results + 153 pipeline_log + 350 daily_candidates) with two strategies: date-join for pre-2026-04-22 1/day rows, midpoint-split for the 2026-04-22 multi-per-day rows. Director pre-allocates piece_id at run-start (moved from publish-time); `logStep()` + `saveAuditResults()` + `scanner.scan()` + `learner.analysePiecePostPublish()` all thread piece_id. Site-side admin page + `/api/daily/[date]/made.ts` + `/api/dashboard/pipeline.ts` all scope by piece_id. Midpoint bandaid deleted. Verified row-by-row against production D1: 0 NULL piece_id across all three tables, correct per-piece partitioning for 2026-04-22. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables" for full phase details and trade-offs.
+
+---
+
 ## [open] 2026-04-22: Residual `WHERE date = ? LIMIT 1` sites surfaced during slot-aware-guard audit
 
 **Surfaced:** 2026-04-22 PM. Post-fix sweep for `WHERE date = ? LIMIT 1` across the repo (to confirm no other silent-skip paths) turned up two sites that aren't correctness blockers but pick an arbitrary same-date piece at multi-per-day:
 
-1. [src/pages/api/daily/[date]/made.ts:71](../src/pages/api/daily/[date]/made.ts) — the made-drawer's per-piece metadata lookup (`SELECT * FROM daily_pieces WHERE date = ? LIMIT 1`). Shows arbitrary piece's headline / wordCount / voiceScore / publishedAt in the drawer at multi-per-day. Drawer component receives `pieceId` via the Phase 7 frontmatter splice (`cbf1f17`); fix is to accept `?pieceId=` on the endpoint and prefer it over the date lookup when present, falling back to `ORDER BY published_at DESC LIMIT 1` at the date-only legacy path.
-2. [src/pages/dashboard/index.astro:59](../src/pages/dashboard/index.astro) — public dashboard's "today's piece" hero query. At multi-per-day shows arbitrary same-date piece. Simple fix: add `ORDER BY published_at DESC LIMIT 1` (matches server.ts:213/268's pattern for the same situation). Homepage hero already sorts this way; this is dashboard-specific.
+1. ~~[src/pages/api/daily/[date]/made.ts:71](../src/pages/api/daily/[date]/made.ts) — the made-drawer's per-piece metadata lookup~~ **Resolved 2026-04-22 via Phase 4 of the piece_id schema fix.** `/api/daily/[date]/made` now accepts `?pieceId=` and prefers it for all 5 piece-scoped queries (metadata, timeline, audit rounds, candidates, audio); date-keyed path now uses `ORDER BY published_at DESC LIMIT 1`. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
+2. [src/pages/dashboard/index.astro:59](../src/pages/dashboard/index.astro) — public dashboard's "today's piece" hero query. At multi-per-day shows arbitrary same-date piece. Simple fix: add `ORDER BY published_at DESC LIMIT 1` (matches server.ts:213/268's pattern for the same situation). Homepage hero already sorts this way; this is dashboard-specific. **Still open.**
 
 **Hypothesis:** both existed pre-Phase-4 URL change and were missed by the Phase 4–7 audits. Neither blocks cadence — the slot-aware guard (resolved entry above) was the only real blocker. These are UX fidelity fixes.
 
 **Investigation hints:**
-- `made.ts` — check whether the made-drawer component already passes a piece-id query param; if so, the endpoint just needs to honour it.
 - `dashboard/index.astro` — 1-line patch, add `ORDER BY published_at DESC` to the query.
 
-**Priority:** Low. Only matters at multi-per-day; at `interval_hours=24` both are unambiguous single-row queries.
+**Priority:** Low. Only matters at multi-per-day; at `interval_hours=24` it's an unambiguous single-row query.
 
 ---
 

@@ -129,21 +129,36 @@ export interface MadeTeaser {
   agentsOnDuty: number;    // static — the 11 non-paused agents in the pipeline
 }
 
-export async function loadMadeTeaser(db: D1Database, date: string): Promise<MadeTeaser> {
+export async function loadMadeTeaser(
+  db: D1Database,
+  date: string,
+  pieceId?: string | null,
+): Promise<MadeTeaser> {
   const teaser: MadeTeaser = { rounds: 0, candidates: 0, agentsOnDuty: 11 };
   try {
-    const draftRows = await db
-      .prepare(
-        "SELECT COUNT(DISTINCT draft_id) as n FROM audit_results WHERE task_id = ?",
-      )
-      .bind(`daily/${date}`)
-      .first<{ n: number }>();
+    // Prefer piece_id scoping when available (unambiguous at
+    // multi-per-day). Falls back to date-keyed at 1/day or when the
+    // caller doesn't know the piece_id yet.
+    const draftRows = pieceId
+      ? await db
+          .prepare('SELECT COUNT(DISTINCT draft_id) as n FROM audit_results WHERE piece_id = ?')
+          .bind(pieceId)
+          .first<{ n: number }>()
+      : await db
+          .prepare('SELECT COUNT(DISTINCT draft_id) as n FROM audit_results WHERE task_id = ?')
+          .bind(`daily/${date}`)
+          .first<{ n: number }>();
     teaser.rounds = draftRows?.n ?? 0;
 
-    const candRows = await db
-      .prepare('SELECT COUNT(*) as n FROM daily_candidates WHERE date = ?')
-      .bind(date)
-      .first<{ n: number }>();
+    const candRows = pieceId
+      ? await db
+          .prepare('SELECT COUNT(*) as n FROM daily_candidates WHERE piece_id = ?')
+          .bind(pieceId)
+          .first<{ n: number }>()
+      : await db
+          .prepare('SELECT COUNT(*) as n FROM daily_candidates WHERE date = ?')
+          .bind(date)
+          .first<{ n: number }>();
     teaser.candidates = candRows?.n ?? 0;
   } catch {
     /* table may be empty in dev — zeros are fine */

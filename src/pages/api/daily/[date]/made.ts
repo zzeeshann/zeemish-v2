@@ -31,10 +31,13 @@ export const prerender = false;
 export const GET: APIRoute = async ({ params, locals, url }) => {
   const db = locals.runtime.env.DB;
   const date = String(params.date ?? '').trim();
-  // Optional: pieceId query param. When present, the learnings
-  // section filters by piece_id (Phase 7 writeLearning piece_id
-  // extension). Other envelope sections (pipeline, audits, candidates,
-  // audio) stay date-keyed — day-view semantics per Phase 3 walk-back.
+  // Optional: pieceId query param. When present, all piece-scoped
+  // sections (piece metadata, timeline, rounds, candidates, audio,
+  // learnings) bind by piece_id for unambiguous multi-per-day
+  // isolation. When absent, fall back to date-keyed lookups — correct
+  // at 1/day, picks "a piece" at multi-per-day (pre-Phase-7 behaviour).
+  // Drawer component always sends pieceId for new bundles; absence
+  // means a stale cached bundle.
   const pieceIdParam = url.searchParams.get('pieceId');
   const pieceIdFilter = pieceIdParam && /^[0-9a-f-]{32,40}$/i.test(pieceIdParam)
     ? pieceIdParam
@@ -67,10 +70,15 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   // --- Piece metadata --------------------------------------------------
   try {
-    const row = await db
-      .prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1')
-      .bind(date)
-      .first<any>();
+    const row = pieceIdFilter
+      ? await db
+          .prepare('SELECT * FROM daily_pieces WHERE id = ? LIMIT 1')
+          .bind(pieceIdFilter)
+          .first<any>()
+      : await db
+          .prepare('SELECT * FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
+          .bind(date)
+          .first<any>();
     if (row) {
       const piece: MadePiece = {
         headline: row.headline,
@@ -90,12 +98,15 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   // --- Timeline from pipeline_log --------------------------------------
   try {
-    const steps = await db
-      .prepare(
-        'SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC',
-      )
-      .bind(date)
-      .all<{ step: string; status: string; data: string | null; created_at: number }>();
+    const steps = pieceIdFilter
+      ? await db
+          .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE piece_id = ? ORDER BY created_at ASC')
+          .bind(pieceIdFilter)
+          .all<{ step: string; status: string; data: string | null; created_at: number }>()
+      : await db
+          .prepare('SELECT step, status, data, created_at FROM pipeline_log WHERE run_id = ? ORDER BY created_at ASC')
+          .bind(date)
+          .all<{ step: string; status: string; data: string | null; created_at: number }>();
 
     envelope.timeline = steps.results.map<MadeTimelineStep>((r) => ({
       step: r.step,
@@ -118,19 +129,29 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   // --- Audit rounds from audit_results ---------------------------------
   try {
-    const rows = await db
-      .prepare(
-        'SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC',
-      )
-      .bind(`daily/${date}`)
-      .all<{
-        auditor: string;
-        passed: number;
-        score: number | null;
-        notes: string | null;
-        draft_id: string;
-        created_at: number;
-      }>();
+    const rows = pieceIdFilter
+      ? await db
+          .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE piece_id = ? ORDER BY created_at ASC')
+          .bind(pieceIdFilter)
+          .all<{
+            auditor: string;
+            passed: number;
+            score: number | null;
+            notes: string | null;
+            draft_id: string;
+            created_at: number;
+          }>()
+      : await db
+          .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC')
+          .bind(`daily/${date}`)
+          .all<{
+            auditor: string;
+            passed: number;
+            score: number | null;
+            notes: string | null;
+            draft_id: string;
+            created_at: number;
+          }>();
 
     // Group by draft_id — each draft_id is one round (…-r1, …-r2, …).
     const byDraft = new Map<string, typeof rows.results>();
@@ -174,20 +195,31 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   // --- Candidates Scanner surfaced -------------------------------------
   try {
-    const cands = await db
-      .prepare(
-        'SELECT headline, source, category, summary, url, teachability_score, selected FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC',
-      )
-      .bind(date)
-      .all<{
-        headline: string;
-        source: string;
-        category: string | null;
-        summary: string | null;
-        url: string | null;
-        teachability_score: number | null;
-        selected: number | null;
-      }>();
+    const cands = pieceIdFilter
+      ? await db
+          .prepare('SELECT headline, source, category, summary, url, teachability_score, selected FROM daily_candidates WHERE piece_id = ? ORDER BY teachability_score DESC')
+          .bind(pieceIdFilter)
+          .all<{
+            headline: string;
+            source: string;
+            category: string | null;
+            summary: string | null;
+            url: string | null;
+            teachability_score: number | null;
+            selected: number | null;
+          }>()
+      : await db
+          .prepare('SELECT headline, source, category, summary, url, teachability_score, selected FROM daily_candidates WHERE date = ? ORDER BY teachability_score DESC')
+          .bind(date)
+          .all<{
+            headline: string;
+            source: string;
+            category: string | null;
+            summary: string | null;
+            url: string | null;
+            teachability_score: number | null;
+            selected: number | null;
+          }>();
 
     const list = cands.results.map<MadeCandidate>((c) => ({
       headline: c.headline,
@@ -211,20 +243,35 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
 
   // --- Audio rows (may be empty if audio hasn't landed yet) -----------
   try {
-    const audioRes = await db
-      .prepare(
-        `SELECT beat_name, public_url, character_count, model, voice_id, generated_at
-         FROM daily_piece_audio WHERE date = ? ORDER BY generated_at ASC`,
-      )
-      .bind(date)
-      .all<{
-        beat_name: string;
-        public_url: string;
-        character_count: number;
-        model: string;
-        voice_id: string;
-        generated_at: number;
-      }>();
+    const audioRes = pieceIdFilter
+      ? await db
+          .prepare(
+            `SELECT beat_name, public_url, character_count, model, voice_id, generated_at
+             FROM daily_piece_audio WHERE piece_id = ? ORDER BY generated_at ASC`,
+          )
+          .bind(pieceIdFilter)
+          .all<{
+            beat_name: string;
+            public_url: string;
+            character_count: number;
+            model: string;
+            voice_id: string;
+            generated_at: number;
+          }>()
+      : await db
+          .prepare(
+            `SELECT beat_name, public_url, character_count, model, voice_id, generated_at
+             FROM daily_piece_audio WHERE date = ? ORDER BY generated_at ASC`,
+          )
+          .bind(date)
+          .all<{
+            beat_name: string;
+            public_url: string;
+            character_count: number;
+            model: string;
+            voice_id: string;
+            generated_at: number;
+          }>();
     const rows = audioRes.results;
     if (rows.length > 0) {
       const beats: MadeAudioBeat[] = rows.map((r) => ({
