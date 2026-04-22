@@ -655,6 +655,21 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
   }): Promise<void> {
     const { pieceId, date, filePath, title } = payload;
 
+    // Arm a silent-stall watchdog — 12min gives the outer alarm (15min
+    // wall budget) 3min of head-room. If the audio pipeline exceeds
+    // its budget mid-ElevenLabs-call, Cloudflare terminates the alarm
+    // and nothing throws; without this watchdog there's no signal to
+    // the admin feed that anything went wrong. See DECISIONS 2026-04-22
+    // "12-min watchdog alarm for silent audio stalls". `checkAudioStalled`
+    // is a no-op when has_audio=1 (pipeline completed normally) or
+    // when an audio-failure event already fired since `armedAt`.
+    await this.schedule(12 * 60, 'checkAudioStalled', {
+      pieceId,
+      date,
+      title,
+      armedAt: Date.now(),
+    });
+
     const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
     const current = await publisher.readPublishedMdx(filePath);
     if (!current) {
@@ -673,6 +688,66 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     await this.runAudioPipeline(pieceId, date, current.mdx, filePath, title);
+  }
+
+  /**
+   * Silent-stall watchdog. Scheduled 12 min after `runAudioPipelineScheduled`
+   * begins. If `has_audio=1` by the time this fires, the pipeline
+   * completed normally — no-op. If any `Audio failure` observer_event
+   * for this pieceId fired since `armedAt`, the pipeline already
+   * reported its failure — no-op. Otherwise: the pipeline stopped
+   * executing without completing or reporting — emit `logAudioFailure`
+   * so the operator knows to manually retry.
+   *
+   * Root cause addressed: ElevenLabs per-attempt timeout is 90s × up
+   * to 3 attempts + backoffs ≈ 273s worst case per beat. A piece with
+   * 8 beats at 2/chunk × up to ~273s-ish/beat can exceed the 15-min
+   * alarm wall budget. Cloudflare terminates the invocation; nothing
+   * throws; no observer event fires. This watchdog makes the stall
+   * visible instead of silent. See FOLLOWUPS 2026-04-19
+   * "Audio pipeline silent stall between alarm chunks" for history.
+   */
+  async checkAudioStalled(payload: {
+    pieceId: string;
+    date: string;
+    title: string;
+    armedAt: number;
+  }): Promise<void> {
+    const { pieceId, date, title, armedAt } = payload;
+
+    // (1) If has_audio=1, the pipeline completed normally before the
+    // watchdog fired. No-op.
+    const piece = await this.env.DB
+      .prepare('SELECT has_audio FROM daily_pieces WHERE id = ? LIMIT 1')
+      .bind(pieceId)
+      .first<{ has_audio: number }>();
+    if (piece?.has_audio === 1) return;
+
+    // (2) If an audio-failure observer_event for this pieceId fired
+    // since `armedAt`, the pipeline already reported its failure. No-op.
+    // (Covers Producer/Auditor/Publisher explicit failures that the
+    // runAudioPipeline try/catch paths emit.)
+    const failureRow = await this.env.DB
+      .prepare(
+        `SELECT id FROM observer_events
+         WHERE piece_id = ? AND title LIKE 'Audio failure:%' AND created_at >= ?
+         LIMIT 1`,
+      )
+      .bind(pieceId, armedAt)
+      .first();
+    if (failureRow) return;
+
+    // (3) Silent stall — pipeline exceeded the 12-min watchdog with
+    // no completion and no failure event. Surface as escalation so
+    // operator can manually retry from the admin dashboard.
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    await observer.logAudioFailure(
+      date,
+      title,
+      'producer',
+      `Silent stall — audio pipeline exceeded 12min watchdog with no completion or failure event. Manual retry likely required.`,
+      pieceId,
+    );
   }
 
   /**

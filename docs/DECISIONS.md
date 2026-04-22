@@ -2,6 +2,31 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: 12-min watchdog alarm for silent audio stalls (Phase E3 of audio trio fix)
+
+**Context:** FOLLOWUPS `[open] 2026-04-19: Audio pipeline silent stall between alarm chunks`. 2026-04-17 retry attempt stopped at 4/8 beats with no observer event and no log entry. Root cause analysis: ElevenLabs per-attempt timeout is 90s × up to 3 attempts + backoffs ≈ 273s worst case per beat. A piece with 6-8 long beats can exceed the 15-min alarm wall-clock budget mid-call. Cloudflare terminates the invocation; nothing throws in the `runAudioPipeline` try/catch paths; no observer event fires. Result: piece stays in partial state (has_audio=0, some beat rows in daily_piece_audio) with no signal to the admin.
+
+**Decision:** watchdog alarm scheduled at the top of `runAudioPipelineScheduled`. 12-min delay gives the outer alarm 3-min headroom so the watchdog fires while or just after the outer alarm terminates — a true silent stall is visible within ~12-15 min of arming.
+
+**What shipped:**
+- `runAudioPipelineScheduled` → `this.schedule(12 * 60, 'checkAudioStalled', {pieceId, date, title, armedAt: Date.now()})` — scheduled BEFORE the pipeline runs so even early abort paths are covered.
+- New method `checkAudioStalled(payload)`:
+  1. `SELECT has_audio FROM daily_pieces WHERE id = ?` — if 1, no-op (happy path, pipeline completed normally).
+  2. `SELECT id FROM observer_events WHERE piece_id = ? AND title LIKE 'Audio failure:%' AND created_at >= armedAt` — if present, no-op (Producer/Auditor/Publisher failure already surfaced).
+  3. Otherwise: `observer.logAudioFailure(phase='producer', reason='Silent stall — audio pipeline exceeded 12min watchdog...')`. Escalation severity surfaces in admin feed.
+- `observer_events.piece_id` scoping (migration 0020) gives the failure lookup clean isolation — same-date other pieces don't false-trigger this piece's watchdog.
+
+**Trade-offs:**
+- Happy path cost: one no-op alarm fire (SQLite reads only, no Claude/ElevenLabs/GitHub) per audio pipeline invocation. Cheap.
+- The watchdog fires 12 min after `runAudioPipelineScheduled` schedules itself, not after it actually starts. In practice the 1-second delay before the scheduled run is fired is negligible — the 3-min headroom handles it.
+- If a pipeline legitimately takes >12 min (unlikely with current beat counts), the watchdog will false-fire. At that point the escalation would read wrong, but the pipeline would still complete normally and land `has_audio=1`. Worst case is one mis-labeled warn event. Accepted — raising the threshold to 15 min would defeat the point.
+- Reusing `logAudioFailure` rather than adding `logAudioStalled` keeps the Observer surface lean. The reason string is self-explanatory; operators can grep for "Silent stall" if they want to filter.
+- No retry automation — watchdog surfaces the stall; operator decides whether to Continue or Start over from the admin dashboard. Matches the ship-and-retry posture already in place.
+
+**Files:** [agents/src/director.ts](../agents/src/director.ts).
+
+---
+
 ## 2026-04-22: retryAudio short-circuits when audio already complete (Phase E2 of audio trio fix)
 
 **Context:** FOLLOWUPS `[open] 2026-04-19: Continue retry path may trigger full re-run`. `retryAudio` at [`agents/src/director.ts:830`](../agents/src/director.ts) validated the pieceId, read the piece's date + headline, and scheduled `runAudioPipelineScheduled` — **with no check for `has_audio=1`**. A completed piece retried via "Continue" ran the full pipeline: Producer no-op'd via R2 head-check, but Auditor and Publisher both ran. Stacked with the Phase E1 regex bug this produced the 2026-04-17 corruption.

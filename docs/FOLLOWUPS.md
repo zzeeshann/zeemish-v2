@@ -462,7 +462,7 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 
 ---
 
-## [open] 2026-04-19: Audio pipeline silent stall between alarm chunks on longer pieces
+## [resolved] 2026-04-19: Audio pipeline silent stall between alarm chunks on longer pieces
 
 **Surfaced:** 2026-04-19 during retro audio for 2026-04-17. First retry attempt stopped at 4 of 8 beats. No `audio-failed` event in observer_events. No error logged. Alarm chain simply stopped firing. User clicked Continue and the pipeline resumed and finished cleanly.
 
@@ -474,6 +474,8 @@ D1 rejected this with `no such column: learnings.created_at` — the inner subqu
 - Could also be the DO eviction cliff extending beyond what keepAlive's heartbeat covers under ElevenLabs latency variance — consider a longer heartbeat or doubling the keepAlive grace window.
 
 **Priority:** Medium. Continue recovers cleanly, so no data is lost. But the silent failure mode is a class-of-bug concern: any future retry that silently stalls leaves the piece in partial state indefinitely.
+
+**Resolved:** 2026-04-22 (Phase E3 of audio retry trio fix). `runAudioPipelineScheduled` at [`agents/src/director.ts`](../agents/src/director.ts) now schedules a 12-min watchdog via `this.schedule(12 * 60, 'checkAudioStalled', {pieceId, date, title, armedAt: Date.now()})`. New method `checkAudioStalled(payload)` runs three checks: (1) has_audio=1 → no-op (pipeline completed), (2) any `Audio failure` observer_event for this pieceId created since armedAt → no-op (pipeline already reported its failure), (3) otherwise emit `logAudioFailure(phase='producer', reason='Silent stall — audio pipeline exceeded 12min watchdog...')` as an escalation. The 12-min timing gives the outer alarm (15-min wall budget) 3-min headroom so the watchdog fires while or just after the outer alarm terminates. Happy path cost is one no-op alarm fire. See DECISIONS 2026-04-22 "12-min watchdog alarm for silent audio stalls".
 
 ---
 
