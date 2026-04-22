@@ -8,7 +8,7 @@ Zeemish is an attempt at a third option.
 
 ## What Zeemish does
 
-Every day, Zeemish publishes one piece. The piece is around 1,000 to 1,500 words. It takes about seven minutes to read. It uses today's news as a starting point — but the starting point is not the subject. The subject is always the underlying system.
+Every day, Zeemish publishes. Each piece is around 1,000 to 1,500 words and takes about seven minutes to read. It uses today's news as a starting point — but the starting point is not the subject. The subject is always the underlying system. How many pieces per day is an admin setting (the default is one at 02:00 UTC; at the time of writing, it's two — at 02:00 and 14:00 UTC).
 
 The QVC piece was a news story about a bankruptcy. The actual subject was why successful incumbents fail to adapt when a market shifts.
 

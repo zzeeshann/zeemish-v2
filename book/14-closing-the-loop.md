@@ -6,9 +6,9 @@ This chapter is about what changed on that date, and what "learning" actually me
 
 ## The shape of the problem
 
-Every day, Zeemish publishes a piece. The pipeline runs — Scanner, Curator, Drafter, auditors, Publisher. The piece goes live. Readers read it.
+Every day, Zeemish publishes. The pipeline runs — Scanner, Curator, Drafter, auditors, Publisher. The piece goes live. Readers read it.
 
-Then the next day, the pipeline runs again. Same pipeline. Same prompts. Same everything.
+Then the pipeline runs again — the next day, or later the same day at multi-per-day cadence. Same pipeline. Same prompts. Same everything.
 
 On the surface, this looks fine. The system is producing pieces. What's missing?
 
