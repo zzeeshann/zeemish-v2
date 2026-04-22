@@ -20,6 +20,7 @@ const windowStart = Date.now() - WINDOW_MS;
 
 type Conversation = {
   user_id: string;
+  piece_id: string | null;
   piece_date: string | null;
   msgs: number;
   first_ms: number;
@@ -28,18 +29,21 @@ type Conversation = {
 
 type Message = {
   user_id: string;
+  piece_id: string | null;
   piece_date: string | null;
   role: 'user' | 'assistant';
   content: string;
   created_at: number;
 };
 
-type PieceRow = { date: string; headline: string };
+type PieceRow = { id: string; date: string; headline: string };
 
 type TruncationEvent = { created_at: number; context: string };
 
 let conversations: Conversation[] = [];
 let messages: Message[] = [];
+// Keyed by piece_id so two same-date pieces keep distinct titles (the
+// pre-Phase-D `Map<date, headline>` was last-writer-wins at multi-per-day).
 let pieceTitles = new Map<string, string>();
 let totalMessages = 0;
 let uniqueReaders = 0;
@@ -47,13 +51,18 @@ let truncationCount = 0;
 let latestTruncation: TruncationEvent | null = null;
 
 try {
+  // Grouping by (user_id, piece_id) instead of (user_id, piece_date) so that
+  // a reader who chatted with both same-date pieces at multi-per-day gets
+  // two conversation rows, one per piece. zita_messages.piece_id has been
+  // populated since migration 0014 (Phase 1 of multi-per-day cadence work).
+  // piece_date is still included in the SELECT for display compatibility.
   const convRes = await db
     .prepare(
-      `SELECT user_id, piece_date, COUNT(*) as msgs,
+      `SELECT user_id, piece_id, MAX(piece_date) as piece_date, COUNT(*) as msgs,
               MIN(created_at) as first_ms, MAX(created_at) as last_ms
        FROM zita_messages
        WHERE created_at > ?
-       GROUP BY user_id, piece_date
+       GROUP BY user_id, piece_id
        ORDER BY last_ms DESC
        LIMIT 100`,
     )
@@ -66,7 +75,7 @@ try {
   if (conversations.length > 0) {
     const msgRes = await db
       .prepare(
-        `SELECT user_id, piece_date, role, content, created_at
+        `SELECT user_id, piece_id, piece_date, role, content, created_at
          FROM zita_messages
          WHERE created_at > ?
          ORDER BY created_at ASC`,
@@ -76,14 +85,16 @@ try {
     messages = msgRes.results;
   }
 
-  const dates = Array.from(new Set(conversations.map((c) => c.piece_date).filter(Boolean))) as string[];
-  if (dates.length > 0) {
-    const placeholders = dates.map(() => '?').join(', ');
+  // Look up headlines by piece_id (not date). At multi-per-day a single
+  // date maps to multiple pieces — id is the unambiguous key.
+  const pieceIds = Array.from(new Set(conversations.map((c) => c.piece_id).filter(Boolean))) as string[];
+  if (pieceIds.length > 0) {
+    const placeholders = pieceIds.map(() => '?').join(', ');
     const titlesRes = await db
-      .prepare(`SELECT date, headline FROM daily_pieces WHERE date IN (${placeholders})`)
-      .bind(...dates)
+      .prepare(`SELECT id, date, headline FROM daily_pieces WHERE id IN (${placeholders})`)
+      .bind(...pieceIds)
       .all<PieceRow>();
-    for (const row of titlesRes.results) pieceTitles.set(row.date, row.headline);
+    for (const row of titlesRes.results) pieceTitles.set(row.id, row.headline);
   }
 
   const totalsRes = await db
@@ -110,10 +121,12 @@ try {
   // Leave defaults; page still renders.
 }
 
-// Group messages by (user_id, piece_date) for per-conversation render.
+// Group messages by (user_id, piece_id) for per-conversation render.
+// Fallback to piece_date for any legacy row where piece_id is NULL
+// (shouldn't exist post-0014 backfill but keeps the render resilient).
 const messagesByKey = new Map<string, Message[]>();
 for (const m of messages) {
-  const key = `${m.user_id}|${m.piece_date ?? ''}`;
+  const key = `${m.user_id}|${m.piece_id ?? m.piece_date ?? ''}`;
   if (!messagesByKey.has(key)) messagesByKey.set(key, []);
   messagesByKey.get(key)!.push(m);
 }
@@ -188,9 +201,13 @@ function relTime(ms: number): string {
     ) : (
       <div class="space-y-3">
         {conversations.map((c) => {
-          const key = `${c.user_id}|${c.piece_date ?? ''}`;
+          const key = `${c.user_id}|${c.piece_id ?? c.piece_date ?? ''}`;
           const convMsgs = messagesByKey.get(key) ?? [];
-          const pieceTitle = c.piece_date ? pieceTitles.get(c.piece_date) ?? null : null;
+          // Look up headline by piece_id (unambiguous at multi-per-day).
+          // Fall back to piece_date label for legacy rows where piece_id
+          // is NULL; the admin deep-link in that case hits the date index
+          // route which disambiguates or 302s to the single piece.
+          const pieceTitle = c.piece_id ? pieceTitles.get(c.piece_id) ?? null : null;
           const pieceLabel = c.piece_date ? (pieceTitle ?? c.piece_date) : 'Non-daily (lessons)';
           const pieceHref = c.piece_date ? `/dashboard/admin/piece/${c.piece_date}/` : null;
           return (

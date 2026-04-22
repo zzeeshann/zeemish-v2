@@ -31,8 +31,8 @@ Format per entry:
    - Engagement widget `GROUP BY piece_id` (migration 0017 post) — verify no stale `GROUP BY lesson_id` fragments.
 
 2. **Admin Zita page** (`/dashboard/admin/zita/`):
-   - Groups conversations by `(user_id, piece_date)`. Verify at multi-per-day the grouping doesn't pool Zita chats from different same-date pieces (zita_messages has piece_id since migration 0013/0014 — check the query uses it).
-   - Per-piece admin's "Questions from readers" section should match.
+   - ~~Groups conversations by `(user_id, piece_date)` — pools same-date pieces' chats into one conversation row.~~ **Resolved 2026-04-22 (Phase D).** `GROUP BY user_id, piece_id` now; headline lookup switched from `daily_pieces WHERE date IN (...)` (last-writer-wins at multi-per-day) to `WHERE id IN (...)`. Render loop keys on piece_id with piece_date fallback for legacy NULL rows. See DECISIONS 2026-04-22 "Admin Zita grouped by piece_id".
+   - Per-piece admin's "Questions from readers" section already piece_id-scoped — verified untouched.
 
 3. **Public dashboard** (`/dashboard/`):
    - ~~"Today's piece" hero at [`src/pages/dashboard/index.astro:59`](../src/pages/dashboard/index.astro) — open residual-sites entry below notes `WHERE date = ? LIMIT 1` picks arbitrary at multi-per-day. 1-line fix.~~ **Resolved 2026-04-22 (Phase C).** Added `ORDER BY published_at DESC` to the hero SELECT.

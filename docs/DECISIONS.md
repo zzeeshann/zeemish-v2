@@ -2,6 +2,30 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Admin Zita grouped by piece_id (Phase D of multi-per-day audit)
+
+**Context:** FOLLOWUPS audit entry point #2. `zita_messages` has had a `piece_id` column since migration 0014 (Phase 1 of multi-per-day cadence work) but the admin Zita page (`/dashboard/admin/zita/`) never consumed it — conversations were grouped by `(user_id, piece_date)`, pooling at multi-per-day, and headlines were looked up via `daily_pieces WHERE date IN (...)` which overwrites in the title Map when multiple pieces share a date.
+
+**Decision:** switch the admin Zita page to piece_id grouping + piece_id-keyed headline lookup.
+
+**What shipped:**
+- `Conversation` + `Message` types gain `piece_id: string | null`.
+- `SELECT` changes from `GROUP BY user_id, piece_date` to `GROUP BY user_id, piece_id`. `MAX(piece_date)` included in SELECT for display compat (the banner label still shows piece_date when headline lookup fails).
+- Headlines Map rekeyed: `pieceTitles: Map<piece_id, headline>`. Title SELECT switches from `daily_pieces WHERE date IN (...)` to `WHERE id IN (...)` — no more last-writer-wins at multi-per-day.
+- Render loop `key = ${user_id}|${piece_id ?? piece_date}` with piece_date fallback for any legacy NULL-piece_id row. Headline resolution prefers piece_id; falls back to piece_date label (plain date) when piece_id is null or headline lookup misses.
+- `messagesByKey` grouping Map rekeyed the same way.
+
+**Trade-offs:**
+- Legacy rows with NULL piece_id would render under the piece_date fallback key, sharing with other NULL-piece_id rows. 0014 backfill + 0013 Commit A's hand-map populated piece_id for all 92 historical rows, so null-piece_id doesn't exist in production zita_messages today. The fallback is defensive.
+- Per-piece admin page's "Questions from readers" section at [src/pages/dashboard/admin/piece/[date]/[slug].astro:244](../src/pages/dashboard/admin/piece/%5Bdate%5D/%5Bslug%5D.astro) was already piece_id-scoped (shipped with the Phase 7 nested route in commit `3208c86`) — verified, no change needed.
+- Non-daily (lessons-era) rows have piece_date=NULL and piece_id=NULL. They render as "Non-daily (lessons)" with no deep-link, same as before.
+
+**Verify after deploy:** at multi-per-day a reader chatting with both same-date pieces should produce two distinct conversation cards (one per piece), each with its correct headline. At current traffic (3 readers across 7 pieces) the effect is near-zero today — visible regression tester would need to simulate a same-day multi-piece chat.
+
+**Files:** [src/pages/dashboard/admin/zita.astro](../src/pages/dashboard/admin/zita.astro).
+
+---
+
 ## 2026-04-22: Admin + dashboard run log scoped by piece_id (Phase C of multi-per-day audit)
 
 **Context:** FOLLOWUPS audit entry point #3 + residual `WHERE date = ?` entry. After migration 0019 backfilled `piece_id` on `audit_results` + `daily_candidates`, two consumer sites were still keying off `task_id = 'daily/${date}'` and `WHERE date IN (...)`: admin home's "All Pieces" rounds/candidates widget and the public dashboard's week-pieces run log. At multi-per-day today's two pieces each showed the same pooled counts (e.g. both tobacco and air-traffic would display `2 rounds, 50 candidates` from their combined dataset). Separately, the public dashboard's today's-piece hero still did `WHERE date = ? LIMIT 1` — arbitrary same-date pick.
