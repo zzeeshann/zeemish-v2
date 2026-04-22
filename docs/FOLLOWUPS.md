@@ -81,6 +81,72 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 
 ---
 
+## [open] 2026-04-22: Admin per-piece deep-dive route is date-keyed — shows first-by-id at multi-per-day
+
+**Surfaced:** Flagged as deferred in Phase 4 + Phase 5 DECISIONS entries. Reader-facing URLs moved to `/daily/YYYY-MM-DD/slug/` (Phase 4); admin per-piece route at [`src/pages/dashboard/admin/piece/[date].astro`](../src/pages/dashboard/admin/piece/[date].astro) stayed date-keyed. At `interval_hours=24` unambiguous (one piece per date). At multi-per-day the page's `SELECT * FROM daily_pieces WHERE date = ? LIMIT 1` picks arbitrary same-date piece.
+
+**Hypothesis:** nested route `src/pages/dashboard/admin/piece/[date]/[slug].astro` mirroring the reader route. Admin home page ([`src/pages/dashboard/admin.astro:320`](../src/pages/dashboard/admin.astro)) link generation updated to include slug — use `deriveSlug` from [`src/lib/slug.ts`](../src/lib/slug.ts) against each piece's MDX entry id (needs `getCollection('dailyPieces')` at request time, same pattern Phase 4 introduced for the "View on site" link).
+
+**Investigation hints:**
+- Admin home page currently generates links as `/dashboard/admin/piece/${p.date}/`. Change to `/dashboard/admin/piece/${p.date}/${deriveSlug(entry.id)}/`. At 1/day the admin page would still show one piece per date URL; at multi-per-day each piece gets its own admin URL.
+- Consider: keep backward compat by having `src/pages/dashboard/admin/piece/[date]/index.astro` render a list when multiple pieces share the date; redirect to the single piece when only one exists. Matches the cleaner-if-ambiguous principle.
+- Page body uses `date` throughout for filters — switch to piece_id keyed where appropriate (audio already piece-id post-Phase-1; pipeline_log stays date-keyed per Phase 3 walk-back). "Questions from readers" section should scope by piece_id.
+
+**Priority:** Low. UX degradation only at multi-per-day; at `interval_hours=24` the route is correct. Does not block the cadence flip.
+
+---
+
+## [open] 2026-04-22: `nextRunRelative()` on public dashboard assumes 02:00 UTC cron
+
+**Surfaced:** 2026-04-22 during end-of-session audit. [`src/pages/dashboard/index.astro`](../src/pages/dashboard/index.astro) `nextRunRelative()` hard-codes the next 02:00 UTC slot for the subtitle ("Next run in Xh Ym"). At `interval_hours=24` (current prod) the value is correct. At multi-per-day the next run is any `(hour - 2 + 24) % intervalHours === 0` hour — the display would read wrong.
+
+**Hypothesis:** read `admin_settings.interval_hours` at the top of the page (page already `prerender = false`, D1 is available), compute the next anchor-2-mod-interval slot. Extract the gate math into [`src/lib/cadence.ts`](../src/lib/cadence.ts) or similar so both Director (agents worker) and this dashboard page reference the same slot-math description (or duplicate the formula defensively like `ALLOWED_INTERVAL_HOURS` already is).
+
+**Investigation hints:**
+- Formula already in Director at [agents/src/director.ts](../agents/src/director.ts) `dailyRun` gate: `(hour - 2 + 24) % intervalHours === 0` passes. Reverse to compute next slot: find smallest `h > 0` where `((currentHour + h - 2 + 24) % intervalHours) === 0`.
+- Server-render time uses `Date.now()`, so rate is deterministic at page-render moment.
+- Keep the fallback hard-coded 02:00 UTC if the admin_settings read fails or returns a non-divisor — same defensive posture as Director's parseIntervalHours.
+
+**Priority:** Low. Visible UX glitch if admin flips `interval_hours<24`; purely cosmetic, no data or behaviour consequence.
+
+---
+
+## [open] 2026-04-22: `reset-today.sh` has no `--piece-id` flag — deletes all same-date pieces
+
+**Surfaced:** 2026-04-22 during Phase 7 audit. [`scripts/reset-today.sh`](../scripts/reset-today.sh) step 2 runs `DELETE FROM daily_pieces WHERE date = '$DATE'` (and same-date deletes for candidates, pipeline_log, audit_results, observer_events). At `interval_hours=24` one piece per date so "reset today" = "reset the one piece" — correct. At multi-per-day all same-date pieces get wiped. Sometimes that's the intent ("full-day reset"); sometimes the operator wants just one piece.
+
+**Hypothesis:** add an optional `--piece-id <uuid>` flag. When provided, scope deletes by piece_id for tables with piece_id column (daily_pieces, audit_results, learnings, zita_messages, daily_piece_audio, daily_candidates post-Phase-1-backfill) and by a time-window lookup for pipeline_log (scope to the piece's creation window since run_id stays date-keyed per Phase 3 walk-back). Also git-rm only the matching MDX file rather than all `$DATE-*.mdx`.
+
+**Investigation hints:**
+- Without flag: keep current behaviour (wipe all of today) — explicit operator choice.
+- With flag: need piece_id → MDX filename mapping. Either grep the MDX files for `pieceId: "<uuid>"` frontmatter, or accept `--slug` as an alternative and match filename by `$DATE-$SLUG.mdx`.
+- Observer_events DELETE shouldn't need scoping — it's already time-windowed by `strftime('%s','now','start of day')`.
+
+**Priority:** Low. Dev-operational tool for iteration. Works correctly at current cadence.
+
+---
+
+## [open] 2026-04-22: Copy cleanup — "one piece per day" / "every morning at 2am UTC" phrasing at multi-per-day
+
+**Surfaced:** 2026-04-22 during Phase 7 audit. Several copy-visible files still phrase the cadence as fixed at one-piece-per-day + 02:00 UTC. At multi-per-day these read wrong.
+
+**Hypothesis:** grep for specific strings:
+- `"every morning at 2am UTC"` — likely in README, book chapters, marketing copy.
+- `"one piece per day"` / `"one piece, every morning"` — same places.
+- Dashboard footer / about text if any.
+
+Replacement strategy: either neutral ("every morning" / "on cadence") OR accurate-at-current-cadence ("at 02:00 UTC, one piece per day by default; admin-configurable"). Cadence decision #9 in Phase 1 DECISIONS: "keep 'daily'" as the reading-rhythm framing. Prose should reflect rhythm not rate.
+
+**Investigation hints:**
+- Grep: `grep -rn "2am UTC\|every morning\|one piece per day" --include="*.md" --include="*.astro" --include="*.ts"`.
+- Likely files: `README.md`, `book/*.md`, `src/pages/index.astro` "no piece today" branch (line 82 area), `docs/ARCHITECTURE.md`, `docs/handoff/*.md`.
+- Handoff docs (`docs/handoff/`) are frozen historical specs — don't touch.
+- The Phase 1 decision #9 ("keep daily") is load-bearing — don't rebrand to "hourly" across the board.
+
+**Priority:** Low. Cosmetic prose. Not time-sensitive.
+
+---
+
 ## [open] 2026-04-22: `engagement` table has no `piece_id` — reader-path attribution ambiguous at multi-per-day
 
 **Surfaced:** 2026-04-22 during the writeLearning piece_id extension. Learner's `analyseAndLearn` (reader-engagement path) derives piece_id via `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` because `engagement` rows are keyed by `lesson_id` (string like `daily/YYYY-MM-DD`) and don't carry piece_id directly. At `interval_hours=24` the lookup is unambiguous; at multi-per-day the same date has multiple pieces and the LIMIT 1 picks an arbitrary one — learnings written under that reader signal would attribute to the wrong piece.

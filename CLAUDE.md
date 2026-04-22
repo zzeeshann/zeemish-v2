@@ -23,9 +23,9 @@ Each agent does one job and lives in one file. Director is a pure orchestrator �
 The 2026-04-19 improvement plan (`~/Downloads/ZEEMISH-IMPROVEMENT-PLAN-2026-04-19.md`, not committed) is ~90% closed as of 2026-04-20. Remaining items: **P1.2 Curator conceptual diversity** (in FOLLOWUPS as `[observing]`, unblock by 2026-04-26), **P2.2 Watch beat** (pending Zishan decision — enforce or drop from spec). **P1.5 Zita learning** shipped as the Learner skeleton in Zita improvement plan Phase 5 (2026-04-21) — no longer pending. P2.1 heading-punctuation scoped out (the major bug shipped via `beatTitles` override; the title-case remainder is `[wontfix]`). P2.3 audio-on-2026-04-17 resolved — live at `zeemish.io/daily/2026-04-17/`. P3.1 dashboard agent-team live state scoped out.
 
 ## Multi-piece cadence plan — status (2026-04-22)
-Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md`. **Phases 1–6 shipped 2026-04-21** — 11 commits, origin at `54a987d`. Production cadence unchanged: `interval_hours=24` (one piece per day at 02:00 UTC). The admin knob is live at `/dashboard/admin/settings/` and flipping it is architecturally safe for the pipeline.
+Plan file: `~/.claude/plans/could-please-do-a-harmonic-waffle.md` — work complete. **14 commits**, origin at `1e17031`. Production cadence unchanged: `interval_hours=24` (one piece per day at 02:00 UTC). The admin knob is live at `/dashboard/admin/settings/` and flipping it is architecturally safe for the pipeline with no known correctness blockers.
 
-**All known multi-per-day correctness blockers resolved as of 2026-04-22 (`cbf1f17`):** `writeLearning` now persists `piece_id` (8th required param); 4 callers threaded; made-drawer component + `/api/daily/[date]/made` endpoint scope learnings by piece_id when provided; Director splices `pieceId` into frontmatter at publish time; 5 existing MDX files backfilled; content schema requires it. Admin can flip `interval_hours<24` without known correctness issues. One residual partial-fix: reader-engagement path (`analyseAndLearn`) resolves piece_id via date-only D1 lookup, so at multi-per-day it picks an arbitrary same-date piece. Reader-path is effectively dormant (no real reader volume yet); `engagement.piece_id` column added as a separate FOLLOWUPS item for when reader volume + multi-per-day overlap.
+**All known multi-per-day correctness blockers resolved as of `cbf1f17`:** `writeLearning` persists `piece_id` (8th required param); 4 callers threaded; made-drawer component + `/api/daily/[date]/made` endpoint scope learnings by piece_id when provided; Director splices `pieceId` into frontmatter at publish time; 5 existing MDX files backfilled; content schema requires it. One residual partial-fix: reader-engagement path (`analyseAndLearn`) resolves piece_id via date-only D1 lookup, so at multi-per-day it picks an arbitrary same-date piece. Reader-path is effectively dormant (no real reader volume yet); `engagement.piece_id` column is tracked as a FOLLOWUPS item for when reader volume + multi-per-day overlap.
 
 Phases shipped in order (each has its own DECISIONS entry):
 - **Phase 1** — Identity foundations (`piece_id = daily_pieces.id`, audio PK rebuild, `pipeline_log.run_id` walk-back after caught same-day regression).
@@ -35,8 +35,15 @@ Phases shipped in order (each has its own DECISIONS entry):
 - **Multi-per-day unblocker batch** (between Phase 4 and Phase 5, three separate commits): pre-run DELETE removed, audio pipeline piece_id scoping + R2 key + latent `persistBeatRow` bug fix, Learner time-window filter.
 - **Phase 5** — Admin settings UI with observer-event audit trail.
 - **Phase 6** — Zita synthesis timing (relative delay) + piece_id scoping.
+- **writeLearning piece_id extension (`cbf1f17`)** — last correctness blocker. pieceId in MDX frontmatter + D1 + made-drawer fetch.
+- **Phase 7 partial (`1e17031`)** — Curator prompt label wording.
 
-Phase 7 scope (cosmetic, deferred — not blockers): "one piece per day" / "every morning at 2am UTC" copy in README + book chapters; "days running" stat rename; observer dashboard grouping by piece_id; `reset-today.sh --piece-id` flag; admin deep-dive route `/dashboard/admin/piece/{date}/` → piece-id keyed; Curator prompt label "Already published in last 30 days" wording.
+**Phase 7 items deferred to next session** (all `[open]` in [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md), all Low priority, none block the cadence flip):
+- Admin per-piece deep-dive route date-keyed → piece-id keyed.
+- `nextRunRelative()` on public dashboard assumes 02:00 UTC cron.
+- `reset-today.sh` `--piece-id` flag.
+- Copy cleanup ("every morning at 2am UTC" phrasing in README + book).
+- `engagement.piece_id` column for reader-path attribution at multi-per-day.
 
 ## Multi-piece cadence — Phase 6 Zita synthesis timing + scoping (2026-04-21)
 Zita synthesis is now piece-scoped on both timing and input. Previous absolute clock target (01:45 UTC day+1) would have stacked N pieces' synth jobs on one clock at multi-per-day AND given same-date afternoon pieces a truncated reader window. Relative delay of `publish + 85500s` (23h45m) per piece gives every piece the same ~24h window regardless of publish time. Learner's SELECT switches from `WHERE piece_date = ?` to `WHERE piece_id = ?` to stop cross-piece pooling on shared dates.
