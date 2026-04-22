@@ -109,9 +109,9 @@ Learner: runs off-pipeline on reader engagement data
 - **Model / format:** `eleven_multilingual_v2`, output `mp3_44100_96`, `use_speaker_boost: true`, `speed: 0.95`, `style: 0.3`, `stability: 0.6`, `similarity_boost: 0.75`.
 - **Process:** Extract beats from MDX → `prepareForTTS` (strip tags + "Zeemish → Zee-mish" alias) → sum chars → reject if > CHAR_CAP → per beat: R2 head-check → POST to ElevenLabs (with `previous_request_ids` rolling-3 window for prosodic stitching) → R2 put → upsert `daily_piece_audio` row.
 - **Budget:** 20,000-char hard cap per piece. Over-cap aborts BEFORE any API spend via `AudioBudgetExceededError` (Director catches, escalates to Observer).
-- **Retry:** 3 attempts with 1s/2s/4s exponential backoff on 5xx / network errors. 4xx fails fast (bad key, bad voice, quota).
+- **Retry:** 3 attempts with 1s/2s exponential backoff on 5xx / network errors / timeouts. Per-attempt `AbortSignal.timeout(90_000)` guards against silent TCP stalls (raised from 30s on 2026-04-22 after a ~2960-char beat exceeded the old cap on the happy path). 4xx fails fast (bad key, bad voice, quota).
 - **Separation:** Never touches git. Never sets `has_audio`. Never knows Publisher exists.
-- **Method:** `generateAudio({ date }, mdx)`
+- **Method:** `generateAudioChunk({ pieceId, date }, mdx, maxBeats = 2)` — Director calls in a bounded while-loop; skip-if-exists-in-R2 logic lets retries resume from the first missing beat.
 - **File:** `agents/src/audio-producer.ts`
 
 ### 10. AudioAuditorAgent
@@ -119,7 +119,7 @@ Learner: runs off-pipeline on reader engagement data
 - **Checks (majors fail audit):** missing rows, missing R2 object, 0-byte file, size <30% of expected (960 bytes/char at 96 kbps), total chars over 20k cap.
 - **Checks (minors):** size >3× expected, beat text <50 chars.
 - **No STT:** deliberately out of scope. STT catches hallucinations, which isn't what TTS gets wrong. Real-Cloudflare STT support isn't there yet anyway.
-- **Method:** `audit({ date })`
+- **Method:** `audit({ pieceId, date })`
 - **File:** `agents/src/audio-auditor.ts`
 
 ### 11. PublisherAgent

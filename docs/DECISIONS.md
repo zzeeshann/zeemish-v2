@@ -28,7 +28,9 @@ Append-only. Never edit old entries.
 
 **Rollforward plan:** deploy agents worker; operator hits the **Continue** button on the admin per-piece page for 2026-04-22; producer's skip-if-exists-in-R2 logic will find hook + the-core-problem already in R2 and resume from beat 3. Expected total runtime ~45-60s for the three remaining beats at their happy-path latencies.
 
-**Reference:** single-file commit raising `AbortSignal.timeout(30_000)` → `AbortSignal.timeout(90_000)` at `agents/src/audio-producer.ts` + CLAUDE.md "Audio hardening" note updated + this DECISIONS entry.
+**Post-deploy verification (same day):** operator fired the Continue retry; `audio-producing running` at T=1776826754221, `audio-producing done` at T=1776826829247 — **75s across 2 chunks, zero per-attempt retries**. All three remaining beats completed inside the 90s cap on first attempt (2960 chars `why-the-debt-compounds`, 3384 chars `what-we-lose-by-waiting`, 118 chars `close`). Audio-auditor passed 5/5 beats = 9608 chars = 8.5MB. Publisher second-commit `9bc60b5` spliced `audioBeats:` into the MDX frontmatter. `daily_pieces.has_audio=1`. Close.
+
+**Reference:** `c422bfc` raised `AbortSignal.timeout(30_000)` → `AbortSignal.timeout(90_000)` at `agents/src/audio-producer.ts`; followup commit closed AGENTS.md drift in the AudioProducer/AudioAuditor sections (method signatures + backoff schedule + timeout value), added this verification paragraph to DECISIONS + CLAUDE.md.
 
 ---
 
