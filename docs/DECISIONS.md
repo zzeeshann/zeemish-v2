@@ -2,6 +2,47 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Phase 7 FOLLOWUPS cleanup — five-commit wrap
+
+**Context:** Five `[open]` FOLLOWUPS items remained after the cadence plan's main 14-commit run (ending at `c4caf39`). All Low priority. None blocked the cadence flip. Session brief: close them all in dependency order — cosmetics first, then the piece-id plumbing that later phases depend on, then the admin-route nesting + the reset-script work that benefit from that plumbing.
+
+**Order (executed as five atomic commits):**
+
+1. **`19910d7` — copy cleanup.** Ten files touched. Reader-visible marketing moved to neutral rhythm language ("every morning" / "each morning"); operational docs spell out the current default + configurable hook explicitly ("hourly cron gated by `admin_settings.interval_hours`, default 24 → only 02:00 UTC fires; admin-configurable"). Zita synthesis row in RUNBOOK updated from the old absolute 01:45 UTC day+1 to the Phase 6 relative `publish + 23h45m` reality. Dashboard footer, README intro, book chapters 8/9/99, src/pages/index.astro "no piece today" fallback, docs/{ARCHITECTURE, AGENTS, RUNBOOK}, CLAUDE.md project instructions all updated. Historical references deliberately left alone: append-only DECISIONS, handoff/ specs, book ch 10's forensic 2026-04-19 walkthrough. Dashboard hard-codes at lines 343 + 398 deferred to commit 2 (they'd be reabsorbed by the new `nextRunRelative`).
+
+2. **`7ebae47` — cadence-aware `nextRunRelative`.** New [`src/lib/cadence.ts`](../src/lib/cadence.ts) holds five exports: `ALLOWED_INTERVAL_HOURS` (site-side mirror), `parseIntervalHours` (24 fallback), `getIntervalHours(db)` (admin_settings reader), `nextRunAtMs(nowMs, intervalHours)` (forward-scan from next top-of-hour for the first hour matching Director's gate), `nextRunRelative(nowMs, intervalHours)` ("Xh Ym" formatter). Dashboard reads `intervalHours` once at render time (defensive 24 fallback), passes through to the subtitle + pending-state hint + no-runs-in-7-days hint. 14 unit-test cases across `{1,2,3,4,6,12,24}` at two anchor times (`00:38 UTC` + `05:30 UTC`) all pass. Site-side `ALLOWED_INTERVAL_HOURS` duplication deduped: admin settings API imports from cadence.ts now. Agents-side copy at `agents/src/shared/admin-settings.ts` stays separate — cross-worker, no shared imports.
+
+3. **`9d20b81` — `engagement.piece_id`.** Migration 0017 rebuilds the table with PK `(piece_id, course_id, date)` (was `(lesson_id, course_id, date)`). `lesson_id` kept as a plain column for display-compat with admin widgets; piece_id is the new attribution axis. 13 historical rows backfilled via date-join on daily_pieces — 5 unique piece_ids, 0 NULLs after backfill. Snapshot `engagement_backup_20260422` held for 7-day rollback. Writer: rehype-beats reads `pieceId` from MDX frontmatter, injects `data-piece-id` on the auto-generated `<lesson-shell>`; lesson-shell POSTs it to `/api/engagement/track`. Endpoint falls back to a date-based lookup for stale bundles (arbitrary at multi-per-day — acceptable for the edge case; new bundles always send it). Reader path: `LearnerAgent.analyseAndLearn` reads piece_id off the row directly (no more date regex + lookup); `analyse()` GROUP BY piece_id so same-date pieces stay separate. `LessonMetric` + `UnderperformingLesson` interfaces gain `pieceId`. Admin widget query joins daily_pieces on piece_id, sorts by `published_at DESC`. Resolves the "Partial fix at multi-per-day" note in DECISIONS 2026-04-22 "writeLearning persists piece_id" §2.4.
+
+4. **`3208c86` — admin per-piece route → `[date]/[slug]`.** `git mv` of the 845-line `[date].astro` → `[date]/[slug].astro` (92% similarity, history preserved). Resolves piece_id from the content collection entry matched on `(date, slug)`, then scopes per-piece queries: `daily_pieces WHERE id = ?`, `daily_piece_audio WHERE piece_id = ?`, `zita_messages WHERE piece_id = ?`. Day-scoped queries unchanged per Phase 3 walk-back + Phase 6 reasoning (audit_results, pipeline_log, daily_candidates, observer_events all intentionally show "today's pipeline activity"). Breadcrumb adds slug segment; "View on site" link uses `pieceUrl(date, slug)` directly. New `[date]/index.astro` handles legacy URLs: 1 piece → 302 to the slug URL; 2+ pieces (multi-per-day) → disambiguation list sorted by `publishedAt DESC`; 0 pieces → "No piece" display. Admin home uses a new `adminPieceHref(date, pieceId?)` helper backed by a piece_id→slug map from `getCollection('dailyPieces')` with graceful fallback to `{date}/`. zita.astro's deep-link left as `{date}/` — hits the new index.astro which routes correctly. Retry-audio + zita-synthesis trigger buttons still pass `?date=` — existing server handlers already resolve piece_id via `ORDER BY published_at DESC LIMIT 1` which matches the "latest" semantic at multi-per-day. Leaving scope creep off this commit.
+
+5. **`205ce1e` — `reset-today.sh --piece-id`.** Default mode unchanged (full-day reset). New `--piece-id <uuid>` flag scopes the wipe to that piece across 7 piece-id-capable tables (daily_pieces, daily_candidates, audit_results, daily_piece_audio, zita_messages, learnings, engagement). Two piece-id-less tables (pipeline_log — date-keyed per Phase 3 walk-back; observer_events — no piece_id column) use a ±20min `published_at`-centred window, mirroring Learner's `LEARNER_PIPELINE_LOOKBACK_MS/LOOKAHEAD_MS` math for same-reason same-answer (stressed-pipeline tolerance without bleeding into neighbouring same-date pieces). `--retrigger` opt-in flag fires `/daily-trigger` after the wipe (default is wipe-only; single-piece re-run has no natural cron slot at multi-per-day, operator makes the trigger decision explicitly). UUID validation prevents silent-zero-rows DELETE on typos. ADMIN_SECRET only required when a trigger actually fires — a dry wipe-only run works secret-free. RUNBOOK updated with both modes.
+
+**Why in this order.** Dependency-first:
+- #1 and #2 are prose + small helpers. No risk. Done first so later commits land in a clean linting/lint-free base.
+- #3 (engagement rebuild) is the schema foundation. Later commits #4 + #5 depend on piece_id being on the engagement table (admin widget + reset script both touch it).
+- #4 uses the piece_id→slug map (introduced by #3's rehype change) for its link helper.
+- #5 uses every piece_id-capable table added across the cadence plan + #3.
+
+**Verification per commit:**
+- #1: preview-live dashboard confirmed `each morning` footer + no lingering `2am UTC` anywhere on served pages.
+- #2: 14/14 unit-test cases pass in a Node scratch run; preview confirms subtitle + hint + no-runs-state all say "in Xh Ym".
+- #3: remote migration applied clean (0017 ✅); 13/13 rows preserved, 5/5 piece_ids populated, 0 NULLs; preview confirms `data-piece-id` attr live on `<lesson-shell>`; engagement POST returns 200 both with and without piece_id in body.
+- #4: `pnpm build` clean; `/dashboard/admin/piece/{date}/` + `/{slug}/` + bogus-slug URLs all return 302 to /login (admin gate fires before routing, as designed).
+- #5: `bash -n` syntax check passes; `--help` output matches docstring; arg validation rejects missing UUID, malformed UUID, and unknown flags with distinct error messages.
+
+**Non-goals:**
+- No touch to `/audio-retry` or `/zita-synthesis-trigger` endpoint signatures — they still accept `?date=` and resolve piece_id via latest-by-date. Close to correct at multi-per-day; changing requires updating site-worker + agents-worker handlers together. Tracked implicitly under "existing latest-by-date heuristic is fine".
+- No `daily_candidates.selected` investigation (separate `[open]` FOLLOWUPS since 2026-04-21).
+- No change to legacy audit_results + daily_candidates + observer_events admin queries (still date-keyed — intentional day-view per Phase 3 walk-back).
+- No `engagement_backup_20260422` drop — held for 7-day rollback window, queued as new FOLLOWUPS for 2026-04-29.
+
+**Flip status:** unchanged. Production cadence stays `interval_hours=24`. The five-commit wrap takes the FOLLOWUPS list from 5 `[open]` → 0 `[open]` + 1 new snapshot-drop entry. No new open correctness blockers. Every cosmetic and attribution-at-multi-per-day gap from the cadence plan is now closed.
+
+**References:** commits `19910d7`, `7ebae47`, `9d20b81`, `3208c86`, `205ce1e`. FOLLOWUPS entries 1–5 of 2026-04-22 all resolved; FOLLOWUPS "Drop `engagement_backup_20260422` snapshot" queued for 2026-04-29.
+
+---
+
 ## 2026-04-22: `writeLearning` persists `piece_id` — last multi-per-day correctness blocker resolved
 
 **Context:** The FOLLOWUPS entry surfaced during Phase 6 scoping — `writeLearning(…, pieceDate)` wrote `learnings.piece_date` but not `learnings.piece_id`, so the made-drawer's per-piece "What the system learned" section queried `WHERE piece_date = ?` and would pool learnings across same-date pieces at multi-per-day cadence. The only blocker listed in CLAUDE.md's cadence-plan top status between "Phases 1-6 shipped" and "admin can safely flip `interval_hours<24`."

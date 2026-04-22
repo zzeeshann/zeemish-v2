@@ -81,7 +81,7 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 
 ---
 
-## [open] 2026-04-22: Admin per-piece deep-dive route is date-keyed — shows first-by-id at multi-per-day
+## [resolved] 2026-04-22: Admin per-piece deep-dive route is date-keyed — shows first-by-id at multi-per-day
 
 **Surfaced:** Flagged as deferred in Phase 4 + Phase 5 DECISIONS entries. Reader-facing URLs moved to `/daily/YYYY-MM-DD/slug/` (Phase 4); admin per-piece route at [`src/pages/dashboard/admin/piece/[date].astro`](../src/pages/dashboard/admin/piece/[date].astro) stayed date-keyed. At `interval_hours=24` unambiguous (one piece per date). At multi-per-day the page's `SELECT * FROM daily_pieces WHERE date = ? LIMIT 1` picks arbitrary same-date piece.
 
@@ -94,9 +94,11 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 
 **Priority:** Low. UX degradation only at multi-per-day; at `interval_hours=24` the route is correct. Does not block the cadence flip.
 
+**Resolved:** 2026-04-22 in commit `3208c86`. Nested route `src/pages/dashboard/admin/piece/[date]/[slug].astro` replaces the old flat `[date].astro`; new `[date]/index.astro` handles legacy URLs (302 to the single slug when unambiguous, disambiguation list at multi-per-day, "No piece" display when empty). Per-piece D1 queries scope by piece_id (daily_pieces `WHERE id = ?`, daily_piece_audio, zita_messages); day-scoped queries unchanged (audit_results, pipeline_log, candidates, observer_events — intentional day-view). Admin home link generator threads slug via a new `adminPieceHref(date, pieceId?)` helper driven off `getCollection('dailyPieces')`. zita.astro's deep-link left as `/dashboard/admin/piece/{date}/` — hits the new index.astro which routes correctly. See DECISIONS 2026-04-22 "Phase 7 FOLLOWUPS cleanup — five-commit wrap".
+
 ---
 
-## [open] 2026-04-22: `nextRunRelative()` on public dashboard assumes 02:00 UTC cron
+## [resolved] 2026-04-22: `nextRunRelative()` on public dashboard assumes 02:00 UTC cron
 
 **Surfaced:** 2026-04-22 during end-of-session audit. [`src/pages/dashboard/index.astro`](../src/pages/dashboard/index.astro) `nextRunRelative()` hard-codes the next 02:00 UTC slot for the subtitle ("Next run in Xh Ym"). At `interval_hours=24` (current prod) the value is correct. At multi-per-day the next run is any `(hour - 2 + 24) % intervalHours === 0` hour — the display would read wrong.
 
@@ -109,9 +111,11 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 
 **Priority:** Low. Visible UX glitch if admin flips `interval_hours<24`; purely cosmetic, no data or behaviour consequence.
 
+**Resolved:** 2026-04-22 in commit `7ebae47`. New [`src/lib/cadence.ts`](../src/lib/cadence.ts) holds `ALLOWED_INTERVAL_HOURS`, `parseIntervalHours`, `getIntervalHours(db)`, `nextRunAtMs(nowMs, intervalHours)`, `nextRunRelative(nowMs, intervalHours)`. Dashboard reads `admin_settings.interval_hours` at render time (defensive 24 fallback), passes through to three surfaces — subtitle, pending-state hint, no-runs-in-7-days hint — all now cadence-aware. 14 unit-test cases across {1,2,3,4,6,12,24} at two anchor times pass. Site-side `ALLOWED_INTERVAL_HOURS` duplication deduped: admin settings API now imports from cadence.ts. See DECISIONS 2026-04-22 "Phase 7 FOLLOWUPS cleanup — five-commit wrap".
+
 ---
 
-## [open] 2026-04-22: `reset-today.sh` has no `--piece-id` flag — deletes all same-date pieces
+## [resolved] 2026-04-22: `reset-today.sh` has no `--piece-id` flag — deletes all same-date pieces
 
 **Surfaced:** 2026-04-22 during Phase 7 audit. [`scripts/reset-today.sh`](../scripts/reset-today.sh) step 2 runs `DELETE FROM daily_pieces WHERE date = '$DATE'` (and same-date deletes for candidates, pipeline_log, audit_results, observer_events). At `interval_hours=24` one piece per date so "reset today" = "reset the one piece" — correct. At multi-per-day all same-date pieces get wiped. Sometimes that's the intent ("full-day reset"); sometimes the operator wants just one piece.
 
@@ -124,9 +128,11 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 
 **Priority:** Low. Dev-operational tool for iteration. Works correctly at current cadence.
 
+**Resolved:** 2026-04-22 in commit `205ce1e`. `--piece-id <uuid>` scopes wipe to that piece across 7 piece-id-capable tables (daily_pieces, daily_candidates, audit_results, daily_piece_audio, zita_messages, learnings, engagement); ±20min time-window filter for the two piece-id-less tables (pipeline_log kept date-keyed per Phase 3 walk-back, observer_events by `created_at`). Window math mirrors Learner's `LEARNER_PIPELINE_LOOKBACK_MS/LOOKAHEAD_MS`. `--retrigger` opt-in for single-piece re-runs (default is wipe-only because multi-per-day has no natural cron slot for a single-piece trigger). UUID validation prevents silent-zero-rows DELETE on typos. ADMIN_SECRET only required when a trigger actually fires. RUNBOOK updated with both modes. See DECISIONS 2026-04-22 "Phase 7 FOLLOWUPS cleanup — five-commit wrap".
+
 ---
 
-## [open] 2026-04-22: Copy cleanup — "one piece per day" / "every morning at 2am UTC" phrasing at multi-per-day
+## [resolved] 2026-04-22: Copy cleanup — "one piece per day" / "every morning at 2am UTC" phrasing at multi-per-day
 
 **Surfaced:** 2026-04-22 during Phase 7 audit. Several copy-visible files still phrase the cadence as fixed at one-piece-per-day + 02:00 UTC. At multi-per-day these read wrong.
 
@@ -145,9 +151,11 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 
 **Priority:** Low. Cosmetic prose. Not time-sensitive.
 
+**Resolved:** 2026-04-22 in commit `19910d7`. 10 files touched: README.md intro + book ch 8/9/99 (author-narrative) + book is left forensic for chapter 10's 2026-04-19 walkthrough + src/pages/index.astro + src/pages/dashboard/index.astro footer + docs/{ARCHITECTURE, AGENTS, RUNBOOK, CLAUDE.md}. Reader-visible marketing moved to neutral rhythm language ("every morning" / "each morning"); operational docs spell out the current default explicitly ("hourly cron gated by `admin_settings.interval_hours`, 24 → only 02:00 UTC fires; admin-configurable"). Zita synthesis row in RUNBOOK also updated to publish+23h45m per piece (Phase 6 reality). Historical references intentionally left alone: DECISIONS (append-only), handoff/ specs, book chapter 10's forensic 2026-04-19 walkthrough. See DECISIONS 2026-04-22 "Phase 7 FOLLOWUPS cleanup — five-commit wrap".
+
 ---
 
-## [open] 2026-04-22: `engagement` table has no `piece_id` — reader-path attribution ambiguous at multi-per-day
+## [resolved] 2026-04-22: `engagement` table has no `piece_id` — reader-path attribution ambiguous at multi-per-day
 
 **Surfaced:** 2026-04-22 during the writeLearning piece_id extension. Learner's `analyseAndLearn` (reader-engagement path) derives piece_id via `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` because `engagement` rows are keyed by `lesson_id` (string like `daily/YYYY-MM-DD`) and don't carry piece_id directly. At `interval_hours=24` the lookup is unambiguous; at multi-per-day the same date has multiple pieces and the LIMIT 1 picks an arbitrary one — learnings written under that reader signal would attribute to the wrong piece.
 
@@ -159,6 +167,23 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 - Once engagement has piece_id, `Learner.analyseAndLearn` reads it directly, no date-lookup, no partial-fix caveat.
 
 **Priority:** Low. Reader engagement writes land in prod but the Learner reader-path is effectively dormant (no real reader traffic volume yet). At flip time, multi-per-day reader attribution is partial but not visibly wrong — no live reader reports hit the drawer's learnings-by-piece view yet. Address when real reader volume + multi-per-day cadence overlap.
+
+**Resolved:** 2026-04-22 in commit `9d20b81`. Migration 0017 rebuilt `engagement` with PK `(piece_id, course_id, date)`; 13 historical rows backfilled from daily_pieces via date-join (5 piece_ids, 0 NULLs). Snapshot `engagement_backup_20260422` held for 7-day rollback. rehype-beats reads `pieceId` from MDX frontmatter and injects `data-piece-id` on the auto-generated `<lesson-shell>`; lesson-shell POSTs it to `/api/engagement/track`; the endpoint falls back to a date lookup for stale bundles (acceptable for the edge case, new bundles always send it). Learner's `analyseAndLearn` reads piece_id directly off the engagement row — no more date-based arbitrary lookup; `analyse()` GROUP BY switched to piece_id so same-date pieces stay separate. Admin widget query joins daily_pieces on piece_id. Resolves the "partial fix at multi-per-day" note in DECISIONS 2026-04-22 "writeLearning persists piece_id" §2.4.
+
+---
+
+## [open] 2026-04-22: Drop `engagement_backup_20260422` snapshot
+
+**Surfaced:** 2026-04-22 alongside migration 0017 (Phase 7 engagement piece_id). The 13-row snapshot was created as a free-rollback safety net for the engagement table rebuild. Should be dropped on or after **2026-04-29** once the new `(piece_id, course_id, date)` PK has absorbed at least a week of reader-path writes without shape regressions.
+
+**Hypothesis:** None — housekeeping, not a bug. Retention window gives time to detect any row-shape regression the manual verification missed. Tiny (13 rows) so cost of keeping a few extra days is nothing.
+
+**Investigation hints:**
+- Before dropping: re-run the post-backfill verification (`SELECT COUNT(*) AS total, COUNT(DISTINCT piece_id) AS unique_pieces FROM engagement`) and confirm the 5 piece_id groups still match.
+- Drop command: `DROP TABLE engagement_backup_20260422;` via `wrangler d1 execute zeemish --remote --command`.
+- Close with a DECISIONS entry on the drop date naming the SHA that dropped it.
+
+**Priority:** Low. One-line operational task, no downstream dependency.
 
 ---
 
