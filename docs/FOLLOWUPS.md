@@ -23,7 +23,7 @@ Format per entry:
 
 **Priority:** Blocker at any `interval_hours < 24`. At default 24, guard semantic is unchanged.
 
-**Resolved:** `<SHA>` (pending commit this session).
+**Resolved:** `5922f43` (2026-04-22).
 
 ---
 
