@@ -273,13 +273,19 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
    * on 5xx / network errors / timeouts. 4xx errors (bad key, quota, bad
    * voice ID) throw immediately — retrying won't fix them.
    *
-   * 30-second AbortSignal timeout per attempt. Without it, if ElevenLabs
+   * 90-second AbortSignal timeout per attempt. Without it, if ElevenLabs
    * stalls the TCP connection (no response, no error), the fetch hangs
    * indefinitely, the Durable Object eventually hibernates, and
    * Director's await on `generateAudio()` stays pending forever — which
-   * is how 2026-04-19's second run silently failed at beat 3 of 6. A
-   * single beat of ~2000 chars typically returns in 5-15s; 30s is
-   * generous headroom before we call it stuck and move on.
+   * is how 2026-04-19's second run silently failed at beat 3 of 6.
+   *
+   * Sizing: Integrator sometimes consolidates beats (8 → 5 on 2026-04-22),
+   * pushing individual beats to ~3000-3400 chars. At `speed: 0.95`,
+   * eleven_multilingual_v2 on a ~3000-char beat can genuinely take 30-60s
+   * on the happy path — which blew the old 30s cap on 2026-04-22's beat 3
+   * and burned all 3 retries. 90s is ~6x the typical happy-path latency
+   * and still leaves headroom under the alarm's 15-min budget even if
+   * every retry exhausts.
    */
   private async callElevenLabs(
     text: string,
@@ -310,7 +316,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
             Accept: 'audio/mpeg',
           },
           body,
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(90_000),
         });
 
         if (!response.ok) {

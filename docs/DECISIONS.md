@@ -2,6 +2,36 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Bump ElevenLabs per-attempt timeout 30s → 90s
+
+**Context:** The 2026-04-22 run's audio pipeline failed with `"The operation was aborted due to timeout"` after 131 seconds wall time. Two beats reached R2 (`hook` at 798 chars, `the-core-problem` at 2375 chars), then the producer stalled on `why-the-debt-compounds` at 2960 chars. Three retries × 30s timeout + backoffs ≈ 93s burned before the whole producer threw. Observer logged an escalation; text was already live; admin retry button was the documented recovery path.
+
+**Investigation:**
+- Pipeline log for `run_id='2026-04-22'`: `audio-producing running` at T=400565, `failed` at T=532034 (131s).
+- `daily_piece_audio` for piece `726b2abf`: 2 rows present (hook + the-core-problem), matching the "made it to R2 before stall" reading.
+- Beat length audit on committed MDX: hook 798 / the-core-problem 2375 / why-the-debt-compounds **2960** / what-we-lose-by-waiting 3397 / close 120. Drafter originally emitted 8 beats (pipeline_log drafting step says `beatCount: 8`); final frontmatter is `beatCount: 5`, meaning the Integrator's round 1 revision compressed the structure. Individual beats ended up ~50% larger than the 2000-char target the original 30s timeout was sized against.
+- Error text matches the standard `DOMException` from `AbortSignal.timeout` — confirms it's the per-attempt timeout firing, not an ElevenLabs 5xx or 4xx.
+
+**Decision:** raise `callElevenLabs`'s per-attempt timeout from 30_000ms → 90_000ms at [agents/src/audio-producer.ts:313](../agents/src/audio-producer.ts:313) and update the associated comment with the new sizing rationale.
+
+**Why 90s (not 60s, not streaming, not sub-chunking long beats):**
+- The existing 30s comment assumed "~2000 chars typically returns in 5-15s; 30s is generous headroom". At 3000 chars + `speed: 0.95` (slower speech → longer audio → longer server-side work), ElevenLabs can legitimately take 30-60s on the *happy path*. Happy-path > 30s means the cap wasn't headroom at all, it was the limit.
+- 60s would cover the observed 3000-char case but leaves no margin for ElevenLabs p99 spikes or the 3397-char `what-we-lose-by-waiting` beat queued right after.
+- 90s gives ~6x typical happy-path latency; still well inside the alarm handler's 15-min wall-clock budget even in the absolute worst case (3 attempts × 90s + 1s + 2s ≈ 273s per beat, ~4.5min for the longest beat).
+- Not sub-chunking long beats: would mean stitching audio at sentence boundaries, which corrupts prosody at the seam (prior-request-id stitching is ElevenLabs' answer to cross-call prosody, and that only works between complete responses). Out of proportion to the problem.
+- Not switching to the streaming endpoint: streaming would start returning bytes sooner, but the producer currently buffers to R2 as one blob — converting means rewriting the write path + R2 object assembly. Not worth it for a 1-line fix that solves the observed failure mode.
+- Kept `MAX_BEATS_PER_CHUNK = 2`: the DO-to-DO RPC wall-clock concern is blunted by `keepAlive()` + alarm-triggered invocation (per Phase F/G/H hardening in DECISIONS 2026-04-19). Two long beats in one chunk = 30-60s typical, 180s absolute worst case — the alarm handler tolerates that.
+
+**Why not also add beat-name context to the error:** the observer event's reason text currently says `"The operation was aborted due to timeout"` with no beat identifier — *which* beat stalled has to be reconstructed from `daily_piece_audio` row presence. Useful, but orthogonal to this fix. Noted, not scoped in.
+
+**Verification:** typecheck clean on the touched file. The 18 pre-existing SubAgent typing errors in `agents/src/server.ts` are unchanged (documented since Phase 2). No new errors introduced.
+
+**Rollforward plan:** deploy agents worker; operator hits the **Continue** button on the admin per-piece page for 2026-04-22; producer's skip-if-exists-in-R2 logic will find hook + the-core-problem already in R2 and resume from beat 3. Expected total runtime ~45-60s for the three remaining beats at their happy-path latencies.
+
+**Reference:** single-file commit raising `AbortSignal.timeout(30_000)` → `AbortSignal.timeout(90_000)` at `agents/src/audio-producer.ts` + CLAUDE.md "Audio hardening" note updated + this DECISIONS entry.
+
+---
+
 ## 2026-04-22: Phase 7 FOLLOWUPS cleanup — five-commit wrap
 
 **Context:** Five `[open]` FOLLOWUPS items remained after the cadence plan's main 14-commit run (ending at `c4caf39`). All Low priority. None blocked the cadence flip. Session brief: close them all in dependency order — cosmetics first, then the piece-id plumbing that later phases depend on, then the admin-route nesting + the reset-script work that benefit from that plumbing.
