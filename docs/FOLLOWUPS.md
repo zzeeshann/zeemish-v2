@@ -13,9 +13,9 @@ Format per entry:
 
 ---
 
-## [observing] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
+## [resolved] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
 
-**Status:** partially resolved across 4 commits on 2026-04-22 evening. Observer events pooling (the original trigger) resolved via migration 0020. Remaining items tracked inline below.
+**Status:** fully resolved across 9 commits on 2026-04-22. Observer events pooling (the original trigger) resolved via migration 0020. All 5 numbered points (including the daily_candidates.selected bug + residual WHERE date = ? + 3 admin/dashboard audit items surfaced 2026-04-22 evening) closed — see inline strikethroughs.
 
 **Surfaced:** 2026-04-22 end of session. User viewing `/dashboard/admin/piece/2026-04-22/uk-bill-bans-.../` after the piece_id schema fix shipped noticed the **Observer events this day** section still pools both same-date pieces' events on each piece's page (admin-settings change + both pieces' `Published`, `Reflection`, `Audio failure`, `Audio published` events — 9 events total visible when the piece only generated ~3 of them). Intentional by the schema-fix design (kept as 36h day window) but not what an operator viewing a per-piece deep-dive expects. Broader request: a comprehensive audit of admin + dashboard + public surfaces for any remaining pooling, stale references, or inconsistencies the Phase 1-5 schema fix didn't address.
 
@@ -25,9 +25,9 @@ Format per entry:
 
 1. **Admin home** (`/dashboard/admin/`):
    - ~~"All pieces" rounds + candidates counts keyed on `daily/${date}` / `date` — pools same-date pieces.~~ **Resolved 2026-04-22 (Phase C).** Both queries now bind on `piece_id IN (...)` using the SELECT's `id` column; tiebreaker `ORDER BY date DESC, published_at DESC` on the parent SELECT preserves publish order at multi-per-day. See DECISIONS 2026-04-22 "Admin + dashboard run log scoped by piece_id".
-   - Observer events section is global (last 30 by created_at DESC) — is that the right scope or should it filter by ack status / severity mix?
+   - ~~Observer events section is global (last 30 by created_at DESC) — is that the right scope?~~ **Resolved 2026-04-22.** Raised LIMIT 30 → 100. The top stats (`openEscalations` + `errorsThisWeek`) already surface what-needs-attention; the feed stays as a chronological log. At current volume 100 rows ≈ 3-4 weeks; at hypothetical 1h cadence ≈ 10 hours.
    - ~~"All pieces" list links to per-piece admin page via `adminPieceHref(date, pieceId?)` — verify the slug lookup works for every historical piece.~~ **Resolved 2026-04-22.** Spot-checked all 7 production pieces via `curl` — each `/daily/{date}/{slug}/` URL returns 200. `adminPieceHref` helper uses `slugByPieceId` Map from the content collection and falls back to `slugByDate` when pieceId is absent (covers any legacy MDX that predates the content-schema pieceId requirement — none exist in production).
-   - Pipeline history (last 14 runs grouped by run_id = date) — at multi-per-day a "run" is a day, grouping hides per-piece run quality. Worth a per-piece grouping mode.
+   - ~~Pipeline history (last 14 runs grouped by run_id = date) — at multi-per-day a "run" is a day, grouping hides per-piece run quality.~~ **Resolved 2026-04-22.** Switched to piece_id grouping via `LEFT JOIN daily_pieces ON dp.id = pl.piece_id` + correlated subquery keyed on piece_id (with null-fallback to run_id for any legacy rows). Each row shows date + headline + verdict. Orphan piece_ids (scanner-skipped / pre-publish errors) render as "(unpublished run)". `lifetimeRuns` stat unchanged — it still counts distinct run_ids (= distinct days), which is a valid day-level stat.
    - Engagement widget `GROUP BY piece_id` (migration 0017 post) — verify no stale `GROUP BY lesson_id` fragments.
 
 2. **Admin Zita page** (`/dashboard/admin/zita/`):
@@ -42,7 +42,7 @@ Format per entry:
 
 4. **`daily_candidates.selected` never-flipped bug** — separate FOLLOWUPS entry, but audit surfaced it again: 0 rows across all 7 piece_ids have `selected=1`, so admin per-piece "Picked candidate marked with teal dot" never renders the teal dot. Curator's `selectedCandidateId` return value either isn't populated or doesn't match any candidate UUID. Investigate alongside this audit.
 
-5. **Frontmatter splice vs daily_pieces.word_count drift** — Drafter reports wordCount at draft time (e.g. 1080), Director's INSERT computes `currentMdx.split(/\s+/).length` on POST-splice MDX which adds a few words (voiceScore, publishedAt, pieceId frontmatter lines). Admin page shows the INSERT value (1086); pipeline timeline shows Drafter's value (1080). Minor; consider showing both or one canonical number.
+5. ~~**Frontmatter splice vs daily_pieces.word_count drift** — Drafter reports wordCount at draft time (e.g. 1080), Director's INSERT computes `currentMdx.split(/\s+/).length` on POST-splice MDX which adds a few words (voiceScore, publishedAt, pieceId frontmatter lines). Admin page shows the INSERT value (1086); pipeline timeline shows Drafter's value (1080). Minor; consider showing both or one canonical number.~~ **Resolved 2026-04-22.** Director's INSERT now uses Drafter's `wordCount` directly (captured at draft time) instead of re-computing on post-splice MDX. One source of truth: `drafting done` pipeline_log step and `daily_pieces.word_count` now agree. Existing historical rows stay as-is (no backfill — ~6-word drift per piece, cosmetic).
 
 6. **Reset-today.sh at multi-per-day** — separate FOLLOWUPS entry, still open. Worth revisiting during the audit because the broken teal-dot + the reset-day semantic are both "day-keyed intent but multi-per-day reality."
 

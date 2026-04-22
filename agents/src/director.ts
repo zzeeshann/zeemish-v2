@@ -408,13 +408,18 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // captured earlier (before the frontmatter splice) so identity +
     // timestamp agree between MDX and D1.
     const factsPassed = failedGates.includes('facts') ? 0 : 1;
+    // Use Drafter's wordCount (captured at draft time, before Director's
+    // frontmatter splices added ~6 tokens for voiceScore/pieceId/publishedAt).
+    // Prior shape re-computed `currentMdx.split(/\s+/).length` here which
+    // inflated the count and drifted from the `drafting done` pipeline_log
+    // step. One source of truth: Drafter's value.
     await this.env.DB
       .prepare(
         `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, quality_flag, published_at, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(pieceId, today, brief.headline, brief.underlyingSubject, brief.newsSource ?? '',
-        currentMdx.split(/\s+/).length, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, publishedAtMs, publishedAtMs)
+        wordCount, brief.beats?.length ?? 0, lastVoiceScore, factsPassed, qualityFlag, publishedAtMs, publishedAtMs)
       .run().catch(() => {});
 
     await this.logStep(today, pieceId,'publishing', 'done', { commitUrl: publishResult.commitUrl, filePath: publishResult.filePath, qualityFlag });

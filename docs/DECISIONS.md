@@ -2,6 +2,29 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Admin polish — observer feed cap + pipeline history per-piece + word_count canonical
+
+**Context:** Final three points from the FOLLOWUPS audit entry. Not bugs — policy/design calls that had been deferred as "needs your input." Taken together, they close the audit entry fully.
+
+**Decisions + shipping:**
+
+1. **Observer events feed LIMIT 30 → 100.** The admin home already surfaces `openEscalations` + `errorsThisWeek` as top-level stats — the feed below is the chronological log, not the anomaly view. Raising to 100 gives headroom without adding filter complexity. At current volume ~28 events (4 escalation + 20 info + 4 warn), 100 rows is ~3-4 weeks. At hypothetical 1h cadence with full producer+reflection+Zita+audio traffic, still ~10 hours. No toggle — the job is "what happened recently" and chronology serves that.
+
+2. **Pipeline history per-piece grouping.** At multi-per-day, "run" = pipeline attempt for a piece, not calendar day. Previously grouped by run_id=date, picking the latest terminal step and hiding that the first piece may have failed while the second succeeded. New query: `LEFT JOIN daily_pieces ON dp.id = pl.piece_id` + correlated subquery keyed on `piece_id` (with null-fallback to run_id for any legacy null-piece_id rows). Each row shows the piece's date + headline + verdict; orphan runs (scanner skipped / pre-publish error) render with "(unpublished run)" label. `lifetimeRuns = COUNT(DISTINCT run_id)` stays day-keyed — a legitimate distinct-days-active stat — and wasn't renamed.
+
+3. **word_count — Drafter's value is canonical, Director stops re-computing.** Drafter returns `wordCount = mdx.split(/\s+/).length` at draft time. Director was re-computing on post-splice MDX (frontmatter gained `voiceScore`, `pieceId`, `publishedAt`, ~6 extra tokens). Result: `drafting done` pipeline_log showed 1080, `daily_pieces.word_count` stored 1086. Admin page had to pick one. Fix: INSERT binds `wordCount` (the Drafter value) directly. One source of truth. Historical rows stay as-is — ~6-word drift is cosmetic and a backfill UPDATE is more risk than the fix is worth.
+
+**Trade-offs:**
+- Pipeline history query gains a LEFT JOIN + correlated subquery branch. D1 handles this cleanly (verified via build, no new typecheck errors on admin.astro). A piece_id-free legacy row still renders via the `OR (p2.piece_id IS NULL AND p1.piece_id IS NULL AND p2.run_id = p1.run_id)` fallback clause — no historical rows get dropped.
+- 100-row observer feed has ~3x the payload of the old 30-row feed. Negligible — each row is small JSON. No perf concern.
+- word_count drift is permanent on existing rows. Future operator reports would show post-Drafter count. Acceptable; no reader-facing surface uses it.
+
+**Files:** [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro), [agents/src/director.ts](../agents/src/director.ts).
+
+**Closes:** FOLLOWUPS audit entry — all 5 numbered points resolved; promoted to `[resolved]`.
+
+---
+
 ## 2026-04-22: Removed 4 dead `/api/dashboard/*` endpoints
 
 **Context:** FOLLOWUPS `[open] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern`. The 2026-04-20 `today.ts` removal raised the question of whether its siblings (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) were similarly orphaned. Added to the list after the 2026-04-20 Memory panel work: `memory.ts`, which was created for that panel but the Astro page ended up querying D1 directly in frontmatter — born orphaned.

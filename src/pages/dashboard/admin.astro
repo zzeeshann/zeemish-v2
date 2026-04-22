@@ -50,7 +50,16 @@ let lifetimeRuns = 0;
 let openEscalations = 0;
 let errorsThisWeek = 0;
 let avgRevisionsLifetime: number | null = null;
-let pipelineHistory: { runId: string; finalStep: string; finalStatus: string; data: any; tMs: number }[] = [];
+let pipelineHistory: {
+  runId: string;
+  pieceId: string | null;
+  date: string | null;
+  headline: string | null;
+  finalStep: string;
+  finalStatus: string;
+  data: any;
+  tMs: number;
+}[] = [];
 
 // Content-collection lookup for per-piece admin URLs. The route moved
 // to /dashboard/admin/piece/{date}/{slug}/ in Phase 7 — links here need
@@ -85,9 +94,15 @@ type EngagementRow = {
 let engagement: EngagementRow[] = [];
 
 try {
-  // Observer events — last 30 (raise the cap from 20 so admin can audit further back).
+  // Observer events — last 100. The top-level stats already surface
+  // what-needs-attention (openEscalations + errorsThisWeek). The feed
+  // is the chronological log; at current volume 100 rows ≈ 3-4 weeks
+  // of history; at hypothetical 1h cadence with full producer/reflection/
+  // Zita synthesis traffic, still ≈ 10 hours. Raised from 30 on 2026-04-22
+  // after piece_id threading landed in migration 0020 made cross-piece
+  // context more useful to keep loaded.
   const events = await db
-    .prepare('SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 30')
+    .prepare('SELECT * FROM observer_events ORDER BY created_at DESC LIMIT 100')
     .all<ObserverEvent>();
   observerEvents = events.results;
 
@@ -154,22 +169,38 @@ try {
     avgRevisionsLifetime = piecesWithRounds > 0 ? Math.round((totalRounds / piecesWithRounds) * 10) / 10 : null;
   }
 
-  // Pipeline history — terminal step per run for the last 14 distinct runs.
-  // Every run logs at least one terminal row (step='done'|'error'|'skipped'),
-  // so we can grab the last row per run_id and read its data.
+  // Pipeline history — terminal step per PIECE (not per day) for the
+  // last 14 runs. At multi-per-day cadence a calendar day has multiple
+  // pipeline attempts, and grouping by run_id=date hides per-piece run
+  // quality (one piece could fail out of two and the day-aggregate view
+  // would show only the latest terminal step). Group by piece_id post-
+  // migration-0018, join daily_pieces for the headline. Orphan piece_ids
+  // (scanner-skipped / error before publish) still surface with a null
+  // headline so "stalled" runs are visible. Legacy rows with null
+  // piece_id fall through the OR branch so they still render, keyed by
+  // run_id alone.
   const histRes = await db
     .prepare(
-      `SELECT run_id, step, status, data, created_at
-       FROM pipeline_log
-       WHERE id IN (
+      `SELECT pl.piece_id, pl.run_id, pl.step, pl.status, pl.data, pl.created_at,
+              dp.headline, dp.date AS piece_date
+       FROM pipeline_log pl
+       LEFT JOIN daily_pieces dp ON dp.id = pl.piece_id
+       WHERE pl.id IN (
          SELECT id FROM pipeline_log p1
-         WHERE created_at = (SELECT MAX(created_at) FROM pipeline_log p2 WHERE p2.run_id = p1.run_id)
+         WHERE created_at = (
+           SELECT MAX(created_at) FROM pipeline_log p2
+           WHERE (p2.piece_id IS NOT NULL AND p2.piece_id = p1.piece_id)
+              OR (p2.piece_id IS NULL AND p1.piece_id IS NULL AND p2.run_id = p1.run_id)
+         )
        )
-       ORDER BY run_id DESC LIMIT 14`,
+       ORDER BY pl.created_at DESC LIMIT 14`,
     )
-    .all<{ run_id: string; step: string; status: string; data: string | null; created_at: number }>();
+    .all<{ piece_id: string | null; run_id: string; step: string; status: string; data: string | null; created_at: number; headline: string | null; piece_date: string | null }>();
   pipelineHistory = histRes.results.map((r) => ({
     runId: r.run_id,
+    pieceId: r.piece_id,
+    date: r.piece_date ?? r.run_id,
+    headline: r.headline,
     finalStep: r.step,
     finalStatus: r.status,
     data: r.data ? safeJson(r.data) : {},
@@ -397,7 +428,7 @@ function shortDate(iso: string): string {
     <p class="text-sm text-zee-muted hidden pt-4" data-empty-match>No pieces match that filter.</p>
   </section>
 
-  <!-- Pipeline history -->
+  <!-- Pipeline history — per-piece at multi-per-day cadence, post-0018. -->
   {pipelineHistory.length > 0 && (
     <section class="mb-10">
       <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Pipeline history (last 14 runs)</h2>
@@ -410,14 +441,20 @@ function shortDate(iso: string): string {
           const score = r.data?.voiceScore != null ? `voice ${r.data.voiceScore}/100` : null;
           const revs = r.data?.revisions != null ? `${r.data.revisions} revision${r.data.revisions === 1 ? '' : 's'}` : null;
           const flag = r.data?.qualityFlag === 'low' ? 'flagged low' : null;
+          const label = r.headline ?? '(unpublished run)';
           return (
             <li class="py-3 flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-              <div class="flex items-center gap-3">
-                <span class={`w-2 h-2 rounded-full ${dotCls} shrink-0`} aria-hidden="true"></span>
-                <span class="text-zee-text font-medium tabular-nums">{r.runId}</span>
-                <span class="text-zee-muted">— {verdict}</span>
+              <div class="flex items-start gap-3 min-w-0">
+                <span class={`w-2 h-2 rounded-full ${dotCls} shrink-0 mt-1.5`} aria-hidden="true"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <span class="text-zee-text font-medium tabular-nums">{r.date}</span>
+                    <span class="text-zee-muted">— {verdict}</span>
+                  </div>
+                  <div class="text-xs text-zee-muted truncate" title={label}>{label}</div>
+                </div>
               </div>
-              <div class="text-xs text-zee-muted tabular-nums flex flex-wrap gap-x-2 sm:justify-end">
+              <div class="text-xs text-zee-muted tabular-nums flex flex-wrap gap-x-2 sm:justify-end shrink-0">
                 {[score, revs, flag].filter(Boolean).map((bit, i, arr) => (
                   <>
                     <span>{bit}</span>
