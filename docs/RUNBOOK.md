@@ -139,10 +139,12 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/status" \
 
 ## Reset today (clean slate for a dev-mode re-test)
 
-"One piece per day" is the product (see `docs/DECISIONS.md` — 2026-04-17
-entry on this). The admin manual trigger bypasses the duplicate-publish
+Daily pieces are the product. Cadence is configurable via
+`admin_settings.interval_hours` (default 24 → one piece/day at 02:00
+UTC; admins can flip to 1/2/3/4/6/8/12 via `/dashboard/admin/settings/`
+without a redeploy). The admin manual trigger bypasses the slot-window
 guard so you can test end-to-end during development, but that can leave
-duplicate state from multiple runs.
+duplicate state from multiple runs within a slot.
 
 ### One command
 ```bash

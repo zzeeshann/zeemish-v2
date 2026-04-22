@@ -27,6 +27,23 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-22: Residual `WHERE date = ? LIMIT 1` sites surfaced during slot-aware-guard audit
+
+**Surfaced:** 2026-04-22 PM. Post-fix sweep for `WHERE date = ? LIMIT 1` across the repo (to confirm no other silent-skip paths) turned up two sites that aren't correctness blockers but pick an arbitrary same-date piece at multi-per-day:
+
+1. [src/pages/api/daily/[date]/made.ts:71](../src/pages/api/daily/[date]/made.ts) — the made-drawer's per-piece metadata lookup (`SELECT * FROM daily_pieces WHERE date = ? LIMIT 1`). Shows arbitrary piece's headline / wordCount / voiceScore / publishedAt in the drawer at multi-per-day. Drawer component receives `pieceId` via the Phase 7 frontmatter splice (`cbf1f17`); fix is to accept `?pieceId=` on the endpoint and prefer it over the date lookup when present, falling back to `ORDER BY published_at DESC LIMIT 1` at the date-only legacy path.
+2. [src/pages/dashboard/index.astro:59](../src/pages/dashboard/index.astro) — public dashboard's "today's piece" hero query. At multi-per-day shows arbitrary same-date piece. Simple fix: add `ORDER BY published_at DESC LIMIT 1` (matches server.ts:213/268's pattern for the same situation). Homepage hero already sorts this way; this is dashboard-specific.
+
+**Hypothesis:** both existed pre-Phase-4 URL change and were missed by the Phase 4–7 audits. Neither blocks cadence — the slot-aware guard (resolved entry above) was the only real blocker. These are UX fidelity fixes.
+
+**Investigation hints:**
+- `made.ts` — check whether the made-drawer component already passes a piece-id query param; if so, the endpoint just needs to honour it.
+- `dashboard/index.astro` — 1-line patch, add `ORDER BY published_at DESC` to the query.
+
+**Priority:** Low. Only matters at multi-per-day; at `interval_hours=24` both are unambiguous single-row queries.
+
+---
+
 ## [resolved] 2026-04-21: Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping
 
 **Surfaced:** 2026-04-21 during the Phase 3 pipeline_log consumer audit (see DECISIONS 2026-04-21 "Multi-piece cadence — Phase 3 hourly cron + runtime gate"). Three sites in the agents worker are scoped by `WHERE run_id = ? .bind(today)` or equivalent and behave correctly at 1 piece/day but pool across pieces at multi-per-day. `interval_hours` cannot be flipped below 24 until these are resolved.
