@@ -29,7 +29,7 @@ const { Content } = await render(piece);
   description={piece.data.description}
 >
   <Content />
-  <MadeBy date={piece.data.date} />
+  <MadeBy date={piece.data.date} pieceId={piece.data.pieceId} />
 </LessonLayout>
 
 <script>

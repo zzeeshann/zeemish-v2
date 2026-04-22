@@ -17,6 +17,12 @@ const dailyPieces = defineCollection({
     // `date` — sort by publishedAt DESC gives a deterministic newest-
     // first order. Added in cadence Phase 4 (2026-04-21).
     publishedAt: z.number(),
+    // UUID matching `daily_pieces.id` in D1. Spliced by Director at
+    // publish time. Lets per-piece consumers (made-drawer fetch + API
+    // learnings filter) resolve a piece by id without a date-based
+    // lookup that would pool at multi-per-day. Added in Phase 7
+    // writeLearning piece_id extension (2026-04-22).
+    pieceId: z.string(),
     newsSource: z.string().optional(),
     underlyingSubject: z.string().optional(),
     estimatedTime: z.coerce.string(),

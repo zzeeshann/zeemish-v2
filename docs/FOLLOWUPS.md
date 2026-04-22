@@ -57,7 +57,7 @@ All three deploy clean through CI. Admin UI for interval flip (Phase 5) unblocke
 
 ---
 
-## [open] 2026-04-21: `writeLearning` doesn't persist `piece_id` — made-drawer pools at multi-per-day
+## [resolved] 2026-04-21: `writeLearning` doesn't persist `piece_id` — made-drawer pools at multi-per-day
 
 **Surfaced:** 2026-04-21 during cadence Phase 6 (Zita synthesis timing + piece_id scoping) scoping. The Learner's synthesis path now scopes its INPUT by piece_id, but its OUTPUT writes via [`agents/src/shared/learnings.ts`](../agents/src/shared/learnings.ts) `writeLearning(...)` still only persists `piece_date`, not `piece_id`. At multi-per-day cadence, the made-drawer's per-piece "What the system learned" section ([`src/pages/api/daily/[date]/made.ts`](../src/pages/api/daily/[date]/made.ts) + [`src/interactive/made-drawer.ts`](../src/interactive/made-drawer.ts)) queries `WHERE piece_date = ?` — pools all same-date pieces' learnings into every piece's drawer.
 
@@ -76,6 +76,23 @@ Made-drawer consumer updates in parallel: `/api/daily/[date]/made` already recei
 - Reader-learn path (`analyseAndLearn`) is harder — engagement rows are keyed by `lesson_id` which was designed pre-multi-per-day. May need its own FOLLOWUPS depending on how engagement tracking evolves.
 
 **Priority:** Medium. Not a blocker for multi-per-day flip itself (cadence switch works) but the per-piece drawer at multi-per-day shows wrong data until this lands. At `interval_hours=24` (current prod) the behaviour is correct because piece_date uniquely identifies a piece. So: required before flipping, not before shipping Phase 5/6 admin UI.
+
+**Resolved:** 2026-04-22 — `writeLearning` signature extended with `pieceId` 8th param, 4 callers threaded, made-drawer + API scoped by piece_id, `pieceId` added to content schema and spliced into frontmatter by Director, 5 existing MDX files backfilled. Reader-engagement path (`analyseAndLearn`) is partial — derives piece_id via date lookup which is unambiguous at 1/day but picks arbitrary at multi/day. Engagement-table piece_id column is a separate FOLLOWUPS item (new entry below). See DECISIONS 2026-04-22 "writeLearning persists piece_id".
+
+---
+
+## [open] 2026-04-22: `engagement` table has no `piece_id` — reader-path attribution ambiguous at multi-per-day
+
+**Surfaced:** 2026-04-22 during the writeLearning piece_id extension. Learner's `analyseAndLearn` (reader-engagement path) derives piece_id via `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` because `engagement` rows are keyed by `lesson_id` (string like `daily/YYYY-MM-DD`) and don't carry piece_id directly. At `interval_hours=24` the lookup is unambiguous; at multi-per-day the same date has multiple pieces and the LIMIT 1 picks an arbitrary one — learnings written under that reader signal would attribute to the wrong piece.
+
+**Hypothesis:** add `engagement.piece_id TEXT` column + backfill historical rows + update the lesson-shell writer ([`src/interactive/lesson-shell.ts`](../src/interactive/lesson-shell.ts) + its POST endpoint) to resolve piece_id from the piece's `data-piece-id` attribute (available post-Phase-7 on every piece page) and include it in the engagement write.
+
+**Investigation hints:**
+- lesson-shell has access to `piece.data.pieceId` via Astro server render context. Pass it into the engagement POST body.
+- Migration: `ALTER TABLE engagement ADD COLUMN piece_id TEXT;` plus `CREATE INDEX idx_engagement_piece_id`. Backfill existing rows via `piece_date → daily_pieces.id` join — at 1/day unambiguous for all historical engagement data.
+- Once engagement has piece_id, `Learner.analyseAndLearn` reads it directly, no date-lookup, no partial-fix caveat.
+
+**Priority:** Low. Reader engagement writes land in prod but the Learner reader-path is effectively dormant (no real reader traffic volume yet). At flip time, multi-per-day reader attribution is partial but not visibly wrong — no live reader reports hit the drawer's learnings-by-piece view yet. Address when real reader volume + multi-per-day cadence overlap.
 
 ---
 

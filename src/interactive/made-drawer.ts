@@ -43,6 +43,7 @@ const STRUCTURE_RULES = [
 
 class MadeDrawer extends HTMLElement {
   private date = '';
+  private pieceId = '';
   private envelope: MadeEnvelope | null = null;
   private loading = false;
   private openerEl: HTMLButtonElement | null = null;
@@ -56,6 +57,7 @@ class MadeDrawer extends HTMLElement {
 
   connectedCallback() {
     this.date = this.getAttribute('data-date') ?? '';
+    this.pieceId = this.getAttribute('data-piece-id') ?? '';
     this.openerEl = this.querySelector('[data-made-open]');
     this.closeEl = this.querySelector('[data-made-close]');
     this.backdropEl = this.querySelector('[data-made-backdrop]');
@@ -174,7 +176,16 @@ class MadeDrawer extends HTMLElement {
     if (!this.bodyEl) return;
     this.loading = true;
     try {
-      const res = await fetch(`/api/daily/${this.date}/made`);
+      // pieceId query param scopes the learnings filter to THIS piece
+      // (Phase 7 writeLearning piece_id extension). Other envelope
+      // sections (pipeline, audits, candidates, audio) stay date-keyed
+      // per Phase 3 walk-back reasoning — "today's pipeline activity"
+      // is a valid day-view. At multi-per-day the pieceId is authoritative
+      // for learnings only; other sections keep pooling by date.
+      const url = this.pieceId
+        ? `/api/daily/${this.date}/made?pieceId=${encodeURIComponent(this.pieceId)}`
+        : `/api/daily/${this.date}/made`;
+      const res = await fetch(url);
       if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
       this.envelope = await res.json();
       this.render();

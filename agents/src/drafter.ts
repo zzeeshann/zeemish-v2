@@ -133,6 +133,7 @@ export class DrafterAgent extends Agent<Env, DrafterState> {
     brief: DailyPieceBrief,
     mdx: string,
     date: string,
+    pieceId: string,
   ): Promise<ReflectionResult> {
     const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
     const start = Date.now();
@@ -172,6 +173,7 @@ export class DrafterAgent extends Agent<Env, DrafterState> {
           60,
           'self-reflection',
           date,
+          pieceId,
         );
         written += 1;
       } catch {

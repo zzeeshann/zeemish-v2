@@ -2,6 +2,54 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: `writeLearning` persists `piece_id` — last multi-per-day correctness blocker resolved
+
+**Context:** The FOLLOWUPS entry surfaced during Phase 6 scoping — `writeLearning(…, pieceDate)` wrote `learnings.piece_date` but not `learnings.piece_id`, so the made-drawer's per-piece "What the system learned" section queried `WHERE piece_date = ?` and would pool learnings across same-date pieces at multi-per-day cadence. The only blocker listed in CLAUDE.md's cadence-plan top status between "Phases 1-6 shipped" and "admin can safely flip `interval_hours<24`."
+
+**Decision:** extend `writeLearning` to take `pieceId` as an 8th required arg, thread it through all four callers + the Director schedule payloads, add `pieceId: z.string()` to the content collection schema, backfill the 5 existing MDX files, teach Director to splice `pieceId` into frontmatter at publish time (alongside the existing `voiceScore` + `publishedAt` splices), teach MadeBy / made-drawer / the `/api/daily/[date]/made` endpoint to pass and filter by `piece_id` when present. Fall back to `piece_date` in the API when `pieceId` query param is absent — defensive, since all 5 existing pieces now have `pieceId` in frontmatter.
+
+**Six changes:**
+
+**1. `writeLearning` signature** — 8th parameter `pieceId: string`. Defensive check refuses INSERT if pieceId is null/empty/non-string (same shape as existing checks for source + pieceDate). INSERT writes to `learnings.piece_id` column added in migration 0014 (previously nullable; still nullable at schema level, but every new row from this commit onwards has it populated by the writer). `logMissingField`'s union widened to include `'piece_id'`.
+
+**2. Four callers updated:**
+- `Learner.analysePiecePostPublish` (producer-synth) — already had `pieceId` in signature post-Phase-6-blocker-#3. Pass to writeLearning.
+- `Learner.analyseZitaPatternsDaily` (Zita synth) — already had `pieceId` post-Phase-6. Pass through.
+- `Drafter.reflect` — signature extended `reflect(brief, mdx, date)` → `reflect(brief, mdx, date, pieceId)`. Director's `reflectOnPieceScheduled` payload gains `pieceId`; the schedule call at publish time passes the captured UUID.
+- `Learner.analyseAndLearn` (reader-engagement) — no piece_id in scope at call time. Resolves via `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1`. **Partial fix at multi-per-day** — picks an arbitrary same-date piece when multiple exist. Engagement attribution correctness at multi-per-day would need a separate `engagement.piece_id` column + lesson-shell writer update; out of scope here. Documented in FOLLOWUPS comment and code.
+
+**3. Director splices `pieceId` into frontmatter at publish time.** Right after the existing `publishedAt` splice, same regex pattern. `pieceId = crypto.randomUUID()` moved to the top of the frontmatter-splice block (was declared just before the daily_pieces INSERT) so both the splice and the INSERT use the same value. `publishedAtMs` moved up alongside for the same symmetry.
+
+**4. Content collection schema** — `pieceId: z.string()` required (not optional). All 5 existing MDX files backfilled with their prod D1 UUIDs in the same commit. Build validation proves all 5 pass the new schema before any runtime sees the change.
+
+**5. 5 MDX frontmatter backfills** — one line each: `pieceId: "<uuid>"`. UUIDs pulled from session memory of prod D1 reads (2026-04-21). Metadata carve-out under the permanence rule (same precedent as `publishedAt`, `voiceScore`, `audioBeats`, `beatTitles`, `qualityFlag`).
+
+**6. Made-drawer end-to-end:**
+- `src/components/MadeBy.astro` — accepts `pieceId: string` prop; passes as `data-piece-id` HTML attribute.
+- `src/pages/daily/[date]/[slug].astro` — passes `piece.data.pieceId` to MadeBy.
+- `src/interactive/made-drawer.ts` — reads `data-piece-id` attr; appends `?pieceId=<uuid>` to the fetch URL when present.
+- `src/pages/api/daily/[date]/made.ts` — accepts `?pieceId=` query param; learnings SELECT uses `WHERE piece_id = ?` when provided; falls back to `WHERE piece_date = ?` when absent (defensive — in practice every piece from this commit has pieceId).
+
+**Why not piece-id-filter every section, only learnings?** The made-drawer also renders timeline (pipeline_log), audit rounds (audit_results), candidates (daily_candidates), and audio (daily_piece_audio). Per Phase 3 walk-back + Phase 6 reasoning, the pipeline_log + daily_candidates sections are legitimately day-view at multi-per-day ("today's pipeline activity" + "today's candidate pool before Curator picked"). daily_piece_audio is already piece-id scoped post-Phase-1 but filtered here by date for the same day-view shape. Audit_results is keyed by `task_id` which encodes date — same. Only learnings had the specific cross-piece-leakage bug this commit fixes; extending the filter to all four would be scope creep with no correctness payoff at 1/day and a mixed story at multi/day.
+
+**Regex for pieceId query param validation** — `/^[0-9a-f-]{32,40}$/i`. Matches UUID v4 shape (36 chars with hyphens) with slack for alternative encodings. Defensive — a bad pieceId param falls back to the piece_date query instead of hitting D1 with garbage.
+
+**Non-goals:**
+- No `engagement.piece_id` column — reader-path attribution at multi-per-day is a separate FOLLOWUPS item (the one this entry references). Partial-fix semantics documented in Learner code comment.
+- No change to the other made-drawer sections (pipeline, audits, candidates, audio). Day-view semantics preserved.
+- No migration. `learnings.piece_id` column has been present since migration 0014; only the writer path and reader filter change here.
+
+**Verified:**
+- Agents TypeScript check clean (18 pre-existing SubAgent errors unchanged).
+- `pnpm build` produces all 5 pages at the new URL shape with the new `pieceId` field required — all 5 MDX pass the schema.
+- Preview verified: made-drawer `data-piece-id` attr populated, `/api/daily/[date]/made?pieceId=<uuid>` filters correctly (seeded a test row with matching piece_id, confirmed it returns only under the matching param and under the no-param fallback, not under a non-matching piece_id).
+
+**Flip status:** with this commit, `interval_hours` can be flipped below 24 without any known correctness blockers. The made-drawer's per-piece learnings section will display scoped data at multi-per-day. The `engagement.piece_id` attribution gap remains open but doesn't surface in any current reader view (engagement writes are consumed by Learner's reader-path only).
+
+**References:** [agents/src/shared/learnings.ts](../agents/src/shared/learnings.ts), [agents/src/learner.ts](../agents/src/learner.ts), [agents/src/drafter.ts](../agents/src/drafter.ts), [agents/src/director.ts](../agents/src/director.ts), [src/content.config.ts](../src/content.config.ts), [src/components/MadeBy.astro](../src/components/MadeBy.astro), [src/pages/daily/[date]/[slug].astro](../src/pages/daily/[date]/[slug].astro), [src/interactive/made-drawer.ts](../src/interactive/made-drawer.ts), [src/pages/api/daily/[date]/made.ts](../src/pages/api/daily/[date]/made.ts), FOLLOWUPS 2026-04-21 "writeLearning doesn't persist piece_id" (resolved by this commit).
+
+---
+
 ## 2026-04-21: Multi-piece cadence — Phase 6 Zita synthesis timing + piece_id scoping
 
 **Context:** Phase 6 "downstream adaptation" from the plan. Scoped tightly to the items that break at the multi-per-day interval flip:

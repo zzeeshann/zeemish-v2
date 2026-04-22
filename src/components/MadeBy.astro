@@ -14,12 +14,13 @@
  */
 interface Props {
   date: string;
+  pieceId: string;
 }
 
-const { date } = Astro.props;
+const { date, pieceId } = Astro.props;
 ---
 
-<made-drawer data-date={date}>
+<made-drawer data-date={date} data-piece-id={pieceId}>
   <button
     class="made-open"
     type="button"

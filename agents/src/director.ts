@@ -295,15 +295,30 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       `$1\nvoiceScore: ${lastVoiceScore}$2`,
     );
 
-    // Splice `publishedAt` (unix ms) into frontmatter. Required by the
-    // content collection schema (`src/content.config.ts`) for the
-    // homepage + library tiebreaker at multi-per-day cadence. Cadence
-    // Phase 4. Uses the same Date.now() value passed to the
-    // daily_pieces INSERT below so the two timestamps match.
+    // Piece_id + publishedAt are captured here (BEFORE the frontmatter
+    // splice + publish commit) because both need to flow into the MDX
+    // frontmatter AND into the daily_pieces INSERT below. The same
+    // local values feed both sources so identity + timestamp agree.
+    // piece_id also threads through the audio pipeline + the off-pipeline
+    // learning/reflection/zita schedule payloads.
+    const pieceId = crypto.randomUUID();
     const publishedAtMs = Date.now();
     currentMdx = currentMdx.replace(
       /^(---\n[\s\S]*?)(\n---\n)/,
       `$1\npublishedAt: ${publishedAtMs}$2`,
+    );
+
+    // Splice `pieceId` into frontmatter. Required by the content schema
+    // so the made-drawer's fetch to /api/daily/[date]/made can pass
+    // piece_id directly — required at multi-per-day to avoid pooling
+    // learnings across same-date pieces (the last multi-per-day
+    // correctness blocker before safely flipping interval_hours). Uses
+    // the same UUID that drives the daily_pieces INSERT below so the
+    // two sources agree on identity. See DECISIONS 2026-04-22
+    // "writeLearning piece_id extension".
+    currentMdx = currentMdx.replace(
+      /^(---\n[\s\S]*?)(\n---\n)/,
+      `$1\npieceId: "${pieceId}"$2`,
     );
 
     if (!passed) {
@@ -333,13 +348,10 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     const publishResult = await publisher.publishToPath(filePath, currentMdx, commitMsg);
 
     // Log to daily_pieces table. fact_check_passed reflects the last
-    // audit round, not an assumption. piece_id is captured into a local
-    // so the audio pipeline can thread it through the R2 key + D1
-    // filters (see cadence Phase 5 "Scope audio pipeline state per
-    // piece_id"). Without it, persistBeatRow would violate the
-    // NOT NULL piece_id PK column added by migration 0015.
+    // audit round, not an assumption. `pieceId` + `publishedAtMs` were
+    // captured earlier (before the frontmatter splice) so identity +
+    // timestamp agree between MDX and D1.
     const factsPassed = failedGates.includes('facts') ? 0 : 1;
-    const pieceId = crypto.randomUUID();
     await this.env.DB
       .prepare(
         `INSERT INTO daily_pieces (id, date, headline, underlying_subject, source_story, word_count, beat_count, voice_score, fact_check_passed, quality_flag, published_at, created_at)
@@ -389,6 +401,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // Learner. Brief is carried in the payload (small) so the
     // reflection prompt has the original ask alongside the MDX.
     await this.schedule(1, 'reflectOnPieceScheduled', {
+      pieceId,
       date: today,
       title: brief.headline,
       filePath: publishResult.filePath,
@@ -533,12 +546,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    * tokens-in/out + latency so cost drift is visible over time.
    */
   async reflectOnPieceScheduled(payload: {
+    pieceId: string;
     date: string;
     title: string;
     filePath: string;
     brief: DailyPieceBrief;
   }): Promise<void> {
-    const { date, title, filePath, brief } = payload;
+    const { pieceId, date, title, filePath, brief } = payload;
     const observer = await this.subAgent(ObserverAgent, 'observer');
     try {
       const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
@@ -551,7 +565,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         return;
       }
       const drafter = await this.subAgent(DrafterAgent, 'drafter');
-      const result = await drafter.reflect(brief, current.mdx, date);
+      const result = await drafter.reflect(brief, current.mdx, date, pieceId);
       await observer
         .logReflectionMetered(date, title, result)
         .catch(() => { /* observer write failure never blocks */ });

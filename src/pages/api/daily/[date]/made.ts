@@ -28,9 +28,17 @@ export const prerender = false;
  * Graceful degradation: if any one table is empty, its section in the
  * response is empty and the drawer hides that section client-side.
  */
-export const GET: APIRoute = async ({ params, locals }) => {
+export const GET: APIRoute = async ({ params, locals, url }) => {
   const db = locals.runtime.env.DB;
   const date = String(params.date ?? '').trim();
+  // Optional: pieceId query param. When present, the learnings
+  // section filters by piece_id (Phase 7 writeLearning piece_id
+  // extension). Other envelope sections (pipeline, audits, candidates,
+  // audio) stay date-keyed — day-view semantics per Phase 3 walk-back.
+  const pieceIdParam = url.searchParams.get('pieceId');
+  const pieceIdFilter = pieceIdParam && /^[0-9a-f-]{32,40}$/i.test(pieceIdParam)
+    ? pieceIdParam
+    : null;
 
   // Basic validation — date route param is YYYY-MM-DD.
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -242,12 +250,20 @@ export const GET: APIRoute = async ({ params, locals }) => {
   // day's audit rounds. Empty until 0012's piece_date column + backfill
   // landed (2026-04-20). Ordered by write time within each source.
   try {
-    const rows = await db
-      .prepare(
-        'SELECT observation, source, created_at FROM learnings WHERE piece_date = ? ORDER BY created_at ASC',
-      )
-      .bind(date)
-      .all<{ observation: string; source: string | null; created_at: number }>();
+    // When pieceId query param is valid, scope by piece_id (correct at
+    // multi-per-day). Otherwise fall back to piece_date (legacy, correct
+    // at 1/day). All 5 existing pieces have pieceId in frontmatter after
+    // the same-commit backfill, so the fallback path is defensive rather
+    // than load-bearing.
+    const rows = pieceIdFilter
+      ? await db
+          .prepare('SELECT observation, source, created_at FROM learnings WHERE piece_id = ? ORDER BY created_at ASC')
+          .bind(pieceIdFilter)
+          .all<{ observation: string; source: string | null; created_at: number }>()
+      : await db
+          .prepare('SELECT observation, source, created_at FROM learnings WHERE piece_date = ? ORDER BY created_at ASC')
+          .bind(date)
+          .all<{ observation: string; source: string | null; created_at: number }>();
     envelope.learnings = rows.results.map<MadeLearning>((r) => ({
       observation: r.observation,
       source: r.source,

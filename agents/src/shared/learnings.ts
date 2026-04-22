@@ -56,6 +56,7 @@ export async function writeLearning(
   confidence: number,
   source: LearningSource,
   pieceDate: string,
+  pieceId: string,
 ): Promise<void> {
   if (typeof source !== 'string' || source.length === 0) {
     await logMissingField(db, { field: 'source', category, observation, receivedType: source === null ? 'null' : typeof source }).catch(() => {
@@ -69,14 +70,20 @@ export async function writeLearning(
     });
     return;
   }
+  if (typeof pieceId !== 'string' || pieceId.length === 0) {
+    await logMissingField(db, { field: 'piece_id', category, observation, receivedType: pieceId === null ? 'null' : typeof pieceId }).catch(() => {
+      /* same rationale as above */
+    });
+    return;
+  }
 
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO learnings (id, category, observation, evidence, confidence, source, piece_date, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO learnings (id, category, observation, evidence, confidence, source, piece_date, piece_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, category, observation, JSON.stringify(evidence), confidence, source, pieceDate, Date.now())
+    .bind(id, category, observation, JSON.stringify(evidence), confidence, source, pieceDate, pieceId, Date.now())
     .run();
 }
 
@@ -90,7 +97,7 @@ export async function writeLearning(
  */
 async function logMissingField(
   db: D1Database,
-  ctx: { field: 'source' | 'piece_date'; category: string; observation: string; receivedType: string },
+  ctx: { field: 'source' | 'piece_date' | 'piece_id'; category: string; observation: string; receivedType: string },
 ): Promise<void> {
   const id = crypto.randomUUID();
   await db

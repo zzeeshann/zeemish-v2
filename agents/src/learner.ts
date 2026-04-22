@@ -262,7 +262,23 @@ Extract learnings for future pieces. What should the Drafter do differently next
       ? lessonData.lessonId.slice(0, 10)
       : null;
 
+    // Reader-path piece_id resolution. At interval_hours=24 (prod today)
+    // date uniquely identifies a piece, so a date-keyed lookup is safe.
+    // At multi-per-day the lookup picks an arbitrary same-date piece —
+    // reader engagement attribution would be wrong. Flagged in FOLLOWUPS
+    // "writeLearning doesn't persist piece_id" as a partial-fix
+    // limitation for the reader path; engagement table would need its
+    // own piece_id column for correct multi-per-day attribution.
+    let pieceIdForReader: string | null = null;
     if (pieceDate) {
+      const row = await this.env.DB
+        .prepare('SELECT id FROM daily_pieces WHERE date = ? LIMIT 1')
+        .bind(pieceDate)
+        .first<{ id: string }>();
+      pieceIdForReader = row?.id ?? null;
+    }
+
+    if (pieceDate && pieceIdForReader) {
       for (const learning of parsed.learnings) {
         try {
           await writeLearning(
@@ -277,6 +293,7 @@ Extract learnings for future pieces. What should the Drafter do differently next
             70,
             'reader',
             pieceDate,
+            pieceIdForReader,
           );
         } catch { /* learning write shouldn't break */ }
       }
@@ -444,6 +461,7 @@ ${logRes.results.map((r) => `- ${r.step} — ${r.status}`).join('\n')}`;
           60,
           'producer',
           date,
+          pieceId,
         );
         written += 1;
       } catch {
@@ -590,6 +608,7 @@ ${convoBlocks.join('\n\n')}`;
           60,
           'zita',
           date,
+          pieceId,
         );
         written += 1;
       } catch {
