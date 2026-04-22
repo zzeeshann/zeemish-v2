@@ -13,6 +13,20 @@ Format per entry:
 
 ---
 
+## [resolved] 2026-04-22: Late-caught multi-per-day blocker — same-date guard in `triggerDailyPiece` silently killed every non-first slot
+
+**Surfaced:** 2026-04-22 afternoon. User flipped `admin_settings.interval_hours=12` evening of 2026-04-21. The 02:00 UTC run published normally. The 14:00 UTC slot was expected to produce a second piece and didn't — zero pipeline_log entry, zero observer event, dashboard showed no trace. User opened with "check the issue, don't guess".
+
+**Hypothesis / root cause:** [agents/src/director.ts:140-146](../agents/src/director.ts:140) had a pre-Phase-3 guard: `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` → `if (existing) return null`. At `interval_hours=12`, the 14:00 UTC slot passed Phase 3's hourly gate (`(14 - 2 + 24) % 12 === 0`), entered `triggerDailyPiece`, matched the 02:00 UTC piece by calendar date, returned null *before* writing any logStep. Phase 1–7's multi-per-day audits keyed on `WHERE run_id = ?` paths and never examined this `WHERE date = ?` guard.
+
+**Fix:** slot-aware guard + observer-on-skip. See DECISIONS 2026-04-22 "Slot-aware guard for multi-per-day cadence" for full trade-offs. Guard now queries `WHERE published_at >= ?` bound to slotStartMs (top of current UTC hour). New `observer.logDailyRunSkipped` info-severity event fires on same-slot re-dispatch — silent skip is no longer possible. Today's missed 14:00 UTC slot backfilled via `/daily-trigger` with force=true after deploy.
+
+**Priority:** Blocker at any `interval_hours < 24`. At default 24, guard semantic is unchanged.
+
+**Resolved:** `<SHA>` (pending commit this session).
+
+---
+
 ## [resolved] 2026-04-21: Unblock multi-per-day flip — pre-run DELETEs + Learner input scoping
 
 **Surfaced:** 2026-04-21 during the Phase 3 pipeline_log consumer audit (see DECISIONS 2026-04-21 "Multi-piece cadence — Phase 3 hourly cron + runtime gate"). Three sites in the agents worker are scoped by `WHERE run_id = ? .bind(today)` or equivalent and behave correctly at 1 piece/day but pool across pieces at multi-per-day. `interval_hours` cannot be flipped below 24 until these are resolved.

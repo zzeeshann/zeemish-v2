@@ -74,6 +74,27 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Daily run entered triggerDailyPiece, passed Phase 3's hourly
+   *  cadence gate, but found a piece already published within the
+   *  current slot window. Expected protective behaviour when a cron
+   *  slot is re-dispatched (same-hour double-fire, SDK oddity, or
+   *  manual replay); info severity — nothing broke. Makes the skip
+   *  visible in the admin feed so "where did that run go?" has an
+   *  answer. Replaces the prior silent `return null`. */
+  async logDailyRunSkipped(
+    date: string,
+    intervalHours: number,
+    slotStartMs: number,
+    existingPieceId: string,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'info',
+      title: `Daily run skipped — slot already published`,
+      body: `Slot starting ${new Date(slotStartMs).toISOString()} (interval_hours=${intervalHours}) already has piece ${existingPieceId} for date ${date}. No action needed.`,
+      context: { date, intervalHours, slotStartMs, existingPieceId, reason: 'slot_already_published' },
+    });
+  }
+
   /** Audio landed — text + audio both live. Info severity, no action
    *  needed. Fires AFTER publisher.publishAudio second commit. */
   async logAudioPublished(

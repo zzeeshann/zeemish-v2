@@ -2,6 +2,65 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Slot-aware guard for multi-per-day cadence
+
+**Context:** User flipped `admin_settings.interval_hours=12` evening of 2026-04-21. The 02:00 UTC run on 2026-04-22 fired and published the ATC piece as expected. The 14:00 UTC slot should have produced a second piece — nothing appeared, no pipeline_log entry, no observer event. User asked "why didn't 2pm run, check the issue, don't guess".
+
+**Investigation:**
+- Live pipeline API confirmed `intervalHours:12` recorded in the 02:00 UTC scanning step — the admin setting was read correctly.
+- Last pipeline_log entry: `audio-publishing done` at T=1776826830410 (~03:40 UTC). Nothing at or after 14:00 UTC.
+- Phase 3 gate math for `interval_hours=12`: `(14 - 2 + 24) % 12 === 0` → PASSES. So `dailyRun` WAS invoked at 14:00 UTC; the hourly cron fired.
+- Silent-null path traced: [agents/src/director.ts:140-146](../agents/src/director.ts:140) `if (existing) return null` after `SELECT id FROM daily_pieces WHERE date = ? LIMIT 1` — bailed *before* writing the first `scanning` logStep, hence the zero trace.
+- Phase 1 through Phase 7's multi-per-day correctness audits never touched this guard. The CLAUDE.md claim "all multi-per-day correctness blockers resolved as of `cbf1f17`" was factually wrong.
+
+**Decision:** replace the calendar-day guard with a slot-window guard, and make the skip-path loud.
+
+**Slot-window guard (Change 1):**
+
+```ts
+if (!force) {
+  const now = new Date();
+  const slotStartMs = Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+    now.getUTCHours(), 0, 0, 0,
+  );
+  const existing = await this.env.DB
+    .prepare('SELECT id FROM daily_pieces WHERE published_at >= ? LIMIT 1')
+    .bind(slotStartMs)
+    .first<{ id: string }>();
+  if (existing) {
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    await observer.logDailyRunSkipped(today, intervalHours, slotStartMs, existing.id);
+    return null;
+  }
+}
+```
+
+Slot-start = top of the current UTC hour. Correct for any `interval_hours` value in `ALLOWED_INTERVAL_HOURS` because Phase 3's gate `(hour - 2 + 24) % intervalHours === 0` already rejected every non-slot-boundary hour before we reach `triggerDailyPiece`. At `interval_hours=24` slotStart rounds to 02:00 UTC and the guard's semantic matches the prior calendar-day behaviour for all practical purposes — no regression at current prod default.
+
+**Observer-on-skip (Change 2):** new `logDailyRunSkipped(date, intervalHours, slotStartMs, existingPieceId)` helper in observer.ts. Severity `info` — this is expected protective behaviour when a slot re-dispatches (SDK quirk, manual replay, clock drift). Visible in the admin observer feed. Replaces the prior silent `return null`. Going forward "where did that run go?" has an answer.
+
+**Why not remove the guard entirely:** defence-in-depth against double-publish within a single slot. If the Agents SDK cron ever double-dispatches (dedupe bug, manual re-registration, clock drift), the slot-window check catches it. Keeping the guard is cheap; losing the protection would be asymmetric risk.
+
+**Why not conditional guard `if (intervalHours >= 24) { /* old */ }`:** works but semantically wrong — it says "below 24h cadence, no same-slot protection at all." The slot-window guard is the right abstraction at every cadence.
+
+**Why `published_at` as the filter column (not `created_at`):** `published_at` is set to the same `Date.now()` value that flows into the MDX frontmatter at publish time. It's the authoritative "this slot's piece landed" timestamp. `created_at` on `daily_pieces` happens to be set to the same value today, but semantically `published_at` matches intent.
+
+**Why not add an index on `published_at`:** `daily_pieces` has 6 rows. Table scan is instant. Revisit if/when volume crosses ~10k.
+
+**Rollback point:** `61ae3fc` (pre-session HEAD, clean tree, origin in sync).
+
+**Retroactive fill:** user confirmed via AskUserQuestion that today's missed 14:00 UTC slot should be filled in. After deploy, POST `/daily-trigger` (force=true via admin secret) produces today's second piece. Natural 2026-04-23 02:00 UTC + 14:00 UTC slots continue uninterrupted.
+
+**Verification:**
+- Typecheck: 18 errors in `server.ts` (pre-existing SubAgent typing per CLAUDE.md convention), zero new errors in director.ts or observer.ts.
+- Not previewable — change lives in the agents worker (Director DO), which doesn't render through the Astro preview server. Verification is live (after deploy) via admin observer feed + next cron slot.
+- Post-deploy functional probes (in plan): guard-protects-within-slot, retroactive-fill-works, default-cadence-unaffected.
+
+**Closes the follow-on claim:** CLAUDE.md "Multi-piece cadence plan — status" block updated to reflect the late-caught regression and its same-session fix. Next multi-per-day correctness audit should check `WHERE date = ?` guards explicitly, not just `WHERE run_id = ?` paths.
+
+---
+
 ## 2026-04-22: Bump ElevenLabs per-attempt timeout 30s → 90s
 
 **Context:** The 2026-04-22 run's audio pipeline failed with `"The operation was aborted due to timeout"` after 131 seconds wall time. Two beats reached R2 (`hook` at 798 chars, `the-core-problem` at 2375 chars), then the producer stalled on `why-the-debt-compounds` at 2960 chars. Three retries × 30s timeout + backoffs ≈ 93s burned before the whole producer threw. Observer logged an escalation; text was already live; admin retry button was the documented recovery path.

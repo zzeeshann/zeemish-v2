@@ -136,22 +136,40 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     try {
     const today = new Date().toISOString().slice(0, 10);
 
-    // Guard: skip if today's piece already exists (bypassed when force=true)
-    if (!force) {
-      const existing = await this.env.DB
-        .prepare('SELECT id FROM daily_pieces WHERE date = ? LIMIT 1')
-        .bind(today)
-        .first();
-      if (existing) return null;
-    }
-
-    // Cadence config — multi-piece Phase 2 plumbing. Read-only in this
-    // phase; Phase 3 adds the hourly-cron gate that actually uses this
-    // value. Logged into the scanning step's data field so admin feed
-    // confirms the read path works before Phase 3 relies on it.
+    // Cadence config — read above the guard below because the guard's
+    // slot-start math depends on intervalHours. Phase 3's hourly-cron
+    // gate has already rejected non-slot hours before we reach here.
     const intervalHours = await getAdminSetting(
       this.env.DB, 'interval_hours', parseIntervalHours, 24
     );
+
+    // Guard: skip if a piece has already been published within the
+    // current slot (bypassed when force=true). The old shape checked
+    // `WHERE date = ?` which worked at 1-piece/day but silently killed
+    // every non-first slot at multi-per-day cadence — see DECISIONS
+    // 2026-04-22 "Slot-aware guard for multi-per-day cadence". Slot-
+    // start is the top of the current UTC hour: Phase 3's gate
+    // `(hour - 2 + 24) % intervalHours === 0` guarantees we only reach
+    // here on valid slot-boundary hours, so "this hour's minute 00"
+    // IS the slot start, regardless of interval. A successful run
+    // stamps daily_pieces.published_at to a timestamp within the slot
+    // window, so a same-slot re-dispatch catches it.
+    if (!force) {
+      const now = new Date();
+      const slotStartMs = Date.UTC(
+        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+        now.getUTCHours(), 0, 0, 0,
+      );
+      const existing = await this.env.DB
+        .prepare('SELECT id FROM daily_pieces WHERE published_at >= ? LIMIT 1')
+        .bind(slotStartMs)
+        .first<{ id: string }>();
+      if (existing) {
+        const observer = await this.subAgent(ObserverAgent, 'observer');
+        await observer.logDailyRunSkipped(today, intervalHours, slotStartMs, existing.id);
+        return null;
+      }
+    }
 
     // ─── Phase 1: Scanner ────────────────────────────────────────────
     this.enterPhase('scanner', `daily/${today}`);
