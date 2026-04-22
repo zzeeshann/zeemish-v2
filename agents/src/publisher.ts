@@ -231,7 +231,16 @@ function spliceAudioBeats(mdx: string, audioBeats: Record<string, string>): stri
   // Strip any existing audioBeats block: the line itself plus any
   // following indented (2-space) lines. Stops at the next unindented
   // line (either another frontmatter key or the closing ---).
-  const withoutExisting = mdx.replace(/\naudioBeats:\n(?:  .+\n)*/, '');
+  //
+  // Capture the leading `\n` in group 1 and restore it. Earlier shape
+  // (`/\naudioBeats:\n(?:  .+\n)*/ → ''`) consumed the newline, so
+  // `qualityFlag: "low"\naudioBeats:\n...\n---\n` became
+  // `qualityFlag: "low"---\n` — the downstream splice regex then
+  // couldn't find `\n---\n`, became a no-op, and publishAudio's
+  // idempotent guard (updatedMdx === current.mdx) skipped over a
+  // stripped-but-not-respliced file. Result: 2026-04-17 frontmatter
+  // corruption. Verified by agents/scripts/verify-splice.mjs.
+  const withoutExisting = mdx.replace(/(\n)audioBeats:\n(?:  .+\n)*/, '$1');
 
   const lines = Object.entries(audioBeats).map(
     ([key, url]) => `  ${key}: ${JSON.stringify(url)}`,

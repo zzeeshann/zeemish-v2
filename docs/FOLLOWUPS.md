@@ -369,7 +369,7 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 
 ---
 
-## [open] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path
+## [resolved] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path
 
 **Surfaced:** 2026-04-19 during retro audio generation for 2026-04-17. Admin "Continue" retry button (after a mid-pipeline silent stall at 4/8 beats) produced two `audio-publishing done` events in observer_events: 543651b (first, correct) and 02882fd (second, corrupted). The second commit deleted the audioBeats map and collapsed `qualityFlag: "low"\n---\n` onto a single line `qualityFlag: "low"---`.
 
@@ -383,6 +383,8 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 - Check Director's Continue path (`runAudioPipelineScheduled` + retryAudio) for whether it dedupes already-completed beats before invoking Producer. If Producer runs at all on Continue-when-already-done, Publisher will also get re-invoked.
 
 **Priority:** Medium. Manual recovery is a `git revert` (small, safe). Automated daily pipeline (2am UTC cron) does NOT exercise the Continue path, so tonight's run is unaffected. But any future manual retry risks corrupting the frontmatter again until this is fixed.
+
+**Resolved:** 2026-04-22 — root cause was bug 2 (the regex), not bug 1 (the double-fire). `spliceAudioBeats`'s strip regex `/\naudioBeats:\n(?:  .+\n)*/` consumed the leading `\n` before `audioBeats:`. On re-splice of an already-spliced file, strip produced `qualityFlag: "low"---\n` (newline lost), the splice regex then couldn't find `\n---\n` and became a no-op, and the idempotent guard `updatedMdx === current.mdx` failed because `withoutExisting` ≠ `current.mdx` — so publisher committed the stripped-but-not-respliced file. Fixed by capturing the leading newline `/(\n)audioBeats:\n(?:  .+\n)*/ → '$1'`. Covered by `agents/scripts/verify-splice.mjs` (4 test cases, runs as `pnpm verify-splice`). Double-firing is addressed separately by Phase E2 retryAudio short-circuit (below FOLLOWUPS). See DECISIONS 2026-04-22 "spliceAudioBeats regex consumed leading newline".
 
 ---
 

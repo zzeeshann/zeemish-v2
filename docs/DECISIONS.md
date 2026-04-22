@@ -2,6 +2,33 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: spliceAudioBeats regex consumed leading newline — root cause of 2026-04-17 frontmatter corruption
+
+**Context:** FOLLOWUPS `[open] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path` — 2026-04-17 retro audio produced two commits, the second collapsing `qualityFlag: "low"\n---\n` to `qualityFlag: "low"---` (no YAML terminator, broke content-collection parsing). Required a `git revert` to recover. FOLLOWUPS entry named two hypothetical bugs stacked: (1) Continue re-runs full pipeline, (2) publisher's idempotent guard should have caught the second commit but didn't. Entry said the corruption state "the regex logic on paper should not be able to generate."
+
+**Root cause (2026-04-22 investigation):** the regex CAN generate the corruption state. [`spliceAudioBeats`](../agents/src/publisher.ts) at line 234:
+```ts
+const withoutExisting = mdx.replace(/\naudioBeats:\n(?:  .+\n)*/, '');
+```
+consumes the `\n` BEFORE `audioBeats:`. Input `qualityFlag: "low"\naudioBeats:\n  beat-1: "url"\n---\n` becomes `qualityFlag: "low"---\n` — newline lost. The splice regex `/^(---\n[\s\S]*?)(\n---\n)/` then can't find `\n---\n` (there's no newline before `---` anymore), becomes a no-op, and returns `withoutExisting` unchanged. `updatedMdx === withoutExisting ≠ current.mdx`, so `publishAudio`'s idempotent guard at `publisher.ts:103` (`updatedMdx === current.mdx`) fails to fire. Publisher commits the stripped-but-not-respliced file. Verified via node-level reproducer.
+
+**Fix:** capture the leading newline in group 1 and restore it:
+```ts
+const withoutExisting = mdx.replace(/(\n)audioBeats:\n(?:  .+\n)*/, '$1');
+```
+Input `qualityFlag: "low"\naudioBeats:\n...\n---\n` now strips to `qualityFlag: "low"\n---\n` (newline preserved). Splice regex matches `\n---\n`, splice inserts the block, idempotent guard fires on identical audioBeats maps.
+
+**Regression test:** [`agents/scripts/verify-splice.mjs`](../agents/scripts/verify-splice.mjs) — 4 cases covering (1) fresh MDX adds block, (2) idempotent re-splice with identical map, (3) re-splice with different map preserves frontmatter terminator (the 2026-04-17 corruption case), (4) audioBeats followed by another frontmatter key — strip removes only audioBeats, keeps sibling. Runs as `pnpm verify-splice` in the `agents/` workspace. Node-level pure string transformation — no worker setup needed.
+
+**Trade-offs:**
+- Case 4 surfaces an existing behavior: re-splice moves the audioBeats block to end-of-frontmatter (splice regex always inserts before closing `---`). The content schema doesn't care about frontmatter key order, so this is a non-regression. Documented in the test comment.
+- The fix is in the pure regex transformation — no MDX parser dependency, no runtime semantics change beyond the bug. Existing good commits stay as-is (no re-publish required).
+- Continue button double-fire is a separate concern — Phase E2 short-circuits `retryAudio` when `has_audio=1`. But even without E2, E1 alone means a double-click now produces two IDENTICAL commits (no-op second) instead of one correct + one corrupted.
+
+**Files:** [agents/src/publisher.ts](../agents/src/publisher.ts), [agents/scripts/verify-splice.mjs](../agents/scripts/verify-splice.mjs), [agents/package.json](../agents/package.json).
+
+---
+
 ## 2026-04-22: Admin Zita grouped by piece_id (Phase D of multi-per-day audit)
 
 **Context:** FOLLOWUPS audit entry point #2. `zita_messages` has had a `piece_id` column since migration 0014 (Phase 1 of multi-per-day cadence work) but the admin Zita page (`/dashboard/admin/zita/`) never consumed it — conversations were grouped by `(user_id, piece_date)`, pooling at multi-per-day, and headlines were looked up via `daily_pieces WHERE date IN (...)` which overwrites in the title Map when multiple pieces share a date.
