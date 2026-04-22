@@ -57,8 +57,9 @@ Learner: runs off-pipeline on reader engagement data
 - **Role:** Picks the most teachable story from today's candidates and plans its structure (beats, hooks, teaching angle).
 - **Selection criteria:** Teachability, universality, freshness, depth potential, no culture war.
 - **Input:** `DailyCandidate[]` + recent piece headlines (30-day history)
-- **Output:** `DailyPieceBrief` or `{ skip: true, reason }`
+- **Output:** `DailyPieceBrief` or `{ skip: true, reason }` — includes `selectedCandidateId: string` (the exact UUID of the chosen `daily_candidates.id` row). Director uses it to flip `selected = 1` on that row, which drives the "picked candidate" teal-dot marker on the per-piece admin deep-dive.
 - **Method:** `curate(candidates, recentPieces)`
+- **Prompt contract (2026-04-22 fix):** `buildCuratorPrompt` renders each candidate with an `id: <uuid>` line so Claude can return a real row id; prompt instruction explicitly says "selectedCandidateId MUST be the exact id string shown above — do not invent, truncate, or guess." Before this fix the UUIDs weren't in the prompt at all — Claude guessed, the UPDATE matched 0 rows, and `.catch(() => {})` hid the silent failure. Director now logs via `observer.logError` on (a) UPDATE throw, (b) `meta.changes === 0`, (c) Curator returning no `selectedCandidateId`. See DECISIONS 2026-04-22 "Curator prompt exposes candidate UUIDs".
 - **File:** `agents/src/curator.ts`
 - **Prompt:** `agents/src/curator-prompt.ts`
 
@@ -147,8 +148,9 @@ Learner: runs off-pipeline on reader engagement data
 
 ### 13. ObserverAgent
 - **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `getRecentEvents()`, `getDailyDigest()`
-- **Site-origin events (new 2026-04-21):** `zita_history_truncated`, `zita_rate_limited`, `zita_claude_error`, `zita_handler_error` — written directly from `src/pages/api/zita/chat.ts` via [`src/lib/observer-events.ts`](../src/lib/observer-events.ts), which mirrors this agent's `writeEvent` shape. Same table, same feed — the admin Observer section doesn't discriminate by origin.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logDailyRunSkipped()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `getRecentEvents()`, `getDailyDigest()`
+- **piece_id threading (2026-04-22, migration 0020):** every piece-scoped helper accepts an optional trailing `pieceId: string | null = null`. Director threads piece_id through all 13 call sites — pieceId is pre-allocated at `triggerDailyPiece` top per the multi-per-day piece_id schema fix. `logDailyRunSkipped` uses the EXISTING piece's id (the piece blocking the slot). System events (admin_settings_changed, zita_rate_limited, zita_claude_error, zita_handler_error) stay piece_id=NULL — they're cross-cutting, not per-piece. Per-piece admin query prefers `WHERE piece_id = ?` with a 36h OR-fallback for legacy NULL rows (pre-0020 events + site-worker events that haven't threaded pieceId yet). See DECISIONS 2026-04-22 "observer_events.piece_id column for per-piece admin scoping".
+- **Site-origin events (2026-04-21):** `zita_history_truncated`, `zita_rate_limited`, `zita_claude_error`, `zita_handler_error` — written directly from `src/pages/api/zita/chat.ts` via [`src/lib/observer-events.ts`](../src/lib/observer-events.ts), which mirrors this agent's `writeEvent` shape. Same table, same feed — the admin Observer section doesn't discriminate by origin. The site-worker helper signature gained an optional `pieceId` field in 0020 but current call sites don't populate it (would need zita-chat client to receive + forward piece_id — deferred as a cross-cutting refactor).
 - **File:** `agents/src/observer.ts`
 
 ## Endpoints
