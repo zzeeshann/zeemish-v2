@@ -24,11 +24,25 @@ class LessonShell extends HTMLElement {
     return `zeemish-beat:${window.location.pathname}`;
   }
 
-  /** Extract content info from URL: /daily/{date}/ */
-  private get lessonInfo(): { course_slug: string; lesson_number: number; piece_date: string } | null {
-    const dailyMatch = window.location.pathname.match(/\/daily\/(\d{4}-\d{2}-\d{2})\/?/);
+  /**
+   * Extract content info from URL: /daily/{date}/{slug}/
+   *
+   * `piece_id` is injected as `data-piece-id` on this element by the
+   * rehype-beats build-time plugin, sourced from MDX frontmatter.
+   * Undefined on pre-Phase-7 HTML bundles — engagement tracking still
+   * works via the per-piece-date PK row for those, but post-migration
+   * code paths prefer piece_id for multi-per-day correctness.
+   */
+  private get lessonInfo(): { course_slug: string; lesson_number: number; piece_date: string; piece_id: string | undefined } | null {
+    const dailyMatch = window.location.pathname.match(/\/daily\/(\d{4}-\d{2}-\d{2})\//);
     if (dailyMatch) {
-      return { course_slug: 'daily', lesson_number: 0, piece_date: dailyMatch[1] };
+      const pieceId = this.dataset.pieceId;
+      return {
+        course_slug: 'daily',
+        lesson_number: 0,
+        piece_date: dailyMatch[1],
+        piece_id: pieceId && pieceId.length > 0 ? pieceId : undefined,
+      };
     }
     return null;
   }
@@ -226,6 +240,7 @@ class LessonShell extends HTMLElement {
       body: JSON.stringify({
         course_id: info.course_slug,
         lesson_id: info.piece_date ?? `${info.course_slug}/${info.lesson_number}`,
+        piece_id: info.piece_id,
         event_type: eventType,
         beat,
       }),

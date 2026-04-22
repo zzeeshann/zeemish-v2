@@ -50,7 +50,9 @@ let avgRevisionsLifetime: number | null = null;
 let pipelineHistory: { runId: string; finalStep: string; finalStatus: string; data: any; tMs: number }[] = [];
 
 type EngagementRow = {
+  piece_id: string;
   lesson_id: string;
+  piece_date: string | null;
   views: number;
   completions: number;
   audio_plays: number;
@@ -149,20 +151,26 @@ try {
     tMs: r.created_at,
   }));
 
-  // Engagement per daily piece. lesson-shell POSTs course_id='daily', lesson_id={piece_date}.
-  // Aggregate across activity dates (engagement.date) so each piece is one row.
+  // Engagement per daily piece. Aggregate by piece_id (migration 0017)
+  // so two pieces sharing a date at multi-per-day get their own rows.
+  // Join daily_pieces to pull the canonical piece date for sort + deep
+  // link; lesson_id is carried for display compat with pre-0017 rows
+  // (where it held piece_date).
   const engagementRes = await db
     .prepare(
-      `SELECT lesson_id,
-              SUM(views) AS views,
-              SUM(completions) AS completions,
-              SUM(audio_plays) AS audio_plays,
-              MAX(drop_off_beat) AS top_drop_off,
-              MAX(date) AS last_active
-       FROM engagement
-       WHERE course_id = 'daily'
-       GROUP BY lesson_id
-       ORDER BY lesson_id DESC
+      `SELECT e.piece_id,
+              MAX(e.lesson_id) AS lesson_id,
+              dp.date AS piece_date,
+              SUM(e.views) AS views,
+              SUM(e.completions) AS completions,
+              SUM(e.audio_plays) AS audio_plays,
+              MAX(e.drop_off_beat) AS top_drop_off,
+              MAX(e.date) AS last_active
+       FROM engagement e
+       LEFT JOIN daily_pieces dp ON dp.id = e.piece_id
+       WHERE e.course_id = 'daily'
+       GROUP BY e.piece_id
+       ORDER BY dp.published_at DESC, MAX(e.date) DESC
        LIMIT 30`,
     )
     .all<EngagementRow>();
@@ -413,10 +421,10 @@ function shortDate(iso: string): string {
           const completionPct = e.views > 0 ? Math.round((e.completions / e.views) * 100) : 0;
           return (
             <li>
-              <a href={`/dashboard/admin/piece/${e.lesson_id}/`} class="flex items-start gap-4 py-3 group">
+              <a href={`/dashboard/admin/piece/${e.piece_date ?? e.lesson_id}/`} class="flex items-start gap-4 py-3 group">
                 <div class="flex-1 min-w-0">
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
-                    <span class="text-zee-text font-medium">{shortDate(e.lesson_id)}</span>
+                    <span class="text-zee-text font-medium">{shortDate(e.piece_date ?? e.lesson_id)}</span>
                     <span class="opacity-40" aria-hidden="true">·</span>
                     <span><span class="text-zee-text">{e.views}</span> {e.views === 1 ? 'view' : 'views'}</span>
                     <span class="opacity-40" aria-hidden="true">·</span>

@@ -105,6 +105,11 @@ export default function rehypeBeats() {
       fm && typeof fm.beatTitles === 'object' && fm.beatTitles !== null
         ? (fm.beatTitles as Record<string, string>)
         : undefined;
+    // piece_id flows from frontmatter to `<lesson-shell data-piece-id>`
+    // so the web component can attribute engagement events per-piece
+    // rather than per-piece_date (which collides at multi-per-day).
+    // Added Phase 7 engagement piece_id wiring (2026-04-22).
+    const pieceId = fm && typeof fm.pieceId === 'string' ? fm.pieceId : undefined;
 
     const preContent = children.slice(0, h2Indices[0]);
     const beats: HastElement[] = [];
@@ -138,7 +143,7 @@ export default function rehypeBeats() {
     const shell: HastElement = {
       type: 'element',
       tagName: 'lesson-shell',
-      properties: {},
+      properties: pieceId ? { 'data-piece-id': pieceId } : {},
       children: beats,
     };
 

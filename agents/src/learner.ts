@@ -73,6 +73,7 @@ export interface EngagementReport {
 
 export interface UnderperformingLesson {
   lessonId: string;
+  pieceId: string;
   views: number;
   completions: number;
   completionRate: number;
@@ -82,6 +83,7 @@ export interface UnderperformingLesson {
 
 export interface LessonMetric {
   lessonId: string;
+  pieceId: string;
   views: number;
   completions: number;
   completionRate: number;
@@ -141,7 +143,10 @@ export class LearnerAgent extends Agent<Env, LearnerState> {
 
   // --- Engagement analysis ---
 
-  /** Analyse engagement for a content stream over the last N days */
+  /** Analyse engagement for a content stream over the last N days.
+   *  Aggregates by piece_id (migration 0017) — at multi-per-day cadence
+   *  two pieces sharing a date are kept separate. `lesson_id` is held
+   *  alongside piece_id via MAX() for display. */
   async analyse(courseId: string, days = 7): Promise<EngagementReport> {
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -149,17 +154,19 @@ export class LearnerAgent extends Agent<Env, LearnerState> {
 
     const result = await this.env.DB
       .prepare(
-        `SELECT lesson_id,
+        `SELECT piece_id,
+                MAX(lesson_id) as lesson_id,
                 SUM(views) as total_views,
                 SUM(completions) as total_completions,
                 GROUP_CONCAT(drop_off_beat) as drop_off_beats
          FROM engagement
          WHERE course_id = ? AND date >= ?
-         GROUP BY lesson_id
-         ORDER BY lesson_id`,
+         GROUP BY piece_id
+         ORDER BY piece_id`,
       )
       .bind(courseId, sinceStr)
       .all<{
+        piece_id: string;
         lesson_id: string;
         total_views: number;
         total_completions: number;
@@ -168,6 +175,7 @@ export class LearnerAgent extends Agent<Env, LearnerState> {
 
     const metrics: LessonMetric[] = result.results.map((r) => ({
       lessonId: r.lesson_id,
+      pieceId: r.piece_id,
       views: r.total_views,
       completions: r.total_completions,
       completionRate: r.total_views > 0 ? Math.round((r.total_completions / r.total_views) * 100) : 0,
@@ -194,6 +202,7 @@ export class LearnerAgent extends Agent<Env, LearnerState> {
 
         return {
           lessonId: r.lesson_id,
+          pieceId: r.piece_id,
           views: r.total_views,
           completions: r.total_completions,
           completionRate: rate,
@@ -253,32 +262,19 @@ Extract learnings for future pieces. What should the Drafter do differently next
       parsed = { learnings: [] };
     }
 
-    // Daily-piece lessonIds follow the system-wide `YYYY-MM-DD-<kebab-slug>`
-    // invariant (MDX filename, /daily/[date]/ routing, library sort). If a
-    // non-conforming lessonId somehow reaches this path, skip the write
-    // rather than inventing a date — writeLearning's non-null pieceDate
-    // invariant exists specifically to keep garbage out of the column.
-    const pieceDate = /^\d{4}-\d{2}-\d{2}-/.test(lessonData.lessonId)
-      ? lessonData.lessonId.slice(0, 10)
-      : null;
+    // Piece attribution at multi-per-day: `lessonData.pieceId` comes
+    // directly from the engagement row (migration 0017 made piece_id
+    // part of engagement's PK), so no date-based lookup is needed.
+    // piece_date derives from the matching daily_pieces row for the
+    // pieceDate column on learnings. Same defensive skip on missing
+    // piece as before — silent drop, Drafter never sees garbage.
+    const pieceRow = await this.env.DB
+      .prepare('SELECT date FROM daily_pieces WHERE id = ? LIMIT 1')
+      .bind(lessonData.pieceId)
+      .first<{ date: string }>();
+    const pieceDate = pieceRow?.date ?? null;
 
-    // Reader-path piece_id resolution. At interval_hours=24 (prod today)
-    // date uniquely identifies a piece, so a date-keyed lookup is safe.
-    // At multi-per-day the lookup picks an arbitrary same-date piece —
-    // reader engagement attribution would be wrong. Flagged in FOLLOWUPS
-    // "writeLearning doesn't persist piece_id" as a partial-fix
-    // limitation for the reader path; engagement table would need its
-    // own piece_id column for correct multi-per-day attribution.
-    let pieceIdForReader: string | null = null;
-    if (pieceDate) {
-      const row = await this.env.DB
-        .prepare('SELECT id FROM daily_pieces WHERE date = ? LIMIT 1')
-        .bind(pieceDate)
-        .first<{ id: string }>();
-      pieceIdForReader = row?.id ?? null;
-    }
-
-    if (pieceDate && pieceIdForReader) {
+    if (pieceDate && lessonData.pieceId) {
       for (const learning of parsed.learnings) {
         try {
           await writeLearning(
@@ -293,7 +289,7 @@ Extract learnings for future pieces. What should the Drafter do differently next
             70,
             'reader',
             pieceDate,
-            pieceIdForReader,
+            lessonData.pieceId,
           );
         } catch { /* learning write shouldn't break */ }
       }
