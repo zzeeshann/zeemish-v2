@@ -124,11 +124,7 @@ Visit https://zeemish.io/dashboard/admin/ and use
 the trigger button (requires ADMIN_EMAIL login).
 
 ### Automatic
-The Director runs every day at 2:00 AM UTC (including weekends). It
-scans news, picks the most teachable story, drafts, audits, and
-publishes. Piece is ready by ~4:00 AM UTC. If the news is thin (rare,
-but possible on quiet weekends), Curator's skip path logs "No teachable
-stories" via Observer and the day is left blank.
+The Director runs on an hourly cron, gated by `admin_settings.interval_hours` (see [`src/pages/dashboard/admin/settings.astro`](../src/pages/dashboard/admin/settings.astro)). At the default value 24, only the 02:00 UTC slot fires — preserving the "every morning" cadence. Admins can flip to 1/2/3/4/6/8/12 hours via the settings page without a redeploy; change propagates at the next hourly alarm. It scans news, picks the most teachable story, drafts, audits, and publishes. At the default cadence the piece is ready by ~04:00 UTC. If the news is thin (rare, but possible on quiet weekends), Curator's skip path logs "No teachable stories" via Observer and the slot is left blank.
 
 ### Check Director status
 ```bash
@@ -238,7 +234,7 @@ curl "https://zeemish-agents.zzeeshann.workers.dev/engagement?course=daily" \
 ### How the synthesis fires (automatic is the default)
 The P1.5 synthesis runs **automatically**, you don't need to do anything:
 
-- Every day a new piece publishes at 02:00 UTC. That same run schedules a synthesis for 01:45 UTC **on the next day**, targeting **today's piece**. The 23h45m gap lets a full day of reader traffic accumulate before the synthesis looks at the chats.
+- Each piece publishes on the cron slot (default: once daily at 02:00 UTC). That same run schedules a synthesis at `publish + 23h45m` (85,500 seconds), relative to each piece individually. At the default cadence that lands at ~01:45 UTC the next day, just before the next 02:00 UTC run; at multi-per-day cadences every piece gets its own ~24h reader window before synthesis fires. Phase 6 (2026-04-21) moved this from an absolute clock target to a relative-delay-per-piece to avoid stacking synth jobs at multi-per-day.
 - If the piece got ≥5 reader messages, the synthesis runs, writes up to 10 `source='zita'` rows into `learnings`, and those rows flow into the next Drafter prompt via `getRecentLearnings(10)`.
 - If it got fewer than 5, the synthesis skips silently (one `info` observer event, zero Claude cost).
 - Failures are non-retriable: one `warn` observer event ("Zita synthesis missed: …"), and the loop moves on. The piece is already live and permanent — a missed batch of learnings is recoverable via manual trigger.
@@ -277,7 +273,7 @@ Every synthesis run — skipped or success — writes a `logZitaSynthesisMetered
 | Max stored content length | 4,000 chars | `ZITA_STORED_CONTENT_CAP` | Hard ceiling on what lands in `zita_messages.content` — appends `[…truncated]` marker if hit |
 | Synthesis minimum threshold | 5 reader messages per piece | `ZITA_SYNTHESIS_MIN_USER_MESSAGES` in [`agents/src/learner.ts`](../agents/src/learner.ts) | Below this, synthesis skips without calling Claude |
 | Synthesis write cap | 10 learnings per run | `ZITA_LEARNINGS_WRITE_CAP` | If Claude produces more, overflow is logged via observer |
-| Synthesis schedule | 01:45 UTC on day+1 | [`agents/src/director.ts`](../agents/src/director.ts) `triggerDailyPiece` | Just before next 02:00 UTC pipeline; gives readers a full day to chat |
+| Synthesis schedule | publish + 23h45m (per piece) | [`agents/src/director.ts`](../agents/src/director.ts) `triggerDailyPiece` | Same ~24h reader window regardless of publish time; no stacking at multi-per-day cadences |
 | Claude model + max_tokens | Sonnet 4.5, 300 per turn | chat.ts | Short replies enforced at the API level |
 | Synthesis max_tokens | 2,000 | `learner.ts` synthesis call | Enough for 10 learnings |
 

@@ -6,7 +6,7 @@ Daily teaching, anchored in today's news, produced by a pipeline of specialised 
 
 ---
 
-Every day at 2am UTC, a pipeline of 13 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, and publishes it to the live site. No human touches the piece before you read it.
+Every morning, a pipeline of 13 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, and publishes it to the live site. No human touches the piece before you read it. Cadence is admin-configurable (default: one piece daily at 02:00 UTC).
 
 You see the result the next morning — a daily teaching piece anchored in today's news, in plain English, with audio narration. A growing library of past pieces. No login needed to read.
 

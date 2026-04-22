@@ -42,7 +42,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 4 — Agent Team (complete — 13 agents, all wired)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
-- [x] DirectorAgent — pure orchestrator, zero LLM calls, scheduled daily at 2am UTC, manual trigger
+- [x] DirectorAgent — pure orchestrator, zero LLM calls, hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC only), manual trigger
 - [x] CuratorAgent — picks most teachable story, plans beats (restored from v10 deletion; owns its prompt file)
 - [x] DrafterAgent — writes MDX from brief (restored from v10 deletion; owns its prompt file)
 - [x] VoiceAuditorAgent — scores voice compliance 0-100, ≥85 to pass (owns its prompt file)
@@ -98,7 +98,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Home page redesign — today's piece prominent, library below
 - [x] D1 tables: daily_candidates, daily_pieces (migration 0006)
 - [x] Content collection: dailyPieces with date/newsSource/underlyingSubject schema
-- [x] Scheduled: Scanner + Director at 2am UTC every day (including weekends)
+- [x] Scheduled: Director on hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC every day including weekends)
 - [x] First daily piece published and live
 
 ## What's NOT built (honest gaps)

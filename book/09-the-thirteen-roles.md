@@ -20,7 +20,7 @@ Here they are, in the order they run.
 
 **Job:** Route work between agents. Keep the pipeline moving.
 
-**What it does:** When 2am UTC hits, Director wakes up. It calls Scanner. When Scanner finishes, it calls Curator. When Curator finishes, it calls Drafter. And so on. It is the conductor. It does not do any of the work itself.
+**What it does:** Director wakes up on a cron — default 02:00 UTC daily, admin-configurable via `admin_settings.interval_hours`. It calls Scanner. When Scanner finishes, it calls Curator. When Curator finishes, it calls Drafter. And so on. It is the conductor. It does not do any of the work itself.
 
 **Claude call?** No. Zero. This is the explicit design — one pure orchestrator, no model calls, no judgment. Just routing.
 

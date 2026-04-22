@@ -22,7 +22,7 @@ Every term this book uses, in plain English. If you see a word you don't recogni
 
 **Commit.** A saved snapshot of a change in Git, with a message explaining what changed.
 
-**Cron.** A scheduled task that runs at a set time. Zeemish's daily pipeline runs on a cron set for 2am UTC.
+**Cron.** A scheduled task that runs at a set time. Zeemish's pipeline runs on an hourly cron gated by `admin_settings.interval_hours` — at the default (24) only the 02:00 UTC slot fires, so in practice it's once a day.
 
 **D1.** Cloudflare's relational database service. Based on SQLite. Zeemish uses it for structured data (pieces, audit results, learnings, users). See chapter 4.
 

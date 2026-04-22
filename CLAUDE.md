@@ -225,7 +225,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
-7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching every day at 2am UTC
+7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching on hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day; admin-configurable)
 8. **Dashboard:** Public factory floor (/dashboard/) + admin control room (/dashboard/admin/)
 
 ## Architecture
@@ -248,7 +248,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner runs off-pipeline, watching readers.
 
 1. **ScannerAgent** — reads the news every morning
-2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Scheduled 2am UTC every day.
+2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day).
 3. **CuratorAgent** — picks the most teachable story from today's candidates, plans beats + hook + teaching angle
 4. **DrafterAgent** — writes the MDX from the brief, enforces `<lesson-shell>` / `<lesson-beat>` format
 5. **VoiceAuditorAgent** — voice compliance gate (≥85/100)

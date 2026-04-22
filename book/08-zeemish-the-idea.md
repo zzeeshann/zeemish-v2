@@ -44,7 +44,7 @@ The format is deliberately tight. 1,000–1,500 words. No more. If the subject i
 
 A daily publication needs someone writing it daily. Most newspapers have hundreds of journalists. A one-person operation producing something this consistent would burn out in a month. Zeemish doesn't want to be a burnout machine.
 
-Instead, Zeemish uses a system of AI agents to do the daily production work. Scanner reads the news. Curator picks the story. Drafter writes the piece. Auditors check it. Publisher ships it. This runs every day at 2am UTC, without a human involved.
+Instead, Zeemish uses a system of AI agents to do the daily production work. Scanner reads the news. Curator picks the story. Drafter writes the piece. Auditors check it. Publisher ships it. This runs on a cron set in admin settings — by default, once a day at 02:00 UTC — without a human involved.
 
 This is the "agents" side of Zeemish. It is not the interesting part, ultimately. It's just how the daily piece gets made. The interesting part is that a daily piece exists at all, and that it's genuinely useful.
 

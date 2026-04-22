@@ -47,7 +47,7 @@ Learner: runs off-pipeline on reader engagement data
 ### 2. DirectorAgent
 - **Role:** Pure orchestrator. Routes work between agents. Zero LLM calls.
 - **State:** `{ status: 'idle' | 'running' | 'error', currentPhase, currentTask, lastDailyPiece, error }`
-- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (scheduled 2am UTC every day)
+- **Methods:** `triggerDailyPiece()`, `getStatus()`, `dailyRun()` (hourly cron; gates on `admin_settings.interval_hours` — at default 24 only the 02:00 UTC slot fires)
 - **Spawns:** Scanner, Curator, Drafter, auditors, Integrator, Publisher, Observer as sub-agents
 - **Writes `pipeline_log`:** step-by-step log visible in admin dashboard
 - **File:** `agents/src/director.ts`
