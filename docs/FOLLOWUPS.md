@@ -13,6 +13,49 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
+
+**Surfaced:** 2026-04-22 end of session. User viewing `/dashboard/admin/piece/2026-04-22/uk-bill-bans-.../` after the piece_id schema fix shipped noticed the **Observer events this day** section still pools both same-date pieces' events on each piece's page (admin-settings change + both pieces' `Published`, `Reflection`, `Audio failure`, `Audio published` events — 9 events total visible when the piece only generated ~3 of them). Intentional by the schema-fix design (kept as 36h day window) but not what an operator viewing a per-piece deep-dive expects. Broader request: a comprehensive audit of admin + dashboard + public surfaces for any remaining pooling, stale references, or inconsistencies the Phase 1-5 schema fix didn't address.
+
+**Observer events on per-piece admin specifically:**
+- [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/%5Bdate%5D/%5Bslug%5D.astro) around the observer_events query — currently bound on `created_at >= startOfDay AND created_at < endWindow` (36h window). At multi-per-day this surfaces every event for the day regardless of which piece it's about.
+- `observer_events` has no `piece_id` column. Events are free-form `{severity, title, body, context}` JSON. `title` and `body` often contain the piece headline (e.g. "Published: UK bill bans...", "Reflection: $12.5 billion..."); some events (admin_settings_changed, zita_rate_limited) aren't piece-scoped at all.
+- Two fix paths:
+  1. **Add `observer_events.piece_id` column** (migration) + thread piece_id through every `observer.log*` call site in agents + site workers. Clean, matches the schema-fix pattern from this session.
+  2. **Filter client-side by headline substring match** — hack, brittle against title format drift, but needs no schema work. Acceptable for the subset of events that embed the headline (publish / reflection / audio-*); "system" events (admin_settings_changed, cron skips) stay on a separate feed.
+
+**Broader admin + dashboard + public cleanup items to surface during the audit:**
+
+1. **Admin home** (`/dashboard/admin/`):
+   - Observer events section is global (last 30 by created_at DESC) — is that the right scope or should it filter by ack status / severity mix?
+   - "All pieces" list links to per-piece admin page via `adminPieceHref(date, pieceId?)` — verify the slug lookup works for every historical piece (had a fallback path pre-Phase-7).
+   - Pipeline history (last 14 runs grouped by run_id = date) — at multi-per-day a "run" is a day, grouping hides per-piece run quality. Worth a per-piece grouping mode.
+   - Engagement widget `GROUP BY piece_id` (migration 0017 post) — verify no stale `GROUP BY lesson_id` fragments.
+
+2. **Admin Zita page** (`/dashboard/admin/zita/`):
+   - Groups conversations by `(user_id, piece_date)`. Verify at multi-per-day the grouping doesn't pool Zita chats from different same-date pieces (zita_messages has piece_id since migration 0013/0014 — check the query uses it).
+   - Per-piece admin's "Questions from readers" section should match.
+
+3. **Public dashboard** (`/dashboard/`):
+   - "Today's piece" hero at [`src/pages/dashboard/index.astro:59`](../src/pages/dashboard/index.astro) — open residual-sites entry below notes `WHERE date = ? LIMIT 1` picks arbitrary at multi-per-day. 1-line fix.
+   - "How it's holding up" signals, "What we've learned so far" panel, week's output stat grid — verify queries scope sensibly at multi-per-day (day-aggregates should stay date-keyed, per-piece counts should use piece_id).
+   - Recent pieces list + library list sorted by `published_at DESC` — already correct post-Phase-4.
+
+4. **`daily_candidates.selected` never-flipped bug** — separate FOLLOWUPS entry, but audit surfaced it again: 0 rows across all 7 piece_ids have `selected=1`, so admin per-piece "Picked candidate marked with teal dot" never renders the teal dot. Curator's `selectedCandidateId` return value either isn't populated or doesn't match any candidate UUID. Investigate alongside this audit.
+
+5. **Frontmatter splice vs daily_pieces.word_count drift** — Drafter reports wordCount at draft time (e.g. 1080), Director's INSERT computes `currentMdx.split(/\s+/).length` on POST-splice MDX which adds a few words (voiceScore, publishedAt, pieceId frontmatter lines). Admin page shows the INSERT value (1086); pipeline timeline shows Drafter's value (1080). Minor; consider showing both or one canonical number.
+
+6. **Reset-today.sh at multi-per-day** — separate FOLLOWUPS entry, still open. Worth revisiting during the audit because the broken teal-dot + the reset-day semantic are both "day-keyed intent but multi-per-day reality."
+
+**Investigation hints:**
+- Start with a grep sweep: `grep -rn "WHERE date = \|WHERE run_id = \|WHERE task_id = 'daily/" src/ agents/src/`. Every match should be categorized as either "keep date-keyed (day-aggregate view)" or "switch to piece_id". The 7 day-aggregation queries from the 2026-04-22 piece_id schema fix plan are canonically kept; any new ones need the same classification.
+- Admin per-piece page is the highest-visibility surface — start there. Public dashboard hero is next.
+- For observer_events specifically: count events per piece per day to gauge how much pooling is happening — at 1/day it's a non-issue, at 12h it's ~2x, at 1h it's ~24x.
+
+**Priority:** Medium. No correctness regression (data itself is honest, just pooled); UX fidelity for operators at multi-per-day. Not a blocker.
+
+---
+
 ## [resolved] 2026-04-22: Late-caught multi-per-day blocker — same-date guard in `triggerDailyPiece` silently killed every non-first slot
 
 **Surfaced:** 2026-04-22 afternoon. User flipped `admin_settings.interval_hours=12` evening of 2026-04-21. The 02:00 UTC run published normally. The 14:00 UTC slot was expected to produce a second piece and didn't — zero pipeline_log entry, zero observer event, dashboard showed no trace. User opened with "check the issue, don't guess".
