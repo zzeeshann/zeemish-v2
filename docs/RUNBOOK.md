@@ -147,12 +147,29 @@ duplicate state from multiple runs.
 ### One command
 ```bash
 export ADMIN_SECRET="..."   # same as AGENTS_ADMIN_SECRET
+
+# Full-day reset (default) — wipes every piece for today's date:
 ./scripts/reset-today.sh
+
+# Single-piece reset (multi-per-day cadence) — wipes just that piece:
+./scripts/reset-today.sh --piece-id ab95f0f8-b419-4e2e-95a8-46ca0290957a
+
+# Single-piece reset + fresh pipeline run (also needs ADMIN_SECRET):
+./scripts/reset-today.sh --piece-id <uuid> --retrigger
 ```
-The script does the three steps below (git rm + D1 clear + trigger) in
-order, pushes the cleanup commit, and prints the run's HTTP status.
-Runs in under a minute including the push wait. See
-`scripts/reset-today.sh` for what it actually executes.
+Default mode does three steps (git rm + D1 clear + trigger) in order,
+pushes the cleanup commit, and prints the run's HTTP status. Runs in
+under a minute including the push wait.
+
+`--piece-id` mode scopes every delete by piece_id on the nine
+piece-id-capable tables, plus a ±20min time window around the piece's
+`published_at` for pipeline_log + observer_events (the two without a
+piece_id column; matches Learner's synthesis window math). git rm
+matches the MDX by `pieceId: "<uuid>"` frontmatter. Does not fire a
+new pipeline run unless `--retrigger` is also passed — at multi-per-day
+cadence a single-piece re-run has no natural cron slot, so the
+operator makes the trigger decision explicitly. See
+`scripts/reset-today.sh --help` for the exact table list.
 
 ### Verify
 - Pipeline monitor on `/dashboard/admin/` shows step-by-step progress
