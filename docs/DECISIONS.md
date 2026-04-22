@@ -2,6 +2,31 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Removed 4 dead `/api/dashboard/*` endpoints
+
+**Context:** FOLLOWUPS `[open] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern`. The 2026-04-20 `today.ts` removal raised the question of whether its siblings (`analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts`) were similarly orphaned. Added to the list after the 2026-04-20 Memory panel work: `memory.ts`, which was created for that panel but the Astro page ended up querying D1 directly in frontmatter — born orphaned.
+
+**Decision:** grep-audit, delete the dead, keep the live.
+
+**Audit results** (grep across `src/` + `scripts/`, excluding self-references):
+- `analytics.ts` — 0 callers. **Deleted.**
+- `recent.ts` — 0 callers. **Deleted.**
+- `stats.ts` — 0 callers. **Deleted.**
+- `memory.ts` — 0 callers. **Deleted.** Born orphaned (DECISIONS 2026-04-20 specified it as the Memory panel's feed, but the page fetches from D1 directly in Astro frontmatter).
+- `observer.ts` — 1 caller (`admin.astro` fetches `/api/dashboard/observer` for the acknowledge POST). **Kept.**
+- `pipeline.ts` — 2 callers (`admin.astro` poller + `scripts/reset-today.sh` monitor). **Kept.**
+
+**Trade-offs:**
+- Public dashboard + library page already query D1 directly in Astro frontmatter — removing the endpoints doesn't affect behavior. The dashboard page actually BECAME more correct after memory.ts was removed from the design: the original Build-1 plan used the endpoint, but the final implementation consolidated into frontmatter queries to keep all page-render data in one place.
+- No external API consumers exist. No breaking change to worry about.
+- Future public JSON surface decision deferred: `observer.ts` + `pipeline.ts` remain as the only public-ish dashboard endpoints and have clear consumers. If we ever need a public API, we'd add specific endpoints with clear SLA rather than repopulating the speculative surface.
+
+**Doc updates:** `docs/RUNBOOK.md` "Dashboard API endpoints" collapsed to the two survivors + note that public dashboard queries D1 directly. `docs/AGENTS.md` Learner-reader-surfaces rewritten to reference direct queries. `docs/CLAUDE.md` Memory-panel description updated. `docs/FOLLOWUPS.md` closes the audit entry + the admin all-pieces slug spot-check (verified 7/7 production pieces resolve via `/daily/{date}/{slug}/` with 200).
+
+**Files removed:** `src/pages/api/dashboard/analytics.ts`, `recent.ts`, `stats.ts`, `memory.ts`.
+
+---
+
 ## 2026-04-22: 12-min watchdog alarm for silent audio stalls (Phase E3 of audio trio fix)
 
 **Context:** FOLLOWUPS `[open] 2026-04-19: Audio pipeline silent stall between alarm chunks`. 2026-04-17 retry attempt stopped at 4/8 beats with no observer event and no log entry. Root cause analysis: ElevenLabs per-attempt timeout is 90s × up to 3 attempts + backoffs ≈ 273s worst case per beat. A piece with 6-8 long beats can exceed the 15-min alarm wall-clock budget mid-call. Cloudflare terminates the invocation; nothing throws in the `runAudioPipeline` try/catch paths; no observer event fires. Result: piece stays in partial state (has_audio=0, some beat rows in daily_piece_audio) with no signal to the admin.

@@ -298,17 +298,15 @@ Every synthesis run — skipped or success — writes a `logZitaSynthesisMetered
 
 ## Dashboard API endpoints (site worker)
 ```bash
-# Public (no auth):
-GET /api/dashboard/recent     # Last 7 pieces
-GET /api/dashboard/stats      # Library counters
-GET /api/dashboard/memory     # Learning-loop counts + latest observation
-
 # Admin only (ADMIN_EMAIL):
-GET  /api/dashboard/analytics # Engagement data
 GET  /api/dashboard/observer  # Observer events
 POST /api/dashboard/observer  # Acknowledge event { eventId }
+GET  /api/dashboard/pipeline  # Live pipeline state (admin poll + reset-today.sh monitor)
 ```
-Admin Astro pages (also ADMIN_EMAIL-gated): `/dashboard/admin/`, `/dashboard/admin/piece/[date]/`, `/dashboard/admin/zita/`.
+
+No public JSON API — public dashboard + library pages query D1 directly via Astro frontmatter (see `/dashboard/` and `/library/` source). The prior `recent.ts` / `stats.ts` / `memory.ts` / `analytics.ts` / `today.ts` endpoints were created early but superseded by direct queries; removed in the 2026-04-22 dead-endpoint audit.
+
+Admin Astro pages (also ADMIN_EMAIL-gated): `/dashboard/admin/`, `/dashboard/admin/piece/[date]/[slug]/`, `/dashboard/admin/zita/`, `/dashboard/admin/settings/`.
 
 ## Audio — retry, troubleshooting, cost
 

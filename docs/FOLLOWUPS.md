@@ -26,7 +26,7 @@ Format per entry:
 1. **Admin home** (`/dashboard/admin/`):
    - ~~"All pieces" rounds + candidates counts keyed on `daily/${date}` / `date` — pools same-date pieces.~~ **Resolved 2026-04-22 (Phase C).** Both queries now bind on `piece_id IN (...)` using the SELECT's `id` column; tiebreaker `ORDER BY date DESC, published_at DESC` on the parent SELECT preserves publish order at multi-per-day. See DECISIONS 2026-04-22 "Admin + dashboard run log scoped by piece_id".
    - Observer events section is global (last 30 by created_at DESC) — is that the right scope or should it filter by ack status / severity mix?
-   - "All pieces" list links to per-piece admin page via `adminPieceHref(date, pieceId?)` — verify the slug lookup works for every historical piece (had a fallback path pre-Phase-7).
+   - ~~"All pieces" list links to per-piece admin page via `adminPieceHref(date, pieceId?)` — verify the slug lookup works for every historical piece.~~ **Resolved 2026-04-22.** Spot-checked all 7 production pieces via `curl` — each `/daily/{date}/{slug}/` URL returns 200. `adminPieceHref` helper uses `slugByPieceId` Map from the content collection and falls back to `slugByDate` when pieceId is absent (covers any legacy MDX that predates the content-schema pieceId requirement — none exist in production).
    - Pipeline history (last 14 runs grouped by run_id = date) — at multi-per-day a "run" is a day, grouping hides per-piece run quality. Worth a per-piece grouping mode.
    - Engagement widget `GROUP BY piece_id` (migration 0017 post) — verify no stale `GROUP BY lesson_id` fragments.
 
@@ -591,7 +591,7 @@ Option 1 is what the external plan recommends. Not a hard constraint — Curator
 
 ---
 
-## [open] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern
+## [resolved] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern
 
 **Surfaced:** 2026-04-20 during the `today.ts` removal (resolved this session). The resolution raised the question of whether `analytics.ts`, `observer.ts`, `pipeline.ts`, `recent.ts`, `stats.ts` were similarly orphaned by the 2026-04-18 dashboard refocus. Not investigated in today's commit to hold scope.
 
@@ -604,3 +604,5 @@ Option 1 is what the external plan recommends. Not a hard constraint — Curator
 - For any endpoint that survives the audit, decide (like we did for `today.ts`) whether to keep it for future external consumers or remove. Err toward removing — speculative API surface rots.
 
 **Priority:** Low. Dead code adds surface area but doesn't break anything.
+
+**Resolved:** 2026-04-22. Grep across `src/` and `scripts/` found zero runtime callers for `analytics.ts`, `recent.ts`, `stats.ts`, `memory.ts` — all four deleted. `memory.ts` was a special case: created 2026-04-20 for the dashboard Memory panel (build 1 of the learnings surfacing work) but the Astro page ended up querying D1 directly in frontmatter, so the endpoint was born orphaned. `observer.ts` (admin acknowledge POST + GET) and `pipeline.ts` (admin poller + `reset-today.sh` monitor) survive the audit — both have live callers. Doc updates: RUNBOOK "Dashboard API endpoints" list collapsed to the two survivors + a note that public dashboard queries D1 directly in frontmatter; AGENTS + CLAUDE.md Learner sections rewritten to reference direct queries instead of `/api/dashboard/memory`.
