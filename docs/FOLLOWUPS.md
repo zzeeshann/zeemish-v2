@@ -13,16 +13,13 @@ Format per entry:
 
 ---
 
-## [open] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
+## [observing] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
+
+**Status:** partially resolved across 4 commits on 2026-04-22 evening. Observer events pooling (the original trigger) resolved via migration 0020. Remaining items tracked inline below.
 
 **Surfaced:** 2026-04-22 end of session. User viewing `/dashboard/admin/piece/2026-04-22/uk-bill-bans-.../` after the piece_id schema fix shipped noticed the **Observer events this day** section still pools both same-date pieces' events on each piece's page (admin-settings change + both pieces' `Published`, `Reflection`, `Audio failure`, `Audio published` events — 9 events total visible when the piece only generated ~3 of them). Intentional by the schema-fix design (kept as 36h day window) but not what an operator viewing a per-piece deep-dive expects. Broader request: a comprehensive audit of admin + dashboard + public surfaces for any remaining pooling, stale references, or inconsistencies the Phase 1-5 schema fix didn't address.
 
-**Observer events on per-piece admin specifically:**
-- [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/%5Bdate%5D/%5Bslug%5D.astro) around the observer_events query — currently bound on `created_at >= startOfDay AND created_at < endWindow` (36h window). At multi-per-day this surfaces every event for the day regardless of which piece it's about.
-- `observer_events` has no `piece_id` column. Events are free-form `{severity, title, body, context}` JSON. `title` and `body` often contain the piece headline (e.g. "Published: UK bill bans...", "Reflection: $12.5 billion..."); some events (admin_settings_changed, zita_rate_limited) aren't piece-scoped at all.
-- Two fix paths:
-  1. **Add `observer_events.piece_id` column** (migration) + thread piece_id through every `observer.log*` call site in agents + site workers. Clean, matches the schema-fix pattern from this session.
-  2. **Filter client-side by headline substring match** — hack, brittle against title format drift, but needs no schema work. Acceptable for the subset of events that embed the headline (publish / reflection / audio-*); "system" events (admin_settings_changed, cron skips) stay on a separate feed.
+**Observer events on per-piece admin specifically — resolved 2026-04-22 (Phase B commit).** Fix path 1 chosen (schema over bandaid, per user preference). Migration 0020 added `observer_events.piece_id` + index. `agents/src/observer.ts` signature extended across 13 helpers with an optional trailing `pieceId`; `agents/src/director.ts` threads pieceId through all 13 call sites. Per-piece admin query now prefers piece_id match with a 36h day-of-publish OR-fallback for legacy NULL rows (pre-0020 events + site-worker writers that haven't threaded pieceId yet — site-side piece_id threading is a separate future task because `/api/zita/chat` doesn't currently receive piece_id from the client). System events (admin_settings_changed, zita_rate_limited) keep piece_id NULL permanently and only surface on the per-piece page via the 36h fallback window. See DECISIONS 2026-04-22 "observer_events.piece_id column for per-piece admin scoping".
 
 **Broader admin + dashboard + public cleanup items to surface during the audit:**
 

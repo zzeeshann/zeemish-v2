@@ -187,20 +187,36 @@ try {
     candidates = candsRes.results;
   }
 
-  // observer_events for this calendar day (UTC). Director writes one
-  // summary per run; we widen to a 36h window around the date so we catch
-  // late-completion or warn events that landed slightly after midnight UTC.
+  // observer_events — prefer piece_id scoping (migration 0020, 2026-04-22).
+  // Legacy NULL rows (events written before 0020 + site-worker events
+  // that haven't yet threaded pieceId) fall back to the 36h day-of-publish
+  // window. Mixed mode is intentional: new piece-scoped events show up
+  // directly on the correct piece, legacy/system events still surface via
+  // day window so admin sees them somewhere rather than losing them.
   const startOfDay = Date.UTC(
     parseInt(date.slice(0, 4), 10),
     parseInt(date.slice(5, 7), 10) - 1,
     parseInt(date.slice(8, 10), 10),
   );
   const endWindow = startOfDay + 36 * 60 * 60 * 1000;
-  const obsRes = await db
-    .prepare('SELECT * FROM observer_events WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC')
-    .bind(startOfDay, endWindow)
-    .all<ObserverRow>();
-  observerEvents = obsRes.results;
+  if (pieceId) {
+    const obsRes = await db
+      .prepare(
+        `SELECT * FROM observer_events
+         WHERE piece_id = ?
+            OR (piece_id IS NULL AND created_at >= ? AND created_at < ?)
+         ORDER BY created_at ASC`,
+      )
+      .bind(pieceId, startOfDay, endWindow)
+      .all<ObserverRow>();
+    observerEvents = obsRes.results;
+  } else {
+    const obsRes = await db
+      .prepare('SELECT * FROM observer_events WHERE created_at >= ? AND created_at < ? ORDER BY created_at ASC')
+      .bind(startOfDay, endWindow)
+      .all<ObserverRow>();
+    observerEvents = obsRes.results;
+  }
 
   // Audio scoped by piece_id (migration 0015 rebuilt the PK there).
   if (pieceId) {

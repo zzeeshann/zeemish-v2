@@ -7,6 +7,7 @@ export interface ObserverEvent {
   title: string;
   body: string;
   context: Record<string, unknown> | null;
+  piece_id: string | null;
   created_at: number;
 }
 
@@ -20,6 +21,13 @@ interface ObserverState {
  * Zishan can review from the dashboard.
  *
  * Events are stored in D1's observer_events table.
+ *
+ * piece_id threading (2026-04-22, migration 0020): piece-scoped
+ * helpers accept an optional trailing `pieceId` so the per-piece
+ * admin deep-dive can filter events by piece_id instead of the 36h
+ * day window it used to fall back to. System-level events (admin
+ * settings changes, global errors) pass `null` and remain visible
+ * only on the admin home feed.
  */
 export class ObserverAgent extends Agent<Env, ObserverState> {
   initialState: ObserverState = { eventCount: 0 };
@@ -32,12 +40,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     voiceScore: number,
     revisionCount: number,
     commitUrl: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'info',
       title: `Published: ${title}`,
       body: `"${title}" passed all gates and was committed to the repo.`,
       context: { source, voiceScore, revisionCount, commitUrl },
+      piece_id: pieceId,
     });
   }
 
@@ -51,26 +61,32 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     voiceScore: number,
     rounds: number,
     failedGates: string[],
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'escalation',
       title: `Escalation: ${title}`,
       body: `"${title}" didn't clear all gates after ${rounds} revision rounds. Unresolved: ${failedGates.join(', ')}. Published with voice ${voiceScore}/100; worth a manual look.`,
       context: { source, voiceScore, rounds, failedGates },
+      piece_id: pieceId,
     });
   }
 
-  /** Log a pipeline error */
+  /** Log a pipeline error. pieceId is optional — many error paths
+   *  fire before a pieceId is allocated (Scanner returned zero, DB
+   *  contention in Director setup). Pass null or omit in those cases. */
   async logError(
     source: string,
     _unused: number,
     error: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
       title: `Error: ${source}`,
       body: `Pipeline error: ${error}`,
       context: { source, error },
+      piece_id: pieceId,
     });
   }
 
@@ -80,7 +96,10 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
    *  slot is re-dispatched (same-hour double-fire, SDK oddity, or
    *  manual replay); info severity — nothing broke. Makes the skip
    *  visible in the admin feed so "where did that run go?" has an
-   *  answer. Replaces the prior silent `return null`. */
+   *  answer. Replaces the prior silent `return null`.
+   *
+   *  piece_id is the EXISTING piece that's already in the slot — the
+   *  skip is about that piece, so attributing it there is correct. */
   async logDailyRunSkipped(
     date: string,
     intervalHours: number,
@@ -92,6 +111,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       title: `Daily run skipped — slot already published`,
       body: `Slot starting ${new Date(slotStartMs).toISOString()} (interval_hours=${intervalHours}) already has piece ${existingPieceId} for date ${date}. No action needed.`,
       context: { date, intervalHours, slotStartMs, existingPieceId, reason: 'slot_already_published' },
+      piece_id: existingPieceId,
     });
   }
 
@@ -103,12 +123,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     beatCount: number,
     totalCharacters: number,
     commitUrl: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'info',
       title: `Audio published: ${title}`,
       body: `Audio for "${title}" landed in ${beatCount} beats (${totalCharacters} chars). Commit: ${commitUrl}`,
       context: { date, beatCount, totalCharacters, commitUrl },
+      piece_id: pieceId,
     });
   }
 
@@ -120,12 +142,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     date: string,
     title: string,
     reason: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
       title: `Post-publish learnings missed: ${title}`,
       body: `Producer-side analysis failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
       context: { date, reason },
+      piece_id: pieceId,
     });
   }
 
@@ -137,12 +161,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     title: string,
     written: number,
     overflowCount: number,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
       title: `Learning overflow: ${title}`,
       body: `Post-publish analysis for "${title}" produced ${written + overflowCount} learnings; wrote ${written}, dropped ${overflowCount}. Usually means the analysis restated the same pattern multiple ways — worth a look if it keeps happening.`,
       context: { date, written, overflowCount },
+      piece_id: pieceId,
     });
   }
 
@@ -161,6 +187,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       tokensOut: number;
       durationMs: number;
     },
+    pieceId: string | null = null,
   ): Promise<void> {
     const overflowNote =
       metrics.overflowCount > 0
@@ -171,6 +198,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       title: `Reflection: ${title}`,
       body: `Self-reflection for "${title}" (${date}) produced ${metrics.considered} bullets, wrote ${metrics.written}.${overflowNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
       context: { date, ...metrics },
+      piece_id: pieceId,
     });
   }
 
@@ -193,6 +221,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       tokensOut: number;
       durationMs: number;
     },
+    pieceId: string | null = null,
   ): Promise<void> {
     if (metrics.skipped) {
       await this.writeEvent({
@@ -200,6 +229,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
         title: `Zita synthesis skipped: ${title}`,
         body: `Reader Q&A synthesis for "${title}" (${date}) skipped — only ${metrics.userMsgCount} reader message${metrics.userMsgCount === 1 ? '' : 's'}, threshold is 5. No Claude call fired. Latency: ${metrics.durationMs}ms (DB only).`,
         context: { date, ...metrics },
+        piece_id: pieceId,
       });
       return;
     }
@@ -212,6 +242,7 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       title: `Zita synthesis: ${title}`,
       body: `Reader Q&A synthesis for "${title}" (${date}) considered ${metrics.userMsgCount} reader messages, produced ${metrics.considered} bullets, wrote ${metrics.written}.${overflowNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
       context: { date, ...metrics },
+      piece_id: pieceId,
     });
   }
 
@@ -222,12 +253,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     date: string,
     title: string,
     reason: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
       title: `Zita synthesis missed: ${title}`,
       body: `Reader Q&A synthesis failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
       context: { date, reason },
+      piece_id: pieceId,
     });
   }
 
@@ -237,12 +270,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     date: string,
     title: string,
     reason: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'warn',
       title: `Reflection missed: ${title}`,
       body: `Self-reflection failed for "${title}" (${date}). Reason: ${reason}. The piece is live; the loop just missed one iteration.`,
       context: { date, reason },
+      piece_id: pieceId,
     });
   }
 
@@ -254,12 +289,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     title: string,
     phase: 'producer' | 'auditor' | 'publisher',
     reason: string,
+    pieceId: string | null = null,
   ): Promise<void> {
     await this.writeEvent({
       severity: 'escalation',
       title: `Audio failure: ${title}`,
       body: `Audio ${phase} failed for "${title}" on ${date}. Text is already live. Reason: ${reason}. Retry from admin dashboard.`,
       context: { date, phase, reason },
+      piece_id: pieceId,
     });
   }
 
@@ -309,10 +346,18 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     try {
       await this.env.DB
         .prepare(
-          `INSERT INTO observer_events (id, severity, title, body, context, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO observer_events (id, severity, title, body, context, piece_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, event.severity, event.title, event.body, JSON.stringify(event.context), now)
+        .bind(
+          id,
+          event.severity,
+          event.title,
+          event.body,
+          JSON.stringify(event.context),
+          event.piece_id ?? null,
+          now,
+        )
         .run();
 
       this.setState({ eventCount: this.state.eventCount + 1 });

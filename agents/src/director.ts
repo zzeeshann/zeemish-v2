@@ -193,7 +193,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     if (candidates.length === 0) {
       await this.logStep(today, pieceId,'skipped', 'done', { reason: 'No candidates found' });
       const observer = await this.subAgent(ObserverAgent, 'observer');
-      await observer.logError('daily', 0, 'Scanner found no candidates');
+      await observer.logError('daily', 0, 'Scanner found no candidates', pieceId);
       this.exitToIdle();
       return null;
     }
@@ -208,7 +208,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     if (curatorResult.skip) {
       await this.logStep(today, pieceId,'skipped', 'done', { reason: curatorResult.reason });
       const observer = await this.subAgent(ObserverAgent, 'observer');
-      await observer.logError('daily', 0, curatorResult.reason);
+      await observer.logError('daily', 0, curatorResult.reason, pieceId);
       this.exitToIdle();
       return null;
     }
@@ -239,6 +239,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
           await observer.logError(
             'curator', 0,
             `selectedCandidateId ${curatorResult.selectedCandidateId} matched 0 rows in daily_candidates — id shape drift from Curator`,
+            pieceId,
           );
         }
       } catch (err) {
@@ -246,6 +247,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         await observer.logError(
           'curator', 0,
           `Failed to mark selected candidate: ${err instanceof Error ? err.message : String(err)}`,
+          pieceId,
         );
       }
     } else {
@@ -253,6 +255,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       await observer.logError(
         'curator', 0,
         `Curator returned no selectedCandidateId — prompt regression or empty candidate list`,
+        pieceId,
       );
     }
 
@@ -386,7 +389,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       // Log escalation — Zishan still needs to know when a piece shipped
       // low. Publisher runs after this so the Observer entry exists
       // regardless of whether the git commit succeeds.
-      await observer.logEscalation('daily', 0, brief.headline, lastVoiceScore, totalRounds, failedGates);
+      await observer.logEscalation('daily', 0, brief.headline, lastVoiceScore, totalRounds, failedGates, pieceId);
     }
 
     this.enterPhase('publisher');
@@ -428,7 +431,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // low-quality publish distinctly from a clean one (escalation already
     // logged above in the !passed branch).
     if (passed) {
-      await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl);
+      await observer.logPublished('daily', 0, brief.headline, lastVoiceScore, totalRounds - 1, publishResult.commitUrl, pieceId);
     }
 
     // ─── Post-publish producer-side learning (P1.3, off-pipeline) ────
@@ -538,13 +541,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const result = await learner.analysePiecePostPublish(pieceId, date);
       if (result.overflowCount > 0) {
         await observer
-          .logLearnerOverflow(date, title, result.written, result.overflowCount)
+          .logLearnerOverflow(date, title, result.written, result.overflowCount, pieceId)
           .catch(() => { /* observer write failure never blocks */ });
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
-        .logLearnerFailure(date, title, reason)
+        .logLearnerFailure(date, title, reason, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }
@@ -573,12 +576,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const learner = await this.subAgent(LearnerAgent, 'learner');
       const result = await learner.analyseZitaPatternsDaily(pieceId, date);
       await observer
-        .logZitaSynthesisMetered(date, title, result)
+        .logZitaSynthesisMetered(date, title, result, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
-        .logZitaSynthesisFailure(date, title, reason)
+        .logZitaSynthesisFailure(date, title, reason, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }
@@ -613,19 +616,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       if (!current) {
         console.error(`reflectOnPieceScheduled: MDX not found at ${filePath} for ${date}`);
         await observer
-          .logReflectionFailure(date, title, `MDX not found at ${filePath}`)
+          .logReflectionFailure(date, title, `MDX not found at ${filePath}`, pieceId)
           .catch(() => { /* observer write failure never blocks */ });
         return;
       }
       const drafter = await this.subAgent(DrafterAgent, 'drafter');
       const result = await drafter.reflect(brief, current.mdx, date, pieceId);
       await observer
-        .logReflectionMetered(date, title, result)
+        .logReflectionMetered(date, title, result, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
-        .logReflectionFailure(date, title, reason)
+        .logReflectionFailure(date, title, reason, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }
@@ -664,6 +667,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         title,
         'producer',
         `Scheduled audio skipped — MDX not found at ${filePath}`,
+        pieceId,
       );
       return;
     }
@@ -732,7 +736,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         ? `Over ${err.cap}-char cap (would spend ${err.totalChars} chars)`
         : err instanceof Error ? err.message : 'Producer failed';
       await this.logStep(date, pieceId,'audio-producing', 'failed', { reason });
-      await observer.logAudioFailure(date, title, 'producer', reason);
+      await observer.logAudioFailure(date, title, 'producer', reason, pieceId);
       return;
     }
     await this.logStep(date, pieceId,'audio-producing', 'done', {
@@ -760,7 +764,7 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         .filter((i) => i.severity === 'major')
         .map((i) => i.issue)
         .join('; ');
-      await observer.logAudioFailure(date, title, 'auditor', majorReasons);
+      await observer.logAudioFailure(date, title, 'auditor', majorReasons, pieceId);
       return;
     }
 
@@ -799,11 +803,12 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
         finalBeatCount,
         totalCharacters,
         publishResult.commitUrl,
+        pieceId,
       );
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Publisher failed';
       await this.logStep(date, pieceId,'audio-publishing', 'failed', { reason });
-      await observer.logAudioFailure(date, title, 'publisher', reason);
+      await observer.logAudioFailure(date, title, 'publisher', reason, pieceId);
     }
   }
 

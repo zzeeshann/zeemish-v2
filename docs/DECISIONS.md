@@ -2,6 +2,36 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: observer_events.piece_id column for per-piece admin scoping
+
+**Context:** FOLLOWUPS `[open] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit` — user noticed on evening of 2026-04-22 that the per-piece admin deep-dive was still pooling observer events across both same-date pieces (tobacco piece page showed air-traffic's `Published`, `Reflection`, `Audio failure`, `Audio published` events mixed in — 9 events total when the piece only generated ~3 of them). The 2026-04-22 morning piece_id schema fix had fixed pipeline_log / audit_results / daily_candidates pooling but left observer_events untouched because it had no piece_id column and was known-intentional by the schema-fix design (kept as 36h day window).
+
+**Decision:** Path 1 from the audit entry — add `piece_id` column to `observer_events` and thread through every agents-side call site. Follows the same schema-over-bandaid posture the user pushed for during the main piece_id schema fix session earlier today. The alternative (client-side substring match on title) would be brittle against title format drift and wouldn't capture all piece-scoped events.
+
+**What shipped:**
+1. **Migration 0020** — nullable `piece_id TEXT` + `idx_observer_events_piece`. Additive, no snapshot, no backfill. Historical rows stay NULL and surface via the 36h fallback on per-piece admin.
+2. **`agents/src/observer.ts`** — 13 piece-scoped helpers gained a trailing optional `pieceId: string | null = null`. `writeEvent` INSERT extended to bind piece_id. `logDailyRunSkipped` binds the *existing* piece_id (the piece already in the slot), not a new one.
+3. **`agents/src/director.ts`** — threaded pieceId through all 13 observer call sites in director.ts. pieceId is pre-allocated at the top of `triggerDailyPiece()` per Phase 3 of this morning's schema fix, so it's in scope everywhere.
+4. **`src/lib/observer-events.ts`** — `ObserverEventInput` gained optional `pieceId`. INSERT binding extended. 4 call sites in site-worker (`/api/zita/chat`, `/api/dashboard/admin/settings`) unchanged for now — none currently receive piece_id in their request context. That's a separate future task (zita-chat component would need a `data-piece-id` attribute, chat endpoint would need to accept & scope by it, zita_messages writes would need piece_id populated — all cross-cutting). Deferred explicitly.
+5. **`src/pages/dashboard/admin/piece/[date]/[slug].astro`** — observer_events query now:
+   ```sql
+   WHERE piece_id = ?
+      OR (piece_id IS NULL AND created_at >= ? AND created_at < ?)
+   ```
+   Mixed mode: new piece-scoped events bind directly; legacy NULL rows keep the 36h day window fallback so admin sees them somewhere rather than losing them.
+
+**Trade-offs:**
+- Legacy rows (pre-0020) stay NULL permanently. Backfilling would mean parsing title/body text for headline matches — the same kind of brittle substring work the schema fix was meant to replace. Not worth it for a finite set of historical rows that age out.
+- Site-worker `logObserverEvent` callers stay pieceId-null for now. At today's traffic (4 observer writes/day from site worker, all Zita-related) the admin feed won't show meaningful degradation. When zita-chat grows real traffic + multi-per-day cadence overlap, circle back.
+- `logDailyRunSkipped` uses the *existing* (already-published) piece's id rather than a new one. Correct semantically — the skip event belongs to the piece that's blocking the slot.
+- Mixed piece_id + 36h fallback in the admin query is intentional. Pure piece_id scope would lose system events (admin_settings_changed, zita_rate_limited) from per-piece view; pure 36h window was the problem we started with. Keep both.
+
+**Verify after next publish:** new `Published`, `Reflection`, `Audio published` rows should have piece_id = the piece's UUID. Per-piece admin renders only that piece's new events + any legacy/system events caught in the 36h window — no more cross-piece pooling of same-date events.
+
+**Files:** [migrations/0020_observer_events_piece_id.sql](../migrations/0020_observer_events_piece_id.sql), [agents/src/observer.ts](../agents/src/observer.ts), [agents/src/director.ts](../agents/src/director.ts), [src/lib/observer-events.ts](../src/lib/observer-events.ts), [src/pages/dashboard/admin/piece/[date]/[slug].astro](../src/pages/dashboard/admin/piece/%5Bdate%5D/%5Bslug%5D.astro), [docs/SCHEMA.md](SCHEMA.md).
+
+---
+
 ## 2026-04-22: Curator prompt exposes candidate UUIDs so `selected` can flip
 
 **Context:** FOLLOWUPS `[open] 2026-04-21: daily_candidates.selected never flipped on historical runs` — prod had 250 candidate rows across 5 dates, zero with `selected = 1`. Director's post-curation UPDATE at [director.ts:227](../agents/src/director.ts) was wrapped in `.run().catch(() => {})`, so whatever was going wrong was silent. Admin per-piece deep-dive's "picked candidate marked with teal dot" has therefore never rendered.

@@ -78,10 +78,11 @@ What Zishan should know about — published lessons, escalations, errors.
 | title | TEXT | Short summary |
 | body | TEXT | Markdown detail |
 | context | TEXT | JSON with task IDs, scores, etc. |
+| piece_id | TEXT | `daily_pieces.id` for piece-scoped events (Published, Audio*, Reflection, Learner, etc.). NULL for system events (admin_settings_changed, zita_rate_limited, global errors) and legacy pre-0020 rows. Per-piece admin query prefers piece_id match; falls back to 36h day-of-publish window for legacy NULL rows. Added in migration 0020 (2026-04-22). |
 | acknowledged_at | INTEGER | Null until Zishan acknowledges |
 | created_at | INTEGER | |
 
-Migration: `0002_observer_events.sql`
+Migrations: `0002_observer_events.sql`, `0020_observer_events_piece_id.sql`
 
 ### engagement
 Reader engagement metrics, aggregated per piece per day.
@@ -251,7 +252,7 @@ Seeded values: `interval_hours = '24'` (preserves current 1-piece/day production
 
 Migration: `0016_admin_settings.sql`
 
-## Migrations summary (19 migrations, 14 tables)
+## Migrations summary (20 migrations, 14 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -271,3 +272,4 @@ Migration: `0016_admin_settings.sql`
 - `0017_engagement_piece_id.sql` — multi-piece cadence Phase 7 (FOLLOWUPS wrap). Rebuilt `engagement` with PK `(piece_id, course_id, date)` via snapshot → create-new → backfill-join → drop-old → rename, all auto-applied. 13 historical rows backfilled from `daily_pieces` via `e.lesson_id = dp.date` join (unambiguous at 1/day — 5 piece_ids, 0 NULLs). `lesson_id` kept as a plain column for display-compat. `engagement_backup_20260422` snapshot held for rollback through 2026-04-29 via FOLLOWUPS. Unblocks reader-path attribution at multi-per-day — `Learner.analyseAndLearn` now reads piece_id directly off the engagement row instead of the pre-Phase-7 partial-fix date-lookup.
 - `0018_pipeline_log_piece_id.sql` — multi-per-day piece_id schema fix Phase 1. Added nullable `piece_id TEXT` to `pipeline_log` + `idx_pipeline_log_piece`. Completes the piece_id column coverage across all three day-keyed tables (0014 had `audit_results` + `daily_candidates`; this finishes the set). Additive ALTER, no snapshot needed. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
 - `0019_piece_id_backfill.sql` — multi-per-day piece_id schema fix Phase 2. Manual (not auto-applied) — commented UPDATEs run via `wrangler d1 execute`, same pattern as 0012 and 0014 Step 2. Two strategies: pre-2026-04-22 rows via `daily_pieces.date` join (unambiguous at 1/day), 2026-04-22 rows via midpoint split at timestamp `1776850364493` between the two pieces' `published_at`. 512 null rows populated across the three tables (9 `audit_results` + 153 `pipeline_log` + 350 `daily_candidates`). 0 NULL remaining across all three. Verified row-by-row against production D1.
+- `0020_observer_events_piece_id.sql` — multi-per-day audit. Added nullable `piece_id TEXT` to `observer_events` + `idx_observer_events_piece`. Additive ALTER, no backfill — historical rows stay NULL and surface on per-piece admin via the existing 36h day-of-publish window fallback. New writes from `agents/src/observer.ts` (13 helpers, piece-scoped signature extended) and `src/lib/observer-events.ts` (optional `pieceId` field) populate piece_id going forward. System-event writers (admin settings changes, Zita rate limits) keep piece_id NULL permanently.
