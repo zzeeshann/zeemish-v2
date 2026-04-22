@@ -1,10 +1,12 @@
 ---
 export const prerender = false;
 
+import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
+import { deriveSlug } from '../../lib/slug';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -48,6 +50,26 @@ let openEscalations = 0;
 let errorsThisWeek = 0;
 let avgRevisionsLifetime: number | null = null;
 let pipelineHistory: { runId: string; finalStep: string; finalStatus: string; data: any; tMs: number }[] = [];
+
+// Content-collection lookup for per-piece admin URLs. The route moved
+// to /dashboard/admin/piece/{date}/{slug}/ in Phase 7 — links here need
+// to resolve slug per piece, keyed off MDX filename via deriveSlug.
+// Fallback to `{date}/` (legacy index) when the collection entry is
+// missing — covers the case where daily_pieces has a row but the MDX
+// collection hasn't rebuilt yet.
+const collectionEntries = await getCollection('dailyPieces');
+const slugByDate = new Map<string, string>();
+const slugByPieceId = new Map<string, string>();
+for (const e of collectionEntries) {
+  slugByDate.set(e.data.date, deriveSlug(e.id));
+  slugByPieceId.set(e.data.pieceId, deriveSlug(e.id));
+}
+function adminPieceHref(date: string, pieceId?: string): string {
+  const slug = (pieceId && slugByPieceId.get(pieceId)) ?? slugByDate.get(date);
+  return slug
+    ? `/dashboard/admin/piece/${date}/${slug}/`
+    : `/dashboard/admin/piece/${date}/`;
+}
 
 type EngagementRow = {
   piece_id: string;
@@ -326,7 +348,7 @@ function shortDate(iso: string): string {
           const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
           return (
             <li data-piece-row data-piece-search={`${p.date} ${p.headline}`.toLowerCase()}>
-              <a href={`/dashboard/admin/piece/${p.date}/`} class="flex items-start gap-4 py-3 group">
+              <a href={adminPieceHref(p.date)} class="flex items-start gap-4 py-3 group">
                 <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
                 <div class="flex-1 min-w-0">
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
@@ -421,7 +443,7 @@ function shortDate(iso: string): string {
           const completionPct = e.views > 0 ? Math.round((e.completions / e.views) * 100) : 0;
           return (
             <li>
-              <a href={`/dashboard/admin/piece/${e.piece_date ?? e.lesson_id}/`} class="flex items-start gap-4 py-3 group">
+              <a href={adminPieceHref(e.piece_date ?? e.lesson_id, e.piece_id)} class="flex items-start gap-4 py-3 group">
                 <div class="flex-1 min-w-0">
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
                     <span class="text-zee-text font-medium">{shortDate(e.piece_date ?? e.lesson_id)}</span>

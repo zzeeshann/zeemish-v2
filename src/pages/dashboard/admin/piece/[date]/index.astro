@@ -1,0 +1,94 @@
+---
+export const prerender = false;
+
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../../../../layouts/BaseLayout.astro';
+import { getUser } from '../../../../../lib/db';
+import { deriveSlug } from '../../../../../lib/slug';
+
+/**
+ * Admin per-piece route — legacy date-only URL.
+ *
+ * Pre-Phase-7 the admin per-piece page was `/dashboard/admin/piece/{date}/`.
+ * Phase 7 nested it as `/dashboard/admin/piece/{date}/{slug}/` so that
+ * multi-per-day cadence gets one URL per piece instead of pooling on
+ * date. This index file keeps the old URL working by:
+ *
+ *   - 1 piece on this date → 302 to the slug URL (common case at
+ *     interval_hours=24; every bookmark / external link still resolves).
+ *   - 2+ pieces (multi-per-day) → render a disambiguation list; admin
+ *     picks which piece to drill into.
+ *   - 0 pieces → "No piece" display matching the existing per-date
+ *     admin shell.
+ */
+
+const db = Astro.locals.runtime.env.DB;
+const userId = Astro.locals.userId;
+const user = userId ? await getUser(db, userId) : null;
+const ADMIN_EMAIL = (Astro.locals.runtime.env as Record<string, string>).ADMIN_EMAIL;
+
+if (!user?.email || user.email !== ADMIN_EMAIL) {
+  return Astro.redirect(`/login/?redirect=/dashboard/admin/`);
+}
+
+const date = String(Astro.params.date ?? '').trim();
+if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  return new Response('Invalid date', { status: 400 });
+}
+
+const collectionEntries = await getCollection('dailyPieces');
+const entriesForDate = collectionEntries
+  .filter((p) => p.data.date === date)
+  .sort((a, b) => (b.data.publishedAt ?? 0) - (a.data.publishedAt ?? 0));
+
+if (entriesForDate.length === 1) {
+  const slug = deriveSlug(entriesForDate[0].id);
+  return Astro.redirect(`/dashboard/admin/piece/${date}/${slug}/`);
+}
+---
+
+<BaseLayout title={`${date} — Admin · Zeemish`}>
+  <nav class="text-sm text-zee-muted mb-6 pt-6" aria-label="Breadcrumb">
+    <a href="/dashboard/admin/" class="hover:text-zee-primary transition-colors">Admin</a>
+    <span class="mx-2 opacity-50">/</span>
+    <span class="text-zee-text">{date}</span>
+  </nav>
+
+  {entriesForDate.length === 0 ? (
+    <div class="py-12">
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">No piece</p>
+      <h1 class="text-3xl md:text-4xl font-bold mb-3 leading-tight tracking-tight">{date}</h1>
+      <p class="text-lg text-zee-muted">No piece was published on this date.</p>
+    </div>
+  ) : (
+    <div class="py-8">
+      <p class="text-xs font-semibold uppercase tracking-widest text-zee-gold mb-2">Multiple pieces on {date}</p>
+      <h1 class="text-2xl md:text-3xl font-bold mb-3 leading-tight tracking-tight">{entriesForDate.length} pieces</h1>
+      <p class="text-sm text-zee-muted mb-6">At multi-per-day cadence this date has more than one piece. Pick one to drill into.</p>
+      <ul class="divide-y divide-zee-border/60">
+        {entriesForDate.map((p) => {
+          const slug = deriveSlug(p.id);
+          const publishedAt = p.data.publishedAt;
+          const publishedDisplay = publishedAt
+            ? new Date(publishedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+            : null;
+          return (
+            <li>
+              <a href={`/dashboard/admin/piece/${date}/${slug}/`} class="flex items-start gap-4 py-4 group">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium leading-snug group-hover:text-zee-primary transition-colors">{p.data.title}</p>
+                  <div class="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
+                    {publishedDisplay && <span>Published {publishedDisplay}</span>}
+                    {publishedDisplay && p.data.underlyingSubject && <span class="opacity-40" aria-hidden="true">·</span>}
+                    {p.data.underlyingSubject && <span>{p.data.underlyingSubject}</span>}
+                  </div>
+                </div>
+                <span class="text-zee-muted/60 group-hover:text-zee-primary transition-colors shrink-0" aria-hidden="true">→</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  )}
+</BaseLayout>

@@ -2,11 +2,11 @@
 export const prerender = false;
 
 import { getCollection } from 'astro:content';
-import BaseLayout from '../../../../layouts/BaseLayout.astro';
-import { getUser } from '../../../../lib/db';
-import { auditTier, auditTierLabel } from '../../../../lib/audit-tier';
-import { pipelineStepLabel } from '../../../../lib/pipeline-steps';
-import { deriveSlug, pieceUrl } from '../../../../lib/slug';
+import BaseLayout from '../../../../../layouts/BaseLayout.astro';
+import { getUser } from '../../../../../lib/db';
+import { auditTier, auditTierLabel } from '../../../../../lib/audit-tier';
+import { pipelineStepLabel } from '../../../../../lib/pipeline-steps';
+import { deriveSlug, pieceUrl } from '../../../../../lib/slug';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -18,8 +18,12 @@ if (!user?.email || user.email !== ADMIN_EMAIL) {
 }
 
 const date = String(Astro.params.date ?? '').trim();
+const slug = String(Astro.params.slug ?? '').trim();
 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
   return new Response('Invalid date', { status: 400 });
+}
+if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+  return new Response('Invalid slug', { status: 400 });
 }
 
 // --- Fetch every per-day data source the operator might want -----------
@@ -106,16 +110,37 @@ let observerEvents: ObserverRow[] = [];
 let audioRows: AudioRow[] = [];
 let zitaMessages: ZitaMessage[] = [];
 
-// Collection entries — used to derive the slug for the View-on-site link
-// at the top of the page. Server-rendered admin page can call
-// getCollection at request time.
+// Resolve piece_id from (date, slug) via the content collection. The
+// filename convention is `YYYY-MM-DD-{slug}.mdx`, so deriveSlug(entry.id)
+// matches the URL slug. Per-piece queries (daily_pieces, audio, zita)
+// bind on piece_id so multi-per-day same-date pieces stay separate.
+// Day-scoped queries (audit_results, pipeline_log, candidates,
+// observer_events) intentionally keep date binding — those sections
+// show the day's pipeline activity, not just this piece's, matching
+// the Phase 3 walk-back + Phase 6 reasoning.
 const collectionEntries = await getCollection('dailyPieces');
+const entry = collectionEntries.find(
+  (p) => p.data.date === date && deriveSlug(p.id) === slug,
+);
+const pieceId: string | null = entry?.data.pieceId ?? null;
 
 try {
-  piece = await db
-    .prepare('SELECT * FROM daily_pieces WHERE date = ? LIMIT 1')
-    .bind(date)
-    .first<Piece>();
+  if (pieceId) {
+    piece = await db
+      .prepare('SELECT * FROM daily_pieces WHERE id = ? LIMIT 1')
+      .bind(pieceId)
+      .first<Piece>();
+  } else {
+    // Fall back to the date-keyed lookup when the collection entry is
+    // missing (rare — pre-Phase-7 MDX without pieceId, or a slug typo).
+    // At multi-per-day this picks an arbitrary same-date piece; the
+    // admin sees a 404-ish "No piece" display if that piece also doesn't
+    // resolve.
+    piece = await db
+      .prepare('SELECT * FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
+      .bind(date)
+      .first<Piece>();
+  }
 
   const auditsRes = await db
     .prepare('SELECT auditor, passed, score, notes, draft_id, created_at FROM audit_results WHERE task_id = ? ORDER BY created_at ASC')
@@ -150,29 +175,37 @@ try {
     .all<ObserverRow>();
   observerEvents = obsRes.results;
 
-  const audioRes = await db
-    .prepare(
-      `SELECT beat_name, r2_key, public_url, character_count, duration_seconds,
-              request_id, model, voice_id, generated_at
-       FROM daily_piece_audio WHERE date = ? ORDER BY generated_at ASC`,
-    )
-    .bind(date)
-    .all<AudioRow>();
-  audioRows = audioRes.results;
+  // Audio scoped by piece_id (migration 0015 rebuilt the PK there).
+  if (pieceId) {
+    const audioRes = await db
+      .prepare(
+        `SELECT beat_name, r2_key, public_url, character_count, duration_seconds,
+                request_id, model, voice_id, generated_at
+         FROM daily_piece_audio WHERE piece_id = ? ORDER BY generated_at ASC`,
+      )
+      .bind(pieceId)
+      .all<AudioRow>();
+    audioRows = audioRes.results;
+  }
 } catch { /* leave empty */ }
 
 // Zita query is in its own try so a failure in the audio section
 // above doesn't silently remove the "Questions from readers" block.
-try {
-  const zitaRes = await db
-    .prepare(
-      `SELECT user_id, role, content, created_at
-       FROM zita_messages WHERE piece_date = ? ORDER BY created_at ASC`,
-    )
-    .bind(date)
-    .all<ZitaMessage>();
-  zitaMessages = zitaRes.results;
-} catch { /* leave empty */ }
+// Scoped by piece_id (migration 0013 + 0014 backfill ensured every
+// row has it populated). Pre-backfill null-piece_id rows exist only
+// in snapshot tables, not in zita_messages.
+if (pieceId) {
+  try {
+    const zitaRes = await db
+      .prepare(
+        `SELECT user_id, role, content, created_at
+         FROM zita_messages WHERE piece_id = ? ORDER BY created_at ASC`,
+      )
+      .bind(pieceId)
+      .all<ZitaMessage>();
+    zitaMessages = zitaRes.results;
+  } catch { /* leave empty */ }
+}
 
 type ZitaConversation = { user_id: string; msgs: ZitaMessage[] };
 const zitaConvos: ZitaConversation[] = (() => {
@@ -319,7 +352,9 @@ function publishedDisplay(): string {
   <nav class="text-sm text-zee-muted mb-6 pt-6" aria-label="Breadcrumb">
     <a href="/dashboard/admin/" class="hover:text-zee-primary transition-colors">Admin</a>
     <span class="mx-2 opacity-50">/</span>
-    <span class="text-zee-text">{date}</span>
+    <a href={`/dashboard/admin/piece/${date}/`} class="hover:text-zee-primary transition-colors">{date}</a>
+    <span class="mx-2 opacity-50">/</span>
+    <span class="text-zee-text">{slug}</span>
   </nav>
 
   {!piece ? (
@@ -350,15 +385,7 @@ function publishedDisplay(): string {
           {piece.quality_flag === 'low' && <><span class="opacity-40">·</span><span class="text-zee-gold font-medium">FLAGGED LOW</span></>}
         </p>
         <div class="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-          {(() => {
-            // Look up the collection entry for this date to derive its slug.
-            // At multi-per-day cadence this picks the first match — admin
-            // URL is still date-keyed pending a Phase 5/6 rework.
-            const entry = collectionEntries.find((p) => p.data.date === date);
-            return entry
-              ? <a href={pieceUrl(date, deriveSlug(entry.id))} class="text-zee-primary hover:underline">View on site →</a>
-              : null;
-          })()}
+          <a href={pieceUrl(date, slug)} class="text-zee-primary hover:underline">View on site →</a>
           {commitUrl && (
             <a href={commitUrl} target="_blank" rel="noopener" class="text-zee-primary hover:underline">View commit on GitHub →</a>
           )}
