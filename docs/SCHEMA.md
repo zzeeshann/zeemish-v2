@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**14 tables across 16 migrations.**
+**14 tables across 20 migrations.**
 
 ## Reader-side tables
 

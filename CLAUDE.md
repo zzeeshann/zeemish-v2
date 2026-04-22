@@ -333,7 +333,7 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 14 tables, 16 migrations)
+### Database (D1 — 14 tables, 20 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
@@ -374,7 +374,7 @@ docs/handoff/           Original architecture + specs
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 13 agents, endpoints, secrets
-- `docs/SCHEMA.md` — all 13 D1 tables, 10 migrations
+- `docs/SCHEMA.md` — all 14 D1 tables, 20 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)

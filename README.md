@@ -6,7 +6,7 @@ Daily teaching, anchored in today's news, produced by a pipeline of specialised 
 
 ---
 
-Every morning, a pipeline of 13 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, and publishes it to the live site. No human touches the piece before you read it. Cadence is admin-configurable (default: one piece daily at 02:00 UTC).
+Every morning, a pipeline of 13 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, and publishes it to the live site. No human touches the piece before you read it. Cadence is admin-configurable via the `interval_hours` setting (allowed values: any divisor of 24; default 24 = one piece at 02:00 UTC).
 
 You see the result the next morning — a daily teaching piece anchored in today's news, in plain English, with audio narration. A growing library of past pieces. No login needed to read.
 
@@ -43,7 +43,7 @@ agents/src/             13 agent files (one per agent)
 content/daily-pieces/   Published daily pieces (YYYY-MM-DD-slug.mdx)
 src/pages/              Site routes (Astro)
 src/interactive/        Web Components (lesson-shell, audio-player, zita-chat)
-migrations/             D1 schema (11 migrations)
+migrations/             D1 schema (20 migrations, 14 tables)
 scripts/                Build, deploy, and ops scripts
 docs/                   Living documentation
 docs/handoff/           Original architecture briefs (frozen)
@@ -63,7 +63,9 @@ docs/handoff/           Original architecture briefs (frozen)
 
 Launched 2026-04-18 at https://zeemish.io. Tagged `v1.0.0`.
 
-Self-improvement loop closed 2026-04-19: Drafter now reads from the `learnings` table at runtime; Learner writes producer-side patterns after each publish; Drafter reflects honestly on its own work after each publish. First cron run under the new behaviour is scheduled for 2am UTC 2026-04-20.
+Self-improvement loop closed 2026-04-19: Drafter now reads from the `learnings` table at runtime; Learner writes producer-side patterns after each publish; Drafter reflects honestly on its own work after each publish.
+
+Multi-piece cadence shipped 2026-04-21: hourly cron + admin-configurable `interval_hours` gate (default 24 → one piece at 02:00 UTC; current production value is 12 → two pieces per day at 02:00 + 14:00 UTC). Every day-keyed D1 table (audit_results, daily_candidates, daily_piece_audio, engagement, learnings, observer_events, pipeline_log, zita_messages) carries a `piece_id` column so per-piece consumers don't pool at multi-per-day.
 
 Known open items tracked in [docs/FOLLOWUPS.md](docs/FOLLOWUPS.md). Nothing currently blocks publication.
 
