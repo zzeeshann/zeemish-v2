@@ -2,6 +2,30 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Admin + dashboard run log scoped by piece_id (Phase C of multi-per-day audit)
+
+**Context:** FOLLOWUPS audit entry point #3 + residual `WHERE date = ?` entry. After migration 0019 backfilled `piece_id` on `audit_results` + `daily_candidates`, two consumer sites were still keying off `task_id = 'daily/${date}'` and `WHERE date IN (...)`: admin home's "All Pieces" rounds/candidates widget and the public dashboard's week-pieces run log. At multi-per-day today's two pieces each showed the same pooled counts (e.g. both tobacco and air-traffic would display `2 rounds, 50 candidates` from their combined dataset). Separately, the public dashboard's today's-piece hero still did `WHERE date = ? LIMIT 1` — arbitrary same-date pick.
+
+**Decision:** swap both consumer sites to `piece_id IN (...)` joins using `daily_pieces.id`; add `ORDER BY date DESC, published_at DESC` tiebreakers to the parent SELECTs so same-date pieces stay in publish order; fix the dashboard hero with `ORDER BY published_at DESC LIMIT 1` (matches the homepage + daily-index pattern already shipped in Phase 4 of the morning's schema fix).
+
+**What shipped:**
+- **`src/pages/dashboard/admin.astro`** — `Piece` type gains `id`. pieces SELECT adds `id` column + `ORDER BY date DESC, published_at DESC`. `roundsByDate`/`candsByDate` renamed to `roundsByPiece`/`candsByPiece`; both queries now `WHERE piece_id IN (...) GROUP BY piece_id`. `allPieces` map uses `p.id` for lookups.
+- **`src/pages/dashboard/index.astro`** — `Piece` type gains `id`. Today's piece hero SELECT adds `id` + `ORDER BY published_at DESC LIMIT 1`. Week pieces SELECT adds `id` + `ORDER BY date DESC, published_at DESC`. Rounds/candidates maps + queries re-keyed on piece_id.
+
+**Trade-offs:**
+- Pre-Phase-C pre-0018 rows have NULL `piece_id` on audit_results (9 rows backfilled in 0019; all filled). So all production rows now have piece_id and the queries return the same totals as the pre-fix date-keyed versions at 1/day cadence — no behavioral regression there.
+- Local D1 (dev) doesn't have the 0014–0019 backfills unless the developer applies them manually — the dashboard renders empty in local dev. Production (where backfills ran) is the authoritative test surface. Unit-level testing wasn't added because the queries are simple SQL and the schema guarantees are in the migration.
+- Day-aggregation views unchanged: `lifetimeRuns = COUNT(DISTINCT run_id)` (distinct *days*), pipeline history grouped by run_id, weekCount by date — all intentionally day-level. `avgRoundsWeek` derives from the now-piece-scoped roundsByPiece map so its average is per-piece, not per-day (correct at multi-per-day).
+
+**Verify in production after deploy:**
+1. Admin home All Pieces list — today's two pieces (tobacco + air-traffic) should show distinct `rounds` + `candidates` counts.
+2. Public dashboard today's piece hero — should display the most-recently-published same-date piece (currently air-traffic since it shipped later than tobacco today). Changes when next slot publishes.
+3. Public dashboard run log — today's two pieces should show distinct counts.
+
+**Files:** [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro), [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro).
+
+---
+
 ## 2026-04-22: observer_events.piece_id column for per-piece admin scoping
 
 **Context:** FOLLOWUPS `[open] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit` — user noticed on evening of 2026-04-22 that the per-piece admin deep-dive was still pooling observer events across both same-date pieces (tobacco piece page showed air-traffic's `Published`, `Reflection`, `Audio failure`, `Audio published` events mixed in — 9 events total when the piece only generated ~3 of them). The 2026-04-22 morning piece_id schema fix had fixed pipeline_log / audit_results / daily_candidates pooling but left observer_events untouched because it had no piece_id column and was known-intentional by the schema-fix design (kept as 36h day window).

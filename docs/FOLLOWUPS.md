@@ -24,6 +24,7 @@ Format per entry:
 **Broader admin + dashboard + public cleanup items to surface during the audit:**
 
 1. **Admin home** (`/dashboard/admin/`):
+   - ~~"All pieces" rounds + candidates counts keyed on `daily/${date}` / `date` — pools same-date pieces.~~ **Resolved 2026-04-22 (Phase C).** Both queries now bind on `piece_id IN (...)` using the SELECT's `id` column; tiebreaker `ORDER BY date DESC, published_at DESC` on the parent SELECT preserves publish order at multi-per-day. See DECISIONS 2026-04-22 "Admin + dashboard run log scoped by piece_id".
    - Observer events section is global (last 30 by created_at DESC) — is that the right scope or should it filter by ack status / severity mix?
    - "All pieces" list links to per-piece admin page via `adminPieceHref(date, pieceId?)` — verify the slug lookup works for every historical piece (had a fallback path pre-Phase-7).
    - Pipeline history (last 14 runs grouped by run_id = date) — at multi-per-day a "run" is a day, grouping hides per-piece run quality. Worth a per-piece grouping mode.
@@ -34,8 +35,9 @@ Format per entry:
    - Per-piece admin's "Questions from readers" section should match.
 
 3. **Public dashboard** (`/dashboard/`):
-   - "Today's piece" hero at [`src/pages/dashboard/index.astro:59`](../src/pages/dashboard/index.astro) — open residual-sites entry below notes `WHERE date = ? LIMIT 1` picks arbitrary at multi-per-day. 1-line fix.
-   - "How it's holding up" signals, "What we've learned so far" panel, week's output stat grid — verify queries scope sensibly at multi-per-day (day-aggregates should stay date-keyed, per-piece counts should use piece_id).
+   - ~~"Today's piece" hero at [`src/pages/dashboard/index.astro:59`](../src/pages/dashboard/index.astro) — open residual-sites entry below notes `WHERE date = ? LIMIT 1` picks arbitrary at multi-per-day. 1-line fix.~~ **Resolved 2026-04-22 (Phase C).** Added `ORDER BY published_at DESC` to the hero SELECT.
+   - ~~Week pieces + run log rounds/candidates counts pooled by date.~~ **Resolved 2026-04-22 (Phase C).** Same piece_id join swap as admin home. Tiebreaker `ORDER BY date DESC, published_at DESC` on the parent SELECT.
+   - "How it's holding up" signals, "What we've learned so far" panel, week's output stat grid — day-aggregates are correct as-is (they're legitimately day-level metrics); the only per-piece count in this section is `avgRoundsWeek` which derives from the now-piece-id-keyed roundsByPiece map and stays correct.
    - Recent pieces list + library list sorted by `published_at DESC` — already correct post-Phase-4.
 
 4. **`daily_candidates.selected` never-flipped bug** — separate FOLLOWUPS entry, but audit surfaced it again: 0 rows across all 7 piece_ids have `selected=1`, so admin per-piece "Picked candidate marked with teal dot" never renders the teal dot. Curator's `selectedCandidateId` return value either isn't populated or doesn't match any candidate UUID. Investigate alongside this audit.
@@ -110,12 +112,12 @@ Path 1 is shippable today; path 2 comes for free if the schema work lands.
 
 ---
 
-## [open] 2026-04-22: Residual `WHERE date = ? LIMIT 1` sites surfaced during slot-aware-guard audit
+## [resolved] 2026-04-22: Residual `WHERE date = ? LIMIT 1` sites surfaced during slot-aware-guard audit
 
 **Surfaced:** 2026-04-22 PM. Post-fix sweep for `WHERE date = ? LIMIT 1` across the repo (to confirm no other silent-skip paths) turned up two sites that aren't correctness blockers but pick an arbitrary same-date piece at multi-per-day:
 
 1. ~~[src/pages/api/daily/[date]/made.ts:71](../src/pages/api/daily/[date]/made.ts) — the made-drawer's per-piece metadata lookup~~ **Resolved 2026-04-22 via Phase 4 of the piece_id schema fix.** `/api/daily/[date]/made` now accepts `?pieceId=` and prefers it for all 5 piece-scoped queries (metadata, timeline, audit rounds, candidates, audio); date-keyed path now uses `ORDER BY published_at DESC LIMIT 1`. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
-2. [src/pages/dashboard/index.astro:59](../src/pages/dashboard/index.astro) — public dashboard's "today's piece" hero query. At multi-per-day shows arbitrary same-date piece. Simple fix: add `ORDER BY published_at DESC LIMIT 1` (matches server.ts:213/268's pattern for the same situation). Homepage hero already sorts this way; this is dashboard-specific. **Still open.**
+2. ~~[src/pages/dashboard/index.astro:59](../src/pages/dashboard/index.astro) — public dashboard's "today's piece" hero query.~~ **Resolved 2026-04-22 (Phase C commit).** Added `ORDER BY published_at DESC` to the hero SELECT so same-date pieces show the most-recently-published one, matching the homepage + daily-index sorts. See DECISIONS 2026-04-22 "Admin + dashboard run log scoped by piece_id".
 
 **Hypothesis:** both existed pre-Phase-4 URL change and were missed by the Phase 4–7 audits. Neither blocks cadence — the slot-aware guard (resolved entry above) was the only real blocker. These are UX fidelity fixes.
 
@@ -123,6 +125,8 @@ Path 1 is shippable today; path 2 comes for free if the schema work lands.
 - `dashboard/index.astro` — 1-line patch, add `ORDER BY published_at DESC` to the query.
 
 **Priority:** Low. Only matters at multi-per-day; at `interval_hours=24` it's an unambiguous single-row query.
+
+**Resolved:** 2026-04-22. Both sites (made.ts and dashboard/index.astro:59) now sort by `published_at DESC`. Fall-back for made.ts already shipped in Phase 4 of the morning's piece_id schema fix; dashboard/index.astro:59 shipped in the Phase C audit commit this evening.
 
 ---
 

@@ -22,6 +22,7 @@ const weekAgoIso = new Date(nowMs - WEEK_MS).toISOString().slice(0, 10);
 
 // --- State: everything starts empty and fills in as queries succeed. ---
 type Piece = {
+  id: string;
   date: string;
   headline: string;
   underlying_subject: string | null;
@@ -55,8 +56,11 @@ let intervalHours = 24;
 try {
   intervalHours = await getIntervalHours(db);
 
+  // Today's piece hero — at multi-per-day, pick the most-recently-published
+  // same-date piece so the hero updates after each slot publishes. Matches
+  // the homepage hero's sort in src/pages/index.astro / src/pages/daily/index.astro.
   todaysPiece = await db
-    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date = ? LIMIT 1')
+    .prepare('SELECT id, date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
     .bind(today)
     .first<Piece>();
 
@@ -85,8 +89,10 @@ try {
   lifetimeSampleSize = lifeVoice?.n ?? 0;
 
   // Pieces from the last 7 days (including today) — used for tier mix + run log.
+  // ORDER BY date DESC, published_at DESC so same-date pieces (multi-per-day)
+  // stay in publish order rather than D1's implicit row order.
   const weekPiecesRes = await db
-    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date >= ? ORDER BY date DESC')
+    .prepare('SELECT id, date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date >= ? ORDER BY date DESC, published_at DESC')
     .bind(weekAgoIso)
     .all<Piece>();
   const weekPieces = weekPiecesRes.results;
@@ -95,36 +101,37 @@ try {
     tierMixWeek[tier] += 1;
   }
 
-  // Per-date round count (max draft_id suffix) and candidate count for the last 7 days.
-  const roundsByDate = new Map<string, number>();
-  const candsByDate = new Map<string, number>();
+  // Per-piece round + candidate counts for the last 7 days — keyed by
+  // piece_id (migration 0018 + 0019 backfill). Pre-0018 this was keyed on
+  // `daily/${date}` / `date`, which pooled same-date pieces into one count
+  // at multi-per-day cadence.
+  const roundsByPiece = new Map<string, number>();
+  const candsByPiece = new Map<string, number>();
   if (weekPieces.length > 0) {
-    const taskIds = weekPieces.map((p) => `daily/${p.date}`);
-    const placeholders = taskIds.map(() => '?').join(',');
+    const pieceIds = weekPieces.map((p) => p.id);
+    const placeholders = pieceIds.map(() => '?').join(',');
     const roundsRes = await db
-      .prepare(`SELECT task_id, draft_id FROM audit_results WHERE task_id IN (${placeholders})`)
-      .bind(...taskIds)
-      .all<{ task_id: string; draft_id: string }>();
+      .prepare(`SELECT piece_id, draft_id FROM audit_results WHERE piece_id IN (${placeholders})`)
+      .bind(...pieceIds)
+      .all<{ piece_id: string; draft_id: string }>();
     for (const r of roundsRes.results) {
       const m = r.draft_id.match(/-r(\d+)$/);
       const round = m ? parseInt(m[1], 10) : 1;
-      const prev = roundsByDate.get(r.task_id) ?? 0;
-      if (round > prev) roundsByDate.set(r.task_id, round);
+      const prev = roundsByPiece.get(r.piece_id) ?? 0;
+      if (round > prev) roundsByPiece.set(r.piece_id, round);
     }
 
-    const dates = weekPieces.map((p) => p.date);
-    const datePlaceholders = dates.map(() => '?').join(',');
     const candsRes = await db
-      .prepare(`SELECT date, COUNT(*) as n FROM daily_candidates WHERE date IN (${datePlaceholders}) GROUP BY date`)
-      .bind(...dates)
-      .all<{ date: string; n: number }>();
-    for (const r of candsRes.results) candsByDate.set(r.date, r.n);
+      .prepare(`SELECT piece_id, COUNT(*) as n FROM daily_candidates WHERE piece_id IN (${placeholders}) GROUP BY piece_id`)
+      .bind(...pieceIds)
+      .all<{ piece_id: string; n: number }>();
+    for (const r of candsRes.results) candsByPiece.set(r.piece_id, r.n);
   }
 
   runLog = weekPieces.map((p) => ({
     ...p,
-    rounds: roundsByDate.get(`daily/${p.date}`) ?? 0,
-    candidates: candsByDate.get(p.date) ?? 0,
+    rounds: roundsByPiece.get(p.id) ?? 0,
+    candidates: candsByPiece.get(p.id) ?? 0,
   }));
 
   // Avg rounds across this week's pieces (if any).

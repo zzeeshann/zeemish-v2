@@ -23,6 +23,7 @@ const nowMs = Date.now();
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 type Piece = {
+  id: string;
   date: string;
   headline: string;
   underlying_subject: string | null;
@@ -100,41 +101,43 @@ try {
   errorsThisWeek = errs?.n ?? 0;
 
   // All pieces newest first. Used for the All Pieces list.
+  // ORDER BY date DESC, published_at DESC so same-date pieces (multi-per-day)
+  // stay in publish order rather than D1's implicit row order.
   const piecesRes = await db
-    .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, word_count, beat_count, published_at FROM daily_pieces ORDER BY date DESC')
+    .prepare('SELECT id, date, headline, underlying_subject, voice_score, quality_flag, word_count, beat_count, published_at FROM daily_pieces ORDER BY date DESC, published_at DESC')
     .all<Piece>();
   const pieces = piecesRes.results;
 
-  // Round + candidate counts per piece (one query each, indexed by date).
-  const roundsByDate = new Map<string, number>();
-  const candsByDate = new Map<string, number>();
+  // Round + candidate counts per piece — keyed by piece_id (migration 0018 +
+  // 0019 backfill). Pre-0018 this was keyed on `daily/${date}` / `date`,
+  // which pooled same-date pieces into one count at multi-per-day cadence.
+  const roundsByPiece = new Map<string, number>();
+  const candsByPiece = new Map<string, number>();
   if (pieces.length > 0) {
-    const taskIds = pieces.map((p) => `daily/${p.date}`);
-    const placeholders = taskIds.map(() => '?').join(',');
+    const pieceIds = pieces.map((p) => p.id);
+    const placeholders = pieceIds.map(() => '?').join(',');
     const roundsRes = await db
-      .prepare(`SELECT task_id, draft_id FROM audit_results WHERE task_id IN (${placeholders})`)
-      .bind(...taskIds)
-      .all<{ task_id: string; draft_id: string }>();
+      .prepare(`SELECT piece_id, draft_id FROM audit_results WHERE piece_id IN (${placeholders})`)
+      .bind(...pieceIds)
+      .all<{ piece_id: string; draft_id: string }>();
     for (const r of roundsRes.results) {
       const m = r.draft_id.match(/-r(\d+)$/);
       const round = m ? parseInt(m[1], 10) : 1;
-      const prev = roundsByDate.get(r.task_id) ?? 0;
-      if (round > prev) roundsByDate.set(r.task_id, round);
+      const prev = roundsByPiece.get(r.piece_id) ?? 0;
+      if (round > prev) roundsByPiece.set(r.piece_id, round);
     }
 
-    const dates = pieces.map((p) => p.date);
-    const datePlaceholders = dates.map(() => '?').join(',');
     const candsRes = await db
-      .prepare(`SELECT date, COUNT(*) as n FROM daily_candidates WHERE date IN (${datePlaceholders}) GROUP BY date`)
-      .bind(...dates)
-      .all<{ date: string; n: number }>();
-    for (const r of candsRes.results) candsByDate.set(r.date, r.n);
+      .prepare(`SELECT piece_id, COUNT(*) as n FROM daily_candidates WHERE piece_id IN (${placeholders}) GROUP BY piece_id`)
+      .bind(...pieceIds)
+      .all<{ piece_id: string; n: number }>();
+    for (const r of candsRes.results) candsByPiece.set(r.piece_id, r.n);
   }
 
   allPieces = pieces.map((p) => ({
     ...p,
-    rounds: roundsByDate.get(`daily/${p.date}`) ?? 0,
-    candidates: candsByDate.get(p.date) ?? 0,
+    rounds: roundsByPiece.get(p.id) ?? 0,
+    candidates: candsByPiece.get(p.id) ?? 0,
   }));
 
   // Lifetime runs = distinct run_id in pipeline_log (a 'run' is one day's
