@@ -2,6 +2,28 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: Curator prompt exposes candidate UUIDs so `selected` can flip
+
+**Context:** FOLLOWUPS `[open] 2026-04-21: daily_candidates.selected never flipped on historical runs` — prod had 250 candidate rows across 5 dates, zero with `selected = 1`. Director's post-curation UPDATE at [director.ts:227](../agents/src/director.ts) was wrapped in `.run().catch(() => {})`, so whatever was going wrong was silent. Admin per-piece deep-dive's "picked candidate marked with teal dot" has therefore never rendered.
+
+**Root cause:** [buildCuratorPrompt](../agents/src/curator-prompt.ts) rendered candidates as `${i+1}. [${category}] "${headline}" (${source})` — **no UUID in the prompt at all**. Claude's returned `selectedCandidateId` was whatever it guessed (empty, a number, a made-up string) — never a real row id. The UPDATE then matched 0 rows. `.catch(() => {})` hid the 0-rows outcome (0 rows isn't an exception — `.run()` succeeds; the silent-catch caught only throw-path errors). Two failure modes stacked, producing zero signal.
+
+**Fix:**
+1. **Prompt fix** — `buildCuratorPrompt` now emits `${i+1}. id: ${c.id}\n   [${category}] "${headline}" (${source})\n   ${summary}`. Added explicit instruction: "selectedCandidateId MUST be the exact id string shown next to the chosen candidate above — do not invent, truncate, or guess."
+2. **Silent-catch removal** — the UPDATE is now wrapped in try/catch that inspects `upd.meta.changes`. Three branches fire `observer.logError` on regression: (a) throw during UPDATE, (b) UPDATE runs but 0 rows match (id-shape drift), (c) curator returned no `selectedCandidateId` at all. Next regression in this code path is visible in the admin observer feed instead of silent.
+
+**Trade-offs:**
+- Historical 250 rows of `selected=0` stay as-is — the winning id for those runs is not recoverable (Curator's reasoning wasn't persisted and the admin feed wasn't surfacing Curator's raw output). Backfilling would mean guessing, which is the class of bug we just fixed.
+- The prompt is ~50 chars longer per candidate × 50 candidates = ~2500 extra input tokens per curate call. Negligible vs the ~1200 output tokens we already pay Claude.
+- Observability adds up to 3 new observer_events per run (one per regression branch). At happy path, zero new events.
+- Didn't change the response schema (still `selectedCandidateId` at the top level) — no downstream consumers to update.
+
+**Verify on next 02:00 UTC run:** `SELECT id, selected FROM daily_candidates WHERE piece_id = '<new-piece-id>' AND selected = 1` should return exactly 1 row. Per-piece admin page's teal dot should render on the Curator section for the first time.
+
+**Files:** [agents/src/curator-prompt.ts](../agents/src/curator-prompt.ts), [agents/src/director.ts](../agents/src/director.ts). No migration; code-only.
+
+---
+
 ## 2026-04-22: piece_id columns on day-keyed tables (audit_results / pipeline_log / daily_candidates)
 
 **Context:** Supersedes the earlier 2026-04-22 entry "Time-window scoping for admin per-piece deep-dive at multi-per-day" below. That entry shipped a midpoint-between-publishes bandaid on the astro-side admin page to isolate per-piece data without a schema change. User pushed back ("you are going round and round") — the bandaid was correct-for-now but the root cause was schema-level: three tables had no `piece_id` column. This entry is the proper fix, shipped across 5 phases with pauses between each.

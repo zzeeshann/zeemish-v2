@@ -303,7 +303,7 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 
 ---
 
-## [open] 2026-04-21: `daily_candidates.selected` never flipped on historical runs
+## [resolved] 2026-04-21: `daily_candidates.selected` never flipped on historical runs
 
 **Surfaced:** 2026-04-21 during multi-piece cadence Phase 1 sizing audit. Prod `daily_candidates` has 250 rows across 5 dates (50/day, consistent with Scanner's `MAX_CANDIDATES_PER_DAY` cap) but **zero rows have `selected = 1`** — meaning no historical daily_candidates row maps back to the piece it became. Director's post-curation UPDATE at [director.ts:150-156](../agents/src/director.ts) is wrapped in `.run().catch(() => {})` which silently swallows any error.
 
@@ -318,6 +318,8 @@ Replacement strategy: either neutral ("every morning" / "on cadence") OR accurat
 - Matters for Phase 3: with piece_id FKs in place, Director should set `daily_candidates.piece_id` and `selected=1` atomically for the winning candidate. Won't help if the current code path never fires the UPDATE.
 
 **Priority:** Medium. Non-blocking for Phase 1 (piece_id column added nullable), but Phase 3's admin observability depends on being able to trace "which candidate became which piece." Investigate alongside or before Phase 3.
+
+**Resolved:** 2026-04-22 — root cause was hypothesis #2: `buildCuratorPrompt` in [agents/src/curator-prompt.ts](../agents/src/curator-prompt.ts) rendered candidates as a numbered list with headline/source/summary but **never included the candidate UUID**, so Claude had no real `id` to return. Whatever string Claude emitted for `selectedCandidateId` matched 0 rows, and `.run().catch(() => {})` at [director.ts:227-232](../agents/src/director.ts) hid it. Fixed in two parts: (1) prompt now shows `id: <uuid>` next to each candidate plus an explicit "MUST be the exact id string" instruction; (2) silent catch replaced with try/catch that inspects `meta.changes` and logs via `observer.logError` on both throw and 0-rows, plus a third branch that logs when Curator returns no `selectedCandidateId` at all. Three regression modes now visible in the admin observer feed. Historical 250 rows of `selected=0` stay as-is (no backfill — the winning id for those runs is not recoverable). See DECISIONS 2026-04-22 "Curator prompt exposes candidate UUIDs".
 
 ---
 

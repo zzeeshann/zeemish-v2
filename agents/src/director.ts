@@ -223,12 +223,37 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       headline: brief.headline, subject: brief.underlyingSubject, newsSource: brief.newsSource,
     });
 
-    // Mark selected candidate in D1
+    // Mark selected candidate in D1. The UPDATE was previously wrapped in
+    // `.catch(() => {})`, which hid both exceptions AND silent 0-row mismatches.
+    // As of 2026-04-22 the curator prompt shows candidate UUIDs to Claude so
+    // the id returned is a real one; surface both failure modes via Observer
+    // so the next regression isn't silent like the 2026-04-21 one was.
     if (curatorResult.selectedCandidateId) {
-      await this.env.DB
-        .prepare('UPDATE daily_candidates SET selected = 1, teachability_score = 100 WHERE id = ?')
-        .bind(curatorResult.selectedCandidateId)
-        .run().catch(() => {});
+      try {
+        const upd = await this.env.DB
+          .prepare('UPDATE daily_candidates SET selected = 1, teachability_score = 100 WHERE id = ?')
+          .bind(curatorResult.selectedCandidateId)
+          .run();
+        if (!upd.meta || upd.meta.changes === 0) {
+          const observer = await this.subAgent(ObserverAgent, 'observer');
+          await observer.logError(
+            'curator', 0,
+            `selectedCandidateId ${curatorResult.selectedCandidateId} matched 0 rows in daily_candidates — id shape drift from Curator`,
+          );
+        }
+      } catch (err) {
+        const observer = await this.subAgent(ObserverAgent, 'observer');
+        await observer.logError(
+          'curator', 0,
+          `Failed to mark selected candidate: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else {
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError(
+        'curator', 0,
+        `Curator returned no selectedCandidateId — prompt regression or empty candidate list`,
+      );
     }
 
     // ─── Phase 3: Drafter ────────────────────────────────────────────

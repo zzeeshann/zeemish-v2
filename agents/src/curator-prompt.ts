@@ -44,10 +44,10 @@ export function buildCuratorPrompt(
   recentPieces: string[],
 ): string {
   return `## Today's news candidates:
-${candidates.map((c, i) => `${i + 1}. [${c.category}] "${c.headline}" (${c.source})\n   ${c.summary}`).join('\n\n')}
+${candidates.map((c, i) => `${i + 1}. id: ${c.id}\n   [${c.category}] "${c.headline}" (${c.source})\n   ${c.summary}`).join('\n\n')}
 
 ## Already published recently — includes today's earlier picks if any (avoid repetition):
 ${recentPieces.length > 0 ? recentPieces.join('\n') : 'None yet.'}
 
-Pick the most teachable story and create a brief. Return JSON only.`;
+Pick the most teachable story and create a brief. Return JSON only. The "selectedCandidateId" field MUST be the exact id string shown next to the chosen candidate above — do not invent, truncate, or guess.`;
 }
