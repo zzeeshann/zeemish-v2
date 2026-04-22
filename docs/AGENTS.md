@@ -130,6 +130,7 @@ Learner: runs off-pipeline on reader engagement data
   - `publishAudio(filePath, audioBeats)` — second commit (metadata-only). Splices `audioBeats:` YAML block into frontmatter. Idempotent — re-running with the same beats returns the existing sha as a no-op.
   - `readPublishedMdx(filePath)` — public read helper for `Director.retryAudio`.
 - **Metadata carve-out:** `publishAudio` modifies a published file. The "published pieces are permanent" rule governs teaching content (beats, narrative, facts); frontmatter metadata (voiceScore, qualityFlag, audioBeats) is an allowed exception. See `DECISIONS.md` 2026-04-18.
+- **spliceAudioBeats regex fix (2026-04-22):** the strip regex `/\naudioBeats:\n(?:  .+\n)*/` previously consumed the `\n` before `audioBeats:`, so a re-splice on an already-spliced file dropped the newline separator before the closing `---`. This caused the 2026-04-17 frontmatter corruption (`qualityFlag: "low"\n---\n` → `qualityFlag: "low"---`). Fix captures the leading newline `/(\n)audioBeats:\n(?:  .+\n)*/ → '$1'`. Covered by [`agents/scripts/verify-splice.mjs`](../agents/scripts/verify-splice.mjs) (4 test cases, runs as `pnpm verify-splice`). See DECISIONS 2026-04-22 "spliceAudioBeats regex consumed leading newline".
 - **Output:** `PublishResult` — commit SHA, commit URL, file path.
 - **File:** `agents/src/publisher.ts`
 
