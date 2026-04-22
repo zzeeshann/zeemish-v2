@@ -46,7 +46,7 @@ export function buildCuratorPrompt(
   return `## Today's news candidates:
 ${candidates.map((c, i) => `${i + 1}. [${c.category}] "${c.headline}" (${c.source})\n   ${c.summary}`).join('\n\n')}
 
-## Already published in last 30 days (avoid repetition):
+## Already published recently — includes today's earlier picks if any (avoid repetition):
 ${recentPieces.length > 0 ? recentPieces.join('\n') : 'None yet.'}
 
 Pick the most teachable story and create a brief. Return JSON only.`;
