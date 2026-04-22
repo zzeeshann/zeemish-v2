@@ -518,7 +518,7 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 
 ---
 
-## [open] 2026-04-19: Continue retry path may trigger full re-run instead of resuming
+## [resolved] 2026-04-19: Continue retry path may trigger full re-run instead of resuming
 
 **Surfaced:** 2026-04-19. When combined with the Publisher double-fire bug above, the Continue button corrupted 2026-04-17's frontmatter. Observer events show producer ran twice (chunks: 4, then chunks: 1) — second run should have been a true no-op (skip producer entirely) but instead walked the full pipeline again.
 
@@ -530,6 +530,8 @@ Option 2 is the more durable fix — it aligns with the parallel durable fix alr
 - Consider whether Continue vs Start-over should even share the same runAudioPipeline entry point. Start-over wipes and runs; Continue should resume from the last successful beat without re-triggering the publish step if nothing new was produced.
 
 **Priority:** Medium. Paired with the Publisher double-fire, this is what corrupted 2026-04-17. Fixing either one prevents the corruption; fixing both defends in depth.
+
+**Resolved:** 2026-04-22 (Phase E2 of audio retry trio fix). `retryAudio` at [`agents/src/director.ts`](../agents/src/director.ts) now reads `has_audio` alongside date + headline and short-circuits with an Observer warn when `has_audio === 1`. Operator sees a "retryAudio no-op" event in the admin feed; no pipeline_log rows, no git commit, no risk of double commit. "Start over" (retryAudioFresh) is the explicit escape hatch — it clears `has_audio=0` first so it always runs. Defense-in-depth layered with Phase E1's spliceAudioBeats regex fix: even if a race dispatches two retries simultaneously, only one passes this guard. See DECISIONS 2026-04-22 "retryAudio short-circuits when audio already complete".
 
 ---
 

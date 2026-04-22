@@ -833,11 +833,29 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     }
 
     const piece = await this.env.DB
-      .prepare('SELECT date, headline FROM daily_pieces WHERE id = ? LIMIT 1')
+      .prepare('SELECT date, headline, has_audio FROM daily_pieces WHERE id = ? LIMIT 1')
       .bind(pieceId)
-      .first<{ date: string; headline: string }>();
+      .first<{ date: string; headline: string; has_audio: number }>();
     if (!piece) throw new Error(`retryAudio: no piece with id ${pieceId}`);
     const { date } = piece;
+
+    // Short-circuit when audio is already published — a second Continue
+    // click (either from a double-tap or a stale tab) re-running the
+    // full pipeline produced the 2026-04-17 corruption when stacked
+    // with the spliceAudioBeats regex bug (resolved separately in
+    // `55fce9f`). Defense-in-depth: refuse the work, surface via
+    // Observer so the operator notices. "Start over" (retryAudioFresh)
+    // is the escape hatch — it wipes has_audio first so it always runs.
+    if (piece.has_audio === 1) {
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError(
+        'audio',
+        0,
+        `retryAudio no-op: piece ${pieceId} already has audio published (has_audio=1). Use "Start over" to regenerate.`,
+        pieceId,
+      );
+      return;
+    }
 
     // filePath lives in the publishing.done step's data column.
     // run_id stays YYYY-MM-DD (cadence Phase 3 walk-back) but we now

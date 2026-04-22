@@ -2,6 +2,21 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-22: retryAudio short-circuits when audio already complete (Phase E2 of audio trio fix)
+
+**Context:** FOLLOWUPS `[open] 2026-04-19: Continue retry path may trigger full re-run`. `retryAudio` at [`agents/src/director.ts:830`](../agents/src/director.ts) validated the pieceId, read the piece's date + headline, and scheduled `runAudioPipelineScheduled` — **with no check for `has_audio=1`**. A completed piece retried via "Continue" ran the full pipeline: Producer no-op'd via R2 head-check, but Auditor and Publisher both ran. Stacked with the Phase E1 regex bug this produced the 2026-04-17 corruption.
+
+**Decision:** short-circuit at the top of `retryAudio` when `has_audio === 1`. Log via `observer.logError` (warn severity) with the message `retryAudio no-op: piece X already has audio published. Use "Start over" to regenerate.` Return cleanly without scheduling an alarm. Operator sees the no-op in the admin observer feed.
+
+**Trade-offs:**
+- Short-circuit is in `retryAudio`, not `retryAudioFresh`. "Start over" is explicit regenerate-and-replace — it wipes `has_audio=0` first so its own inner `retryAudio` call passes the guard. The split matches the admin UI's "Continue" vs "Start over" buttons semantically.
+- Defense-in-depth with Phase E1. Even a simultaneous race that dispatches two retries will see one of them land `has_audio=1` first and the other short-circuit. Without the guard, both would run; without E1, the second would corrupt; with E1 alone, the second produces a redundant no-op commit. E1 + E2 gives the cleanest behaviour.
+- The observer event uses `logError` (severity: warn) rather than a new dedicated helper. Keeps the Observer surface lean — the message is self-explanatory.
+
+**Files:** [agents/src/director.ts](../agents/src/director.ts).
+
+---
+
 ## 2026-04-22: spliceAudioBeats regex consumed leading newline — root cause of 2026-04-17 frontmatter corruption
 
 **Context:** FOLLOWUPS `[open] 2026-04-19: Publisher.publishAudio double-fires on Continue retry path` — 2026-04-17 retro audio produced two commits, the second collapsing `qualityFlag: "low"\n---\n` to `qualityFlag: "low"---` (no YAML terminator, broke content-collection parsing). Required a `git revert` to recover. FOLLOWUPS entry named two hypothetical bugs stacked: (1) Continue re-runs full pipeline, (2) publisher's idempotent guard should have caught the second commit but didn't. Entry said the corruption state "the regex logic on paper should not be able to generate."
