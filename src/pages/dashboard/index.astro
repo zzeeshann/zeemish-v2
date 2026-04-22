@@ -2,11 +2,13 @@
 export const prerender = false;
 
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
 import { pipelineStepLabel } from '../../lib/pipeline-steps';
 import { getIntervalHours, nextRunRelative } from '../../lib/cadence';
+import { deriveSlug } from '../../lib/slug';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -52,6 +54,25 @@ let isRunningNow = false;
 let learningCounts = { producer: 0, selfReflection: 0, total: 0 };
 let latestLearning: { observation: string; source: string | null; piece_date: string | null; created_at: number } | null = null;
 let intervalHours = 24;
+
+// Slug lookup for piece URLs (post-Phase-4 the canonical URL is
+// /daily/{date}/{slug}/ — date-only URLs 404). Keyed by piece_id; falls
+// back to date-keyed Map for the hero's `todaysPiece` since it doesn't
+// carry a pieceId field today (the SELECT returns id as p.id though, so
+// prefer piece_id when present). Mirrors admin.astro's pattern.
+const collectionEntries = await getCollection('dailyPieces');
+const slugByPieceId = new Map<string, string>();
+const slugByDate = new Map<string, string>();
+for (const e of collectionEntries) {
+  if (e.data.pieceId) slugByPieceId.set(e.data.pieceId, deriveSlug(e.id));
+  // Last-writer-wins at multi-per-day is acceptable for the date-keyed
+  // fallback — the id-keyed Map is the authoritative path.
+  slugByDate.set(e.data.date, deriveSlug(e.id));
+}
+function pieceHref(date: string, pieceId?: string | null): string {
+  const slug = (pieceId && slugByPieceId.get(pieceId)) ?? slugByDate.get(date);
+  return slug ? `/daily/${date}/${slug}/` : `/daily/${date}/`;
+}
 
 try {
   intervalHours = await getIntervalHours(db);
@@ -348,7 +369,7 @@ const latestLearningDate = latestLearning
       </div>
     )}
     {todayStatus === 'published' && todaysPiece && (
-      <a href={`/daily/${todaysPiece.date}/`} class="text-sm text-zee-primary hover:underline whitespace-nowrap">
+      <a href={pieceHref(todaysPiece.date, todaysPiece.id)} class="text-sm text-zee-primary hover:underline whitespace-nowrap">
         View piece →
       </a>
     )}
@@ -408,7 +429,7 @@ const latestLearningDate = latestLearning
           const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
           return (
             <li>
-              <a href={`/daily/${row.date}/`} class="flex items-start gap-4 py-4 group">
+              <a href={pieceHref(row.date, row.id)} class="flex items-start gap-4 py-4 group">
                 <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
                 <div class="flex-1 min-w-0">
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
