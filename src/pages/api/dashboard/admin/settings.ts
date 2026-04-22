@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getUser } from '../../../../lib/db';
 import { logObserverEvent } from '../../../../lib/observer-events';
+import { ALLOWED_INTERVAL_HOURS } from '../../../../lib/cadence';
 
 export const prerender = false;
 
@@ -12,15 +13,15 @@ export const prerender = false;
  * is `interval_hours` (multi-piece cadence), but this surface is
  * forward-looking for other admin-togglable state.
  *
- * `ALLOWED_INTERVAL_HOURS` is duplicated from the agents-worker helper
- * at `agents/src/shared/admin-settings.ts`. The two workers don't share
- * imports (separate packages). Both must be updated together if the
- * allowed-set ever changes. Defensive layers preserve this:
+ * `ALLOWED_INTERVAL_HOURS` is the site-side mirror of the agents-worker
+ * helper at `agents/src/shared/admin-settings.ts`. The two workers
+ * don't share imports (separate packages). Both must be updated
+ * together if the allowed-set ever changes. Defensive layers preserve
+ * this:
  *   - POST here rejects out-of-set values (400).
  *   - Director's parseIntervalHours on the agents side also falls back
  *     to 24 for out-of-set values, so a drift still fails safe.
  */
-const ALLOWED_INTERVAL_HOURS = [1, 2, 3, 4, 6, 8, 12, 24] as const;
 
 type AdminSettingsRow = { key: string; value: string; updated_at: number };
 

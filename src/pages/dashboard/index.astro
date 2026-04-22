@@ -6,6 +6,7 @@ import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
 import { pipelineStepLabel } from '../../lib/pipeline-steps';
+import { getIntervalHours, nextRunRelative } from '../../lib/cadence';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -49,8 +50,11 @@ let lastPipelineStep: { step: string; status: string; tMs: number; runId: string
 let isRunningNow = false;
 let learningCounts = { producer: 0, selfReflection: 0, total: 0 };
 let latestLearning: { observation: string; source: string | null; piece_date: string | null; created_at: number } | null = null;
+let intervalHours = 24;
 
 try {
+  intervalHours = await getIntervalHours(db);
+
   todaysPiece = await db
     .prepare('SELECT date, headline, underlying_subject, voice_score, quality_flag, published_at FROM daily_pieces WHERE date = ? LIMIT 1')
     .bind(today)
@@ -202,17 +206,10 @@ if (runningSince) {
   daysRunning = Math.max(1, diffDays + 1);
 }
 
-// Next run at 02:00 UTC — compute time-until string.
-function nextRunRelative(): string {
-  const now = new Date();
-  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 2, 0, 0, 0));
-  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
-  const diff = next.getTime() - now.getTime();
-  const hrs = Math.floor(diff / (60 * 60 * 1000));
-  const mins = Math.floor((diff % (60 * 60 * 1000)) / (60 * 1000));
-  if (hrs === 0) return `${mins}m`;
-  return `${hrs}h ${mins}m`;
-}
+// Next run — cadence-aware via `admin_settings.interval_hours`. At the
+// default (24) the next slot is always the next 02:00 UTC; at 4h it's
+// whichever of 02/06/10/14/18/22 UTC comes next, etc. See src/lib/cadence.ts.
+const nextRunStr = nextRunRelative(nowMs, intervalHours);
 
 // Header subtitle — adapts to state.
 let subtitle: string;
@@ -223,9 +220,9 @@ if (isRunningNow && lastPipelineStep) {
     ? `Today's piece is live. The first one.`
     : `Today's piece is live. ${lifetimeCount} pieces published in ${daysRunning} ${daysRunning === 1 ? 'day' : 'days'}.`;
 } else if (lifetimeCount === 0) {
-  subtitle = `Waiting on the first piece. Next run in ${nextRunRelative()}.`;
+  subtitle = `Waiting on the first piece. Next run in ${nextRunStr}.`;
 } else {
-  subtitle = `${lifetimeCount} ${lifetimeCount === 1 ? 'piece' : 'pieces'} in ${daysRunning} ${daysRunning === 1 ? 'day' : 'days'}. Next run in ${nextRunRelative()}.`;
+  subtitle = `${lifetimeCount} ${lifetimeCount === 1 ? 'piece' : 'pieces'} in ${daysRunning} ${daysRunning === 1 ? 'day' : 'days'}. Next run in ${nextRunStr}.`;
 }
 
 // Today status strip — one of three states.
@@ -340,7 +337,7 @@ const latestLearningDate = latestLearning
     {todayStatus === 'pending' && (
       <div class="flex items-center gap-3 flex-wrap">
         <span class="w-2.5 h-2.5 rounded-full border border-zee-border shrink-0" aria-hidden="true"></span>
-        <span class="text-sm text-zee-muted">Pipeline hasn't run yet — next run at 02:00 UTC</span>
+        <span class="text-sm text-zee-muted">Pipeline hasn't run yet — next run in {nextRunStr}</span>
       </div>
     )}
     {todayStatus === 'published' && todaysPiece && (
@@ -395,7 +392,7 @@ const latestLearningDate = latestLearning
     <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Recent runs</h2>
     {runLog.length === 0 ? (
       <p class="text-sm text-zee-muted italic py-4">
-        No runs in the last 7 days. Next run at 02:00 UTC.
+        No runs in the last 7 days. Next run in {nextRunStr}.
       </p>
     ) : (
       <ul class="divide-y divide-zee-border/60">
