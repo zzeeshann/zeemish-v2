@@ -434,10 +434,21 @@ function shortDate(iso: string): string {
       <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Pipeline history (last 14 runs)</h2>
       <ul class="divide-y divide-zee-border/60 text-sm">
         {pipelineHistory.map((r) => {
-          const ok = r.finalStep === 'done';
-          const skipped = r.finalStep === 'skipped';
+          // Verdict reads finalStatus, not just step name. Healthy audio runs
+          // terminate at `step='audio-publishing', status='done'` — matching
+          // on step name alone misread those as "Stalled at audio-publishing".
+          const status = r.finalStatus;
+          const step = r.finalStep;
+          const skipped = step === 'skipped';
+          const errored = status === 'failed';
+          const running = status === 'running';
+          const ok = status === 'done' && !skipped;
           const dotCls = ok ? 'bg-zee-primary' : skipped ? 'bg-zee-muted' : 'bg-zee-gold';
-          const verdict = ok ? 'Done' : skipped ? 'Skipped' : (r.finalStep === 'error' ? 'Errored' : `Stalled at ${r.finalStep}`);
+          const verdict = ok ? 'Done'
+            : skipped ? 'Skipped'
+            : errored ? `Errored at ${step}`
+            : running ? `Running · ${step}`
+            : `Stalled at ${step}`;
           const score = r.data?.voiceScore != null ? `voice ${r.data.voiceScore}/100` : null;
           const revs = r.data?.revisions != null ? `${r.data.revisions} revision${r.data.revisions === 1 ? '' : 's'}` : null;
           const flag = r.data?.qualityFlag === 'low' ? 'flagged low' : null;
