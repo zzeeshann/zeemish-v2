@@ -51,8 +51,6 @@ let avgCandidatesPerDay: number | null = null;
 let runningSince: string | null = null;
 let lastPipelineStep: { step: string; status: string; tMs: number; runId: string } | null = null;
 let isRunningNow = false;
-let learningCounts = { producer: 0, selfReflection: 0, total: 0 };
-let latestLearning: { observation: string; source: string | null; piece_date: string | null; created_at: number } | null = null;
 let intervalHours = 24;
 
 // Slug lookup for piece URLs (post-Phase-4 the canonical URL is
@@ -149,11 +147,16 @@ try {
     for (const r of candsRes.results) candsByPiece.set(r.piece_id, r.n);
   }
 
-  runLog = weekPieces.map((p) => ({
-    ...p,
-    rounds: roundsByPiece.get(p.id) ?? 0,
-    candidates: candsByPiece.get(p.id) ?? 0,
-  }));
+  // Exclude the hero piece so "Published —" and the first row aren't the
+  // same thing twice. At multi-per-day cadence the second-latest piece of
+  // today stays in the feed (filter by id, not date).
+  runLog = weekPieces
+    .filter((p) => p.id !== todaysPiece?.id)
+    .map((p) => ({
+      ...p,
+      rounds: roundsByPiece.get(p.id) ?? 0,
+      candidates: candsByPiece.get(p.id) ?? 0,
+    }));
 
   // Avg rounds across this week's pieces (if any).
   if (runLog.length > 0) {
@@ -203,24 +206,6 @@ try {
     isRunningNow = lastStep.run_id === today && !terminal;
   }
 
-  // Self-improvement loop — counts by source + latest observation.
-  const producerCount = await db
-    .prepare("SELECT COUNT(*) as n FROM learnings WHERE source = 'producer'")
-    .first<{ n: number }>();
-  const selfReflectionCount = await db
-    .prepare("SELECT COUNT(*) as n FROM learnings WHERE source = 'self-reflection'")
-    .first<{ n: number }>();
-  const totalLearnings = await db
-    .prepare('SELECT COUNT(*) as n FROM learnings')
-    .first<{ n: number }>();
-  learningCounts = {
-    producer: producerCount?.n ?? 0,
-    selfReflection: selfReflectionCount?.n ?? 0,
-    total: totalLearnings?.n ?? 0,
-  };
-  latestLearning = await db
-    .prepare('SELECT observation, source, piece_date, created_at FROM learnings ORDER BY created_at DESC LIMIT 1')
-    .first<{ observation: string; source: string | null; piece_date: string | null; created_at: number }>();
 } catch { /* D1 may be empty in dev — everything above stays at defaults */ }
 
 // --- Derived display strings ---
@@ -282,7 +267,7 @@ if (lastPipelineStep && nowMs - lastPipelineStep.tMs < ACTIVE_WINDOW_MS) {
 }
 
 const agents = [
-  { name: 'Scanner', job: 'Reads the news every morning', paused: false },
+  { name: 'Scanner', job: 'Reads the news for each run', paused: false },
   { name: 'Director', job: 'Orchestrates the pipeline', paused: false },
   { name: 'Curator', job: "Picks today's story", paused: false },
   { name: 'Drafter', job: 'Writes the MDX', paused: false },
@@ -304,28 +289,6 @@ function shortDate(iso: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// Source → human label for the self-improvement panel's attribution line.
-// Fallback covers pre-P1.3 orphan rows where source is null.
-function learningSourceLabel(source: string | null): string {
-  switch (source) {
-    case 'producer': return 'Learner, producer-side pattern';
-    case 'self-reflection': return 'Drafter self-reflection';
-    case 'reader': return 'Reader signal';
-    case 'zita': return 'Zita question pattern';
-    default: return 'Learning pattern';
-  }
-}
-
-// Prefer piece_date (the piece the learning is ABOUT) over created_at
-// (when the row was written). For producer + self-reflection learnings
-// these match — both fire seconds after publish. For Zita-source
-// learnings they diverge: synthesis runs at 01:45 UTC day+1, so
-// created_at is a day ahead of piece_date. We want the piece label,
-// not the writing label. Fall back to created_at for pre-0012 rows
-// that have NULL piece_date.
-const latestLearningDate = latestLearning
-  ? (latestLearning.piece_date ?? new Date(latestLearning.created_at).toISOString().slice(0, 10))
-  : null;
 ---
 
 <BaseLayout title="Dashboard — Zeemish" description="How the Zeemish factory is running.">
@@ -510,43 +473,6 @@ const latestLearningDate = latestLearning
     </section>
   )}
 
-  <!-- What we've learned so far -->
-  {learningCounts.total > 0 && (
-    <section class="mb-10">
-      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">What we've learned so far</h2>
-
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-        <div class="p-4 rounded-xl border border-zee-border text-center">
-          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.producer}</div>
-          <div class="text-sm text-zee-muted">Producer patterns</div>
-        </div>
-        <div class="p-4 rounded-xl border border-zee-border text-center">
-          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.selfReflection}</div>
-          <div class="text-sm text-zee-muted">Self-reflections</div>
-        </div>
-        <div class="p-4 rounded-xl border border-zee-border text-center col-span-2 md:col-span-1">
-          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.total}</div>
-          <div class="text-sm text-zee-muted">Total observations</div>
-        </div>
-      </div>
-
-      {latestLearning && latestLearningDate && (
-        <figure class="mb-6">
-          <blockquote class="border-l-2 border-zee-gold pl-4 text-sm italic text-zee-text leading-relaxed">
-            {latestLearning.observation}
-          </blockquote>
-          <figcaption class="mt-2 pl-4 text-xs text-zee-muted">
-            — {learningSourceLabel(latestLearning.source)}, after the {latestLearningDate} piece.
-          </figcaption>
-        </figure>
-      )}
-
-      <p class="text-sm text-zee-muted leading-relaxed">
-        After every piece, two passes run: the Learner writes patterns from the quality record; the Drafter reflects on its own work. Both feed the next piece's prompt.
-      </p>
-    </section>
-  )}
-
   <!-- Agent team -->
   <section class="mb-12">
     <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">The agent team</h2>
@@ -577,7 +503,7 @@ const latestLearningDate = latestLearning
   <!-- How this works -->
   <section class="mb-8 pt-8 border-t border-zee-border/60">
     <p class="text-sm text-zee-muted leading-relaxed mb-3">
-      Zeemish is produced by these 13 agents, each morning. Each piece is audited for voice, accuracy, and structure. Any piece page has a <em>How this was made</em> drawer showing its full creation story — timeline, auditor notes, rules, candidates.
+      Each piece is audited for voice, accuracy, and structure. Any piece page has a <em>How this was made</em> drawer showing its full creation story — timeline, auditor notes, rules, candidates.
     </p>
     <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm">
       <a

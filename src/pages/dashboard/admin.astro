@@ -8,6 +8,7 @@ import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
 import { deriveSlug } from '../../lib/slug';
 import { pipelineStepLabel } from '../../lib/pipeline-steps';
+import { getLearningCounts, type LearningCounts } from '../../lib/learnings';
 
 const db = Astro.locals.runtime.env.DB;
 const userId = Astro.locals.userId;
@@ -51,6 +52,7 @@ let lifetimeRuns = 0;
 let openEscalations = 0;
 let errorsThisWeek = 0;
 let avgRevisionsLifetime: number | null = null;
+let learningCounts: LearningCounts = { producer: 0, selfReflection: 0, total: 0 };
 let pipelineHistory: {
   runId: string;
   pieceId: string | null;
@@ -232,6 +234,12 @@ try {
     )
     .all<EngagementRow>();
   engagement = engagementRes.results;
+
+  // Self-improvement loop counters. Moved from /dashboard/ in Task 4 —
+  // reader-facing dashboard describes how Zeemish works; operator-facing
+  // admin describes how much memory has accumulated. Shared helper at
+  // src/lib/learnings.ts.
+  learningCounts = await getLearningCounts(db);
 } catch { /* D1 may be empty in dev */ }
 
 function safeJson(input: string): any {
@@ -307,6 +315,29 @@ function shortDate(iso: string): string {
       </div>
     </div>
   </section>
+
+  <!-- Learning loop — Producer + self-reflection counters. Moved from
+       /dashboard/ in Task 4; reader sees the mechanism on per-piece
+       drawers, admin sees accumulated counts here. -->
+  {learningCounts.total > 0 && (
+    <section class="mb-10">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Learning loop</h2>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.producer}</div>
+          <div class="text-sm text-zee-muted">Producer patterns</div>
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.selfReflection}</div>
+          <div class="text-sm text-zee-muted">Self-reflections</div>
+        </div>
+        <div class="p-4 rounded-xl border border-zee-border text-center col-span-2 md:col-span-1">
+          <div class="text-2xl font-bold text-zee-primary tabular-nums">{learningCounts.total}</div>
+          <div class="text-sm text-zee-muted">Total observations</div>
+        </div>
+      </div>
+    </section>
+  )}
 
   <!-- Observer events -->
   <section class="mb-10">

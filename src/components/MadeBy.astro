@@ -12,6 +12,8 @@
  * on first open, not on mount. Saves one D1 query per page view for
  * readers who never open the drawer.
  */
+import { AGENT_COUNT } from '../lib/constants';
+
 interface Props {
   date: string;
   pieceId: string;
@@ -31,7 +33,7 @@ const { date, pieceId } = Astro.props;
     <span>
       <span class="made-open-label">How this was made</span>
       <span class="made-open-meta">
-        The pipeline of 13 agents behind this piece
+        The pipeline of {AGENT_COUNT} agents behind this piece
       </span>
     </span>
     <svg class="made-open-arrow" width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true">
