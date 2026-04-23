@@ -2,6 +2,54 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.3 — Seed existing pieces
+
+**Context:** With Categoriser wired (2.2), every *new* piece gets categorised at publish+1s. But the 9 pre-Categoriser pieces (2026-04-17 → 2026-04-23) have no rows in `piece_categories` — they'd appear nowhere under the library filter (2.4) until manually retagged. 2.3 is the one-time backfill that (a) catches up the historical pieces and (b) builds the initial taxonomy from real pieces rather than a guessed seed list.
+
+**Decisions:**
+
+1. **One-shot shell script at `scripts/seed-categories.sh`.** Matches existing convention (`reset-today.sh`, `post-build.sh`). Uses the same wrangler+curl+node-for-JSON-parsing pattern reset-today.sh established. No new TS toolchain overhead; no extension-case bikeshed.
+
+2. **Sequential by `published_at ASC`, not parallel or reverse.** Categoriser's reuse-bias only works if it can see previously-created categories in the SELECT before running. Sequential means piece N completes its categorisation + commits to `categories` before piece N+1's categoriser reads the list. Oldest-first means the earliest pieces (when the taxonomy was empty) did most of the category creation work; every subsequent piece saw a growing list and reused where it fit. Reverse would have concentrated novelty at the end and left earlier pieces looking for non-existent subjects.
+
+3. **Idempotent at three layers.** (a) Script pre-check per piece — `SELECT COUNT(*) FROM piece_categories WHERE piece_id = ?` skips already-done pieces, avoids the HTTP round-trip. (b) Agent pre-insert guard — same check inside `CategoriserAgent.categorise` returns `skipped: true` + no Claude call. (c) Composite PK `(piece_id, category_id)` on the table blocks duplicate rows even if layers (a) + (b) were bypassed. Re-running the script is a safe no-op on completed pieces and only acts on newly-added or admin-wiped ones. Verified: second run on all 9 pieces emitted 9 `already categorised, skipping` lines with zero HTTP calls.
+
+4. **Poll-for-completion between pieces, not fixed sleep.** Categoriser's `/categorise-trigger` returns 202 immediately (fire-and-forget via `ctx.waitUntil`) — the actual Claude call + writes happen asynchronously. If piece N+1 fires before piece N completes, N+1's SELECT misses N's new categories, collapsing the reuse-bias. Script polls `piece_categories` every 3s with a 90s timeout per piece — each piece takes 3–10s wall-clock in practice. Fixed-sleep alternatives (20s or 30s) would either starve the polling (if Claude is slow) or waste 10s × 9 pieces on the happy path. Polling is load-bearing here.
+
+5. **Per-piece assignment summary on completion.** Prints the slug + confidence for each assignment as the piece finishes (`resource-constraints-tradeoffs@75`, `policy-design-implementation@90`). Operator gets a real-time read of the taxonomy that's emerging instead of waiting for the tail summary. Makes obvious when the agent's reuse bias is working (early pieces create categories, later pieces reuse them).
+
+6. **`DRY_RUN=1` preview mode.** Skips the HTTP call entirely; prints what *would* fire. Useful before first run to sanity-check the piece ordering and count. No secret required for the dry run — only fetches from D1, no writes.
+
+7. **`ADMIN_SECRET` rotation this session.** Secret was write-only-by-design and unavailable at script-run time. Rotated via `openssl rand -hex 32` → `wrangler secret put ADMIN_SECRET` on agents worker + `wrangler secret put AGENTS_ADMIN_SECRET` on site worker (names differ by worker but carry the same value). Brief rotation window (~5s between the two `secret put` commands) is safe at 23:40 UTC — no pipeline running, no audio-retry UI in use, zero cross-worker API traffic.
+
+**First-run result (all 9 pre-Categoriser pieces, 2026-04-23 late evening):**
+- 11 total assignments (8 pieces with 1 category, 2 pieces with 2 categories — the two legitimately-spanning ones).
+- 7 categories emerged:
+  - `chokepoints-and-supply` (3 pieces) — Hormuz open, Hormuz halt, jet fuel
+  - `commodity-shocks` (2) — jet fuel, Hormuz halt
+  - `policy-design-implementation` (2) — tobacco ban, cannabis reclass
+  - `business-model-disruption` (1) — QVC
+  - `infrastructure-technical-debt` (1) — ATC modernisation
+  - `resource-constraints-tradeoffs` (1) — NASA Voyager 1 shutdown
+  - `trade-policy-mechanics` (1) — tariff refunds
+- Every category name is a *subject* not a topic-of-the-week (no "Cannabis Reclassification" or "Iran Tensions" labels). Reuse-bias held: both Hormuz pieces reused the Chokepoints + Commodity categories from the oil + jet fuel pieces rather than proliferating Iran-specific categories. Tobacco + cannabis both went to Policy Design & Implementation, not drug-specific categories.
+- 9 `Categorised: …` observer events (severity=info), zero failures. Zero `skipped` on first run.
+- Idempotency confirmed: second run skipped all 9 with zero HTTP calls.
+
+**Trade-offs:**
+- 90s per-piece poll timeout means a slow Claude response (or a network hiccup) stalls the whole backfill at that piece. Acceptable — the script exits 1 on timeout and lists the failed piece, operator reruns. At n=9 this runs <1min total on the happy path; at n=100 it'd be ~5–10min which is still fine for a one-shot.
+- Script requires `ADMIN_SECRET` in the shell. Per `feedback_admin_ui_over_shell_secret` this is the "automation belongs in wrangler/CI" exception — there's no admin-UI path for bulk backfill and creating one just for this use case would be overkill. The `/categorise-trigger` endpoint exists primarily for this script plus the future 2.5 admin retag flow.
+- First-run category quality depends on whatever Sonnet decides is a "durable subject" for the first piece (QVC). If it had proposed "E-commerce Disruption" instead of "Business Model Disruption", the whole taxonomy would have had a more specific flavour. Mitigation: admin UI in 2.5 gives operator rename/merge controls. Worst case is renaming a few categories, not a re-run.
+- Seed run permanently captures the initial taxonomy shape in the `categories` table. If the agent prompt changes later (2.6 or beyond), re-seeding requires either deleting `piece_categories` rows + `categories` rows first (destructive, loses history), or manually merging new categories via the admin UI. Accepted — the whole point of a one-shot seed is that it's not re-run.
+
+**Files:** NEW [scripts/seed-categories.sh](../scripts/seed-categories.sh). EDIT [docs/RUNBOOK.md](./RUNBOOK.md) (new "Seed categories across historical pieces" section). CLAUDE.md (Area 2 2.3 entry).
+
+**Verification:** Live backfill completed 2026-04-23 late evening — 9/9 pieces fired cleanly, 11 assignments written, 7 categories in the taxonomy. Second run confirmed idempotency (9 skip lines, zero HTTP calls). 9 `Categorised: …` observer events visible in admin feed, zero warns. `SELECT COUNT(*) FROM piece_categories` = 11; `SELECT COUNT(*) FROM categories` = 7. Per-piece assignments spot-checked — all 7 category names are subjects, none reference specific news events.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.2 — CategoriserAgent (14th agent)
 
 **Context:** With schema in place (sub-task 2.1), 2.2 adds the 14th agent that actually populates it. Single-purpose agent, same off-pipeline pattern as Learner's post-publish analysis and Drafter.reflect.

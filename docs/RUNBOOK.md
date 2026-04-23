@@ -212,6 +212,29 @@ reset.
 #### 3. Trigger a fresh run
 Either press "Trigger Daily Piece" on `/dashboard/admin/`, or curl as above.
 
+## Seed categories across historical pieces
+
+Area 2 sub-task 2.3. One-time backfill — fires the 14th agent (Categoriser) against every published piece so the category taxonomy and `piece_categories` rows catch up before the library filter + admin page ship.
+
+```bash
+export ADMIN_SECRET="..."   # same value as AGENTS_ADMIN_SECRET
+
+# Live run
+./scripts/seed-categories.sh
+
+# Preview (no HTTP calls)
+DRY_RUN=1 ./scripts/seed-categories.sh
+```
+
+What it does:
+- Pulls every piece from `daily_pieces` ordered by `published_at ASC`. Oldest first matters — Categoriser is reuse-biased, so running the earliest pieces first lets the initial taxonomy form from real pieces; later runs mostly reuse rather than proliferate.
+- Per piece: pre-checks `piece_categories` for existing rows (skips if found) → POSTs `/categorise-trigger?piece_id=<uuid>` → polls until `piece_categories` shows the write (up to 90s timeout, 3s interval) → prints the assigned slug(s) with confidence.
+- Prints a "Taxonomy after run:" summary at the end — every category with its piece count.
+
+Idempotent: re-running is safe. Already-categorised pieces are skipped at the agent layer (no Claude call, no writes). Use when you want to retag pieces after an admin merge/delete flow (sub-task 2.5) wipes a category's rows — run the script and it'll fire only on the now-empty pieces.
+
+Failure surface: an individual piece failure (Claude API blip, GitHub 404 on the re-read) prints a line and continues to the next piece. The tail summary shows `failed: N`. Script exits 1 if any fail. Retry by re-running — idempotence handles the already-done ones.
+
 ## Check what agents have been doing
 All three endpoints are admin-only and require `ADMIN_SECRET`.
 ```bash
