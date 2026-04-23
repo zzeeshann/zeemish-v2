@@ -2,6 +2,160 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (evening): Dashboard `isRunningNow` heuristic + gerund progress phrasing
+
+**Context:** User reported `/dashboard/` was showing "Pipeline running — currently in publisher commits the audio." for today's 2026-04-23 cannabis piece, even though audio had long since completed (`has_audio=1`, commit `891c6f2` earlier in the day). Two bugs compounded.
+
+**Decisions:**
+
+1. **`isRunningNow` heuristic misread terminal state.** [src/pages/dashboard/index.astro:205-206](../src/pages/dashboard/index.astro) checked `lastStep.step` against a terminal-NAME list (`['done', 'error', 'skipped']`). Director writes the audio success terminal as `step='audio-publishing', status='done'` ([agents/src/director.ts:885](../agents/src/director.ts:885)) — step NAME never matches `'done'`, so `!terminal` stayed true forever after audio completed. **Same bug class as commit `fc23970` (admin Pipeline History verdict, earlier today).** Fix: `isRunningNow = lastStep.run_id === today && lastStep.status === 'running';`. `status` is the canonical terminal signal; step name is not.
+
+2. **"currently in X" grammar broke at every state.** `pipelineStepLabel` values are full subject-verb-object sentences ("Drafter writes the MDX"). Composing them into "currently in X" produced "currently in drafter writes the MDX" / "currently in publisher commits the audio" — stilted at every state, not just audio. New [`pipelineStepProgress(step)`](../src/lib/pipeline-steps.ts) helper returns gerund phrases ("writing the draft", "generating audio", "committing audio"). Round-aware for `auditing_rN` / `revising_rN` via regex. Status line now reads "Pipeline running — generating audio." cleanly. Two render sites updated: hero subtitle at [index.astro:231](../src/pages/dashboard/index.astro:231) + Today status strip at [:324](../src/pages/dashboard/index.astro:324).
+
+**Trade-offs:**
+- Two progress helpers now co-exist in `pipeline-steps.ts`: `pipelineStepLabel` (timeline/stepper rows — noun-phrase OK because rendered standalone) and `pipelineStepProgress` (live status lines — gerund because rendered inside a running-state sentence). Slightly redundant but the grammar demands are genuinely different; merging would force one site to degrade.
+- Unknown step falls through to raw (same fallback as `pipelineStepLabel`). At current agent set every step is mapped; new steps will read "Pipeline running — {step}" until added to the map — visible enough to notice but not broken.
+- The heuristic fix is identical in shape to commit `fc23970`'s fix earlier in the day. Lesson logged: when one surface reads `pipeline_log.step` as a terminal marker, audit every other surface for the same pattern in the same session.
+
+**Files:** EDIT [src/lib/pipeline-steps.ts](../src/lib/pipeline-steps.ts), EDIT [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro).
+
+**Verification:** `pnpm build` clean. Helper unit-checked via `tsx` stub across all 10 step names + unknown fallback — every phrase reads naturally in the "Pipeline running — X." frame. Live check after deploy: today's dashboard should flip from false "running" to "Today's piece is live. 9 pieces in 7 days."
+
+**Commit:** `dc870a1`.
+
+---
+
+## 2026-04-23 (evening): Cross-surface duplication sweep + `src/lib/learnings.ts` helper
+
+**Context:** User-led audit of home / public dashboard / admin surfaces for content shown in more than one place. Found three confirmed dups on the public dashboard plus four stale "each morning" / "every morning" references from before `interval_hours=12` shipped. Single-session sweep.
+
+**Decisions:**
+
+1. **"Published —" hero vs first row of Recent Runs.** Hero says "Published — {headline} · {tier}"; Recent Runs' first row rendered the same headline with richer metadata (voice score, rounds, candidates). Both fed from `daily_pieces` where `date >= weekAgoIso`. Fix: filter `todaysPiece?.id` out of `runLog` at [index.astro:152](../src/pages/dashboard/index.astro:152). Filter by `id` not `date` so at multi-per-day the second-latest same-date piece stays in the feed.
+
+2. **"What we've learned so far" section deleted from public, counters moved to admin.** The section showed 3 counters (Producer patterns / Self-reflections / Total observations) + a blockquote with the latest learning observation. The blockquote was a verbatim duplicate of a bullet in the matching piece's How-this-was-made drawer. The counters are operator-facing signals about the learning loop — readers visiting `/dashboard/` don't gain from them. Public dashboard should describe how Zeemish works, not how much memory has accumulated. Explainer paragraph ("After every piece, two passes run…") went with the section; its mechanism description can find a home later if a "How Zeemish works" expansion happens. Pull-quote option chosen: **(a) remove, keep counters** (moved to admin). Rotating (b) needed state; aggregate (c) needed an LLM pass or human curation. Reader-facing per-piece drawer keeps its learnings list — unchanged.
+
+3. **New section on admin: "Learning loop"** — placed between **System state** and **Observer events** on [admin.astro](../src/pages/dashboard/admin.astro). Three counters only; no explainer (operator knows). Flows: system-health stats → learning-loop stats → observer feed.
+
+4. **`src/lib/learnings.ts` helper** — extracted the learning-count query into `getLearningCounts(db)`. Previous inline form issued three separate `SELECT COUNT(*)` round trips; the helper consolidates into one `SUM(CASE WHEN source = 'X' THEN 1 ELSE 0 END)` query. Since public is DELETING the query and admin is GAINING it, no copy-paste-forward happens in this commit — but the helper prevents the pattern from spreading the next time a surface wants these numbers ("one home per piece of information").
+
+5. **Cadence copy sweep.** Removed "each morning" / "every morning" from four surfaces instead of parameterising: the product rhythm doesn't need to be asserted in copy when the dashboard already shows "Next run in Xh Ym". Cadence-neutral sentences stay true at any `interval_hours`. Changes: dashboard Scanner job ("Reads the news every morning" → "Reads the news for each run"), dashboard explainer (drop "13 agents, each morning" sentence — dup with footer + agent-team list directly above), homepage empty state (drop "Every morning, "), `/daily/` subhead (drop "One piece, every morning."). OG description in BaseLayout switched to use `AGENT_COUNT` template literal rather than literal "13".
+
+6. **`MadeBy.astro` drawer subtitle uses `AGENT_COUNT`.** Previously "The pipeline of 13 agents behind this piece" — now "The pipeline of {AGENT_COUNT} agents behind this piece". Closes the bleed-through from Task 3 where the footer already read "14" via constant.
+
+**Trade-offs:**
+- Public dashboard lost a section. Sparse is fine — the remaining sections (today status, week's output, Recent Runs, How it's holding up, Agent team, How this works) are enough.
+- Explainer paragraph's mechanism description ("two passes run…") was the only place on public copy where the learning loop was named. Moving to admin means a casual reader no longer learns the loop exists. Acceptable: per-piece drawer still shows "What the system learned from this piece" with source attribution.
+- Admin's new Learning loop section gated on `learningCounts.total > 0` — hidden when no learnings exist (dev / bootstrap). Same defensive pattern as the prior public section.
+- At `interval_hours=24` the cadence copy change ("every morning" removed) is imperceptible — current users won't notice. At 12h/4h/etc the change is what keeps the claim true.
+- Book + README retain "13 agents" / "thirteen" references. Those are forensic narrative at a moment in time; rewriting them ahead of actually adding agents would be editing history. They sync when Task 10/22 land.
+
+**Files:** NEW [src/lib/learnings.ts](../src/lib/learnings.ts); EDIT [src/pages/dashboard/index.astro](../src/pages/dashboard/index.astro) (filter + delete section + cadence copy + dead-code cleanup); EDIT [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro) (new Learning loop section + query); EDIT [src/pages/index.astro](../src/pages/index.astro) (drop "Every morning, "); EDIT [src/pages/daily/index.astro](../src/pages/daily/index.astro) (drop trailing sentence); EDIT [src/components/MadeBy.astro](../src/components/MadeBy.astro) (AGENT_COUNT); EDIT [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro) (OG desc uses AGENT_COUNT).
+
+**Verification:** `pnpm build` clean. Local fetch of `/`, `/daily/`, `/dashboard/` confirms zero "13 agents" / "every morning" / "What we've learned so far" strings on any surface. Piece-page drawer subtitle renders "14 agents" correctly. Admin Learning loop section's D1 path not locally verifiable (requires ADMIN_EMAIL + seeded learnings); build-clean is the right level for the template change. Hero + Recent Runs dedup is a 1-line filter change on a piece_id comparison — trivially correct.
+
+**Commit:** `7312ee0`.
+
+---
+
+## 2026-04-23 (evening): Homepage "made by N agents" strip moves to site footer + `AGENT_COUNT` constant
+
+**Context:** Homepage had a transparency strip between today's hero and the Recent list: "Made by 13 agents. Today's piece moved through Scanner → Curator → Drafter → Voice · Facts · Structure → Publisher before going live. See the pipeline →". Cramped; competing with the teaching hero. Home's job is surfacing today's teaching — the pipeline's home is the Dashboard.
+
+**Decisions:**
+
+1. **Strip removed from homepage body.** [src/pages/index.astro:70-79](../src/pages/index.astro) deleted.
+
+2. **Tiny footer pointer added to `BaseLayout.astro`.** Three centered lines: tagline / "Made by {AGENT_COUNT} agents." / copyright. Site-wide (every page), not homepage-only — matches "the footer" phrasing and DRY. Minor redundancy on `/dashboard/` itself where the "See the pipeline →" link would self-reference; chose to drop the link entirely and keep just the "Made by N agents." statement. Footer stays tiny.
+
+3. **New `src/lib/constants.ts` with `AGENT_COUNT`.** No shared constant existed previously; "13" was hardcoded in 4 places (homepage strip, MadeBy drawer subtitle, BaseLayout OG description, dashboard explainer). Constant set to **14** per user direction — more agents are planned in Task 10/22, docs + agent-team list update alongside when those land. The other three surfaces stay on literal "13" pending those tasks (the cluster-extend happens in Task 4's duplication sweep same-session).
+
+4. **Scope:** only the footer pointer uses the constant in this commit. Task 4 (same session, later commit) extends to MadeBy + OG + dashboard explainer.
+
+**Trade-offs:**
+- `AGENT_COUNT = 14` vs actual 13-file roster creates a temporary mismatch: public dashboard's agent-team list still shows 13 cards while the footer claims "14 agents". User accepted this ("more agents will come, we will update the docs"). The footer is the forward-looking claim; the team list is the current literal truth. Honesty gap closes when Task 10 adds the 14th agent.
+- Mobile footer is three stacked centered lines (verified via preview resize to 375px). No horizontal overflow; reads clean.
+
+**Files:** NEW [src/lib/constants.ts](../src/lib/constants.ts); EDIT [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro); EDIT [src/pages/index.astro](../src/pages/index.astro).
+
+**Verification:** `pnpm build` clean. `preview_start` + `preview_resize mobile` confirmed the footer renders three lines, strip gone from body, zero console errors.
+
+**Commit:** `6592b6a`.
+
+---
+
+## 2026-04-23 (evening): Kebab-case step names no longer leak in timelines + steppers
+
+**Context:** "How this was made" drawer timeline, admin Today's Run stepper, and per-piece admin timeline all route step names through `pipelineStepLabel()` — but the map had no entries for `audio-producing`, `audio-auditing`, `audio-publishing`. Those three rendered as raw kebab-case alongside the human-written labels ("Scanner reads the news", "Drafter writes the MDX"). Same list, two voices.
+
+**Decisions:**
+
+1. **Three entries added to `PIPELINE_STEP_LABELS`** in [src/lib/pipeline-steps.ts](../src/lib/pipeline-steps.ts):
+   - `audio-producing` → "Audio Producer narrates the beats"
+   - `audio-auditing` → "Audio Auditor checks the files"
+   - `audio-publishing` → "Publisher commits the audio"
+   Fall-through behaviour preserved (unknown steps still render raw — visible enough to notice, not broken).
+
+2. **Admin Pipeline History verdict routes step name through `pipelineStepLabel`.** The verdict fix in commit `fc23970` (earlier same day) rendered "Errored at audio-publishing" / "Running · audio-publishing" / "Stalled at scanning" using the raw step name — a new kebab leak I introduced in that fix. [admin.astro:440](../src/pages/dashboard/admin.astro:440) now wraps `step` in `stepLabel = pipelineStepLabel(step)` before composing verdicts. "Errored at Publisher commits the audio" reads slightly long but is consistent with every other admin surface.
+
+**Other leaks swept** (and found clean):
+- Observer event titles ([observer.ts:130,149,296](../agents/src/observer.ts:130)) — already human ("Audio published: {title}", "Audio failure: {title}").
+- Raw step strings in [admin/piece/[date]/[slug].astro:377-380](../src/pages/dashboard/admin/piece/[date]/[slug].astro:377) — internal comparisons only, not rendered.
+- 5 consumers of `pipelineStepLabel` (made-drawer, admin home stepper, per-piece admin timeline, public dashboard's "currently in X" hero and status strip) all inherit the new entries automatically.
+
+**Trade-offs:**
+- "Errored at Publisher commits the audio" is 5 words; the raw kebab was 2. Length cost accepted because (a) consistency across admin > terseness, (b) the verdict line is rare (only for failed/running/stalled runs, not Done/Skipped), (c) the text wraps gracefully.
+
+**Files:** EDIT [src/lib/pipeline-steps.ts](../src/lib/pipeline-steps.ts), EDIT [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro).
+
+**Verification:** `pnpm build` clean.
+
+**Commit:** `fafdc5c`.
+
+---
+
+## 2026-04-23 (evening): Admin Pipeline History verdict reads `finalStatus`, not step name
+
+**Context:** Admin home's "Pipeline history (last 14 runs)" panel showed "Stalled at audio-publishing" for every healthy recent run — the indicator had lost its signal. Audio was actually landing (`has_audio=1`, piece audio played live), so the "Stalled" label was false.
+
+**Root cause:** the query at [admin.astro:182-196](../src/pages/dashboard/admin.astro:182) picked `MAX(created_at)` pipeline_log row per piece. For a healthy run with audio, that row is `step='audio-publishing', status='done'` (Director's terminal write at [director.ts:885](../agents/src/director.ts:885)). The verdict logic at [:440](../src/pages/dashboard/admin.astro:440) only checked step *name*:
+```js
+const ok = r.finalStep === 'done';
+const verdict = ok ? 'Done' : skipped ? 'Skipped' : (r.finalStep === 'error' ? 'Errored' : `Stalled at ${r.finalStep}`);
+```
+Step name was `audio-publishing`, not the literal `'done'` — so every healthy run fell through to "Stalled at audio-publishing". The `finalStep === 'error'` branch was also dead: no director.ts logStep writes a step literally named `'error'`.
+
+**Decisions:**
+
+1. **Verdict now reads `finalStatus`.** Status is Director's canonical terminal signal; `'done'` = success, `'failed'` = errored, `'running'` = in-flight. Step name describes WHAT step, not WHETHER terminal.
+```js
+const skipped = step === 'skipped';
+const errored = status === 'failed';
+const running = status === 'running';
+const ok = status === 'done' && !skipped;
+const verdict = ok ? 'Done'
+  : skipped ? 'Skipped'
+  : errored ? `Errored at ${step}`
+  : running ? `Running · ${step}`
+  : `Stalled at ${step}`;
+```
+
+2. **Pipeline History kept (not removed).** Audit confirmed it's not duplicating "All pieces" or "Recent runs": it's the only admin surface that shows runs with no successful publish (scanner-skipped, errored before publish). All pieces excludes those; Recent runs is a reader-facing summary.
+
+3. **Added running-vs-stalled distinction.** Previously "Stalled" was the catch-all for any non-terminal step name. Now "Running · {step}" fires when `status='running'` (actually in flight); "Stalled" only for genuine unknowns (status not done/failed/running).
+
+**Trade-offs:**
+- Verdict reads raw step name ("Errored at audio-publishing"). A new kebab-case leak, fixed same-session in commit `fafdc5c`.
+- `errored` branch uses `status='failed'`. Matches director.ts writes. No agent writes `status='error'` — that dead check was removed.
+
+**Files:** EDIT [src/pages/dashboard/admin.astro](../src/pages/dashboard/admin.astro).
+
+**Verification:** `pnpm build` clean. Live: after deploy, recent healthy runs show "Done" (not "Stalled at audio-publishing"); failed runs show "Errored at {step}" with the specific failure point visible.
+
+**Commit:** `fc23970`.
+
+---
+
 ## 2026-04-23 (cont.): Two cleanups surfaced by live verification of the audio-retry surface
 
 **Context:** Live Start-over test on the 2026-04-23 cannabis piece passed but surfaced two small issues during mid-run inspection. Neither blocked the pipeline — the run completed healthy end-to-end — but both are visible quality-of-life bugs worth fixing while the context is fresh.
