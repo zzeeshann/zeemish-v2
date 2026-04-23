@@ -2,6 +2,53 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.4 — Library category filter
+
+**Context:** Data is in place (2.1 schema, 2.2 agent, 2.3 backfill — 7 categories across 9 pieces). 2.4 surfaces it. Readers get a chip bar on `/library/` to browse by category.
+
+**Decisions:**
+
+1. **Sub-route `/library/<slug>/` over query param `/library/?cat=<slug>`.** Both are shareable, both were cheap. Sub-route wins on URL cleanliness + SEO signal (it's a distinct canonical page for each category). Cost was one extra .astro file; ~80% of the layout lives in a shared `<CategoryChips>` component so the duplication is contained.
+
+2. **Both library routes switched to SSR (`prerender = false`).** Categories live in D1, not in the content collection — prerendering would need a build-time D1 proxy which is fragile. SSR cost is modest: each library render adds 2 D1 queries (~5ms each at the edge). `getCollection('dailyPieces')` still works in SSR mode since Astro content collections are bundled into the worker at build time. Same pattern `/dashboard/admin.astro` and `/dashboard/index.astro` already use.
+
+3. **`getCategories()` filters `piece_count > 0`.** Empty categories can exist transiently after a sub-task 2.5 merge (source just went to 0, about to be deleted). A chip linking to a view with zero pieces is a dead end. The admin categories page will show them; the reader surface hides them.
+
+4. **`CategoryChips.astro` as a shared component.** Same chip bar markup on both routes — pulling it into a single component means the render rule ("All pieces" pinned first + categories sorted by count) lives in one place. Active-chip detection via `aria-current="page"` (accessibility-correct + CSS-targetable).
+
+5. **Chip styling: 44px min-height, flex-wrap, rounded-full pill shape.** 44px is the Apple HIG / WCAG 2.2 minimum touch target. `flex-wrap` lets the bar grow as the taxonomy does without horizontal scroll on mobile (verified at 375×812: chips stack across 3 rows at current 4-chip count, will scale cleanly to 20+ chips later). Rounded-full pill is the existing app idiom (matches Zita's UI, the admin settings page). Active state uses solid `zee-primary` bg; idle state uses transparent bg + `zee-border` outline. `title={description}` on each chip surfaces the description on desktop hover without cluttering the bar.
+
+6. **Route-layer slug validation.** `/library/[slug].astro` validates `slug` against `^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$` before hitting D1 — same kebab rule Categoriser enforces via `normaliseSlug`. Malformed input (double dashes, leading/trailing dashes, unicode, >60 chars) 404s fast with zero DB load. `getCategoryBySlug()` returns null on a valid-shape but unknown slug → also 404 via `return new Response('Not found', { status: 404 })`.
+
+7. **Filter view shows `getCollection` filtered by `pieceIds` Set, not a D1 piece-row fetch.** `piece_categories` gives the set of piece_ids for a slug; content collection gives per-piece frontmatter. Joining in-memory via `Set.has(pieceId)` avoids a SELECT-JOIN across D1 for metadata the worker already has. Cost: content collection is bundled into the worker, memory use is trivial at current n=9; at n=10000 a SELECT-JOIN would start winning but that's years away.
+
+8. **Text filter preserved on the filtered view.** Operates within the subset — placeholder reads "Filter within this category…" so reader knows the scope. Same client-side JS logic. If the category has ≤2 pieces the filter input is hidden (same rule as the unfiltered view).
+
+9. **Stat line on unfiltered view now shows "N categories" alongside "N pieces" and "N subjects".** Cheap signal that the taxonomy exists; grows as categories do.
+
+**Trade-offs:**
+- SSR on library pages gives up static-HTML edge caching for the reader path. Accepted — library is a low-traffic page vs daily piece reads, and the D1 query cost is well under human perception.
+- Filtered view re-fetches all pieces via `getCollection` then filters in-memory. At very large catalogue sizes (10k+) this would become wasteful; at 9 pieces (today) or even 3 years × 2/day = ~2200 pieces, the bundled content collection is small and the join is fine. Revisit if the catalogue ever gets into the five-figure range.
+- `piece_count=0` categories disappear from the reader-facing chip bar but stay in `categories`. The admin categories page (sub-task 2.5) surfaces them so operators can delete them after a merge.
+- Two `.astro` files share ~60 lines of list-rendering markup. Chose duplication over a third shared component because list rendering tangles with month-grouping state that would bloat the component's prop surface. Mild code smell; acceptable at this file count.
+- Local dev mode needed migration 0021 applied locally + test seed rows for the chip bar to render in preview. Not a prod issue (remote D1 has the real data). Noted so future contributors know why `library/` looks empty on a fresh local dev unless seeded.
+
+**Files:** NEW [src/lib/categories.ts](../src/lib/categories.ts) (three query helpers). NEW [src/components/CategoryChips.astro](../src/components/CategoryChips.astro) (chip bar component). NEW [src/pages/library/[slug].astro](../src/pages/library/[slug].astro) (filtered view, SSR). EDIT [src/pages/library/index.astro](../src/pages/library/index.astro) (now SSR, renders chips, stat line gains category count). EDIT [CLAUDE.md](../CLAUDE.md) (Area 2 2.4 entry).
+
+**Verification:**
+- `pnpm build` clean with the new routes.
+- Typecheck clean on every new/touched file.
+- Preview at localhost:4321: `/library/` renders chip bar with 4 chips (All pieces + 3 seeded categories), stat line shows "9 pieces · 9 subjects · 3 categories", active chip on "All pieces".
+- Click into `/library/chokepoints-and-supply/`: 3 pieces listed (Hormuz open, jet fuel, Hormuz halt), breadcrumb reads "Library · Chokepoints & Supply", category description renders, active chip moves to "Chokepoints & Supply".
+- Mobile viewport (375×812): chips wrap cleanly across 3 rows, 44px touch targets honoured, filter input full-width.
+- Desktop viewport: chips on one row at current 4-chip count, hover state works.
+- 404 cases: `/library/does-not-exist/` → 404 via unknown-slug path; `/library/BAD..SLUG/` → 404 via slug-shape validation. Both before any DB round-trip.
+- Zero server errors in dev log across ~10 page loads.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.3 — Seed existing pieces
 
 **Context:** With Categoriser wired (2.2), every *new* piece gets categorised at publish+1s. But the 9 pre-Categoriser pieces (2026-04-17 → 2026-04-23) have no rows in `piece_categories` — they'd appear nowhere under the library filter (2.4) until manually retagged. 2.3 is the one-time backfill that (a) catches up the historical pieces and (b) builds the initial taxonomy from real pieces rather than a guessed seed list.

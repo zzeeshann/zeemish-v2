@@ -1,0 +1,61 @@
+---
+/**
+ * Category chip bar — rendered above the library list on both
+ * `/library/` (activeSlug = null) and `/library/<slug>/` (activeSlug
+ * = that slug). Sorted by piece count DESC; "All pieces" is always
+ * the first chip.
+ *
+ * Mobile: chips wrap, min-height 44px so each is a comfortable
+ * tap target. Active chip is visually distinct via solid
+ * zee-primary background.
+ */
+import type { Category } from '../lib/categories';
+
+interface Props {
+  categories: Category[];
+  activeSlug: string | null;
+  totalPieces: number;
+}
+
+const { categories, activeSlug, totalPieces } = Astro.props;
+
+const baseChipClass =
+  'inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-full text-sm font-medium border transition-colors whitespace-nowrap';
+const activeClass =
+  'bg-zee-primary text-white border-zee-primary';
+const idleClass =
+  'bg-transparent text-zee-text border-zee-border/80 hover:border-zee-primary/50 hover:text-zee-primary';
+---
+
+{(categories.length > 0 || activeSlug !== null) && (
+  <nav class="mb-6 pb-4 border-b border-zee-border/60" aria-label="Filter by category">
+    <ul class="flex flex-wrap gap-2">
+      <li>
+        <a
+          href="/library/"
+          class={`${baseChipClass} ${activeSlug === null ? activeClass : idleClass}`}
+          aria-current={activeSlug === null ? 'page' : undefined}
+        >
+          All pieces
+          <span class={activeSlug === null ? 'opacity-80' : 'text-zee-muted'}>{totalPieces}</span>
+        </a>
+      </li>
+      {categories.map((c) => {
+        const isActive = c.slug === activeSlug;
+        return (
+          <li>
+            <a
+              href={`/library/${c.slug}/`}
+              class={`${baseChipClass} ${isActive ? activeClass : idleClass}`}
+              aria-current={isActive ? 'page' : undefined}
+              title={c.description ?? undefined}
+            >
+              {c.name}
+              <span class={isActive ? 'opacity-80' : 'text-zee-muted'}>{c.pieceCount}</span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  </nav>
+)}
