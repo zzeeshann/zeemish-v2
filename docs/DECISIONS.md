@@ -2,6 +2,20 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (cont.): Two cleanups surfaced by live verification of the audio-retry surface
+
+**Context:** Live Start-over test on the 2026-04-23 cannabis piece passed but surfaced two small issues during mid-run inspection. Neither blocked the pipeline — the run completed healthy end-to-end — but both are visible quality-of-life bugs worth fixing while the context is fresh.
+
+1. **Admin retry block displayed stale failure reason from a prior run.** Screenshot captured mid-Start-over showed "Audio pipeline failed at audio-producing — Durable Object reset because its code was updated." The `audio-producing failed` row it surfaced was from **6 hours earlier** (14:02:11 UTC, during the original publish run before today's deploy), not from the healthy Start-over run that was in flight (started 20:11:21 UTC). Root cause: `audioFailureStep = pipeline.find((p) => p.step.startsWith('audio-') && p.status === 'failed')` in [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/[date]/[slug].astro) had no time filter. Pre-existing bug since commit `3208c86` on 2026-04-22 — **not** a regression from today's always-visible-retry change (earlier framing was guessing; git log showed the unfiltered query was untouched by today's commit). Fix: compute `latestAudioRunStart` from the most recent `audio-producing running` row, then filter failures to `created_at >= latestAudioRunStart`. Historical failures from prior runs no longer surface as current.
+
+2. **Publisher made pure-reorder commits on per-beat regen and Start over.** Director's `SELECT beat_name, public_url FROM daily_piece_audio WHERE piece_id = ? ORDER BY generated_at ASC` built the `audioBeats` frontmatter map in generation order. On per-beat regen, the regen'd beat's `generated_at` was newest, so it moved to the bottom of the map — same URLs, different order, triggering Publisher's byte-comparison to see a diff and make a noisy reorder-only commit. Two such commits landed today for the cannabis piece (`d6cfb55` per-beat, `d94754f` Start-over). Fix: change SELECT to `ORDER BY beat_name ASC` so the map serialises deterministically regardless of which beat was regenerated most recently. Readers unaffected — site consumes `audioBeats` by key lookup, not map order. First pipeline run after this fix produces one last reorder commit (one-time cost), then Publisher's idempotent check fires correctly for all subsequent per-beat regens where URLs are unchanged.
+
+**Files:** EDIT [src/pages/dashboard/admin/piece/[date]/[slug].astro](../src/pages/dashboard/admin/piece/[date]/[slug].astro), EDIT [agents/src/director.ts](../agents/src/director.ts).
+
+**Verification:** `pnpm build` clean, agents typecheck no new errors (same 18 pre-existing server.ts SubAgent errors plus the one `retryAudioBeat` instance from the morning commit). Live verification: on the next Start-over, the stale "Durable Object reset" should no longer display — mid-run shows "Audio incomplete — expected N beats, have M" instead. On the next per-beat regen where URLs are unchanged, Publisher should skip the commit entirely.
+
+---
+
 ## 2026-04-23: Provider-agnostic TTS normaliser + admin per-beat audio regen
 
 **Context:** The 2026-04-23 cannabis piece ("Trump Administration Reclassifies Cannabis…") contains dense Roman numerals — "Schedule I, II, III, IV and V". ElevenLabs reads single-letter Roman numerals as English letter names: `I` becomes the pronoun "I", `V` becomes the letter "V". The issue is at the TTS layer, not the writing, and will recur for any Roman-numeral-heavy piece (amendments, monarchs, chapters) regardless of which audio provider we use. Separately, the admin per-piece page hides the audio retry buttons the moment `has_audio = 1` — so there's no affordance to refresh an already-published piece after a pipeline-level fix like this one, and no per-beat surgical option.

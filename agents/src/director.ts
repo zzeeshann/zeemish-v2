@@ -854,10 +854,19 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // any beats from prior partial runs picked up via R2 head-check.
     this.enterPhase('audio-publisher');
     await this.logStep(date, pieceId,'audio-publishing', 'running', {});
+    // ORDER BY beat_name ASC (not generated_at) so the audioBeats map
+    // serialises identically across runs regardless of which beat was
+    // regenerated most recently. Publisher's splice compares the full
+    // YAML block byte-for-byte — with generated_at ordering, per-beat
+    // regen + Start over produced noisy pure-reorder commits (the
+    // regen'd beat moved to the end of the map). beat_name order means
+    // Publisher's idempotent check actually fires when nothing changed.
+    // Site renderers look up beats by name, not by map order, so readers
+    // see no difference.
     const allBeatsRes = await this.env.DB
       .prepare(
         `SELECT beat_name, public_url FROM daily_piece_audio
-         WHERE piece_id = ? ORDER BY generated_at ASC`,
+         WHERE piece_id = ? ORDER BY beat_name ASC`,
       )
       .bind(pieceId)
       .all<{ beat_name: string; public_url: string }>();

@@ -365,9 +365,21 @@ function relativeFromStart(tMs: number, startMs: number): string {
 const timelineStart = timeline[0]?.tMs ?? 0;
 
 // Audio state — decides whether to show per-beat rows, retry affordance, or both.
+// Failure detection is scoped to the CURRENT audio attempt: find the most
+// recent `audio-producing running` timestamp and only consider audio-*
+// failures at or after that point. Without this bound, stale historical
+// failures surface as if they were current — e.g. during a Start-over
+// run (has_audio=0, retry block visible), a `Durable Object reset`
+// failure from a prior day's run would display as the current reason.
+// Bug pre-existing since commit 3208c86 (2026-04-22); surfaced during
+// 2026-04-23 testing of the always-visible retry surface.
+const latestAudioRunStart = pipeline
+  .filter((p) => p.step === 'audio-producing' && p.status === 'running')
+  .reduce<number>((max, p) => (p.created_at > max ? p.created_at : max), 0);
 const audioFailureStep = pipeline.find(
   (p) => (p.step === 'audio-producing' || p.step === 'audio-auditing' || p.step === 'audio-publishing')
-    && p.status === 'failed',
+    && p.status === 'failed'
+    && p.created_at >= latestAudioRunStart,
 );
 const audioFailureReason: string | null = audioFailureStep
   ? (safeJson(audioFailureStep.data)?.reason ?? null)
