@@ -584,7 +584,7 @@ function publishedDisplay(): string {
           <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Audio</h2>
           {audioComplete ? (
             <span class="text-xs text-zee-muted tabular-nums">
-              {audioRows.length} beat{audioRows.length === 1 ? '' : 's'} · {totalAudioChars.toLocaleString()} chars
+              {audioRows.length} beat{audioRows.length === 1 ? '' : 's'} · {totalAudioChars.toLocaleString()} chars · <span class="text-zee-primary">published ✓</span>
             </span>
           ) : audioRows.length > 0 ? (
             <span class="text-xs text-zee-gold tabular-nums">
@@ -597,9 +597,12 @@ function publishedDisplay(): string {
           )}
         </div>
 
-        {/* Row listing — shown whenever any rows exist, regardless of completeness */}
-        {audioRows.length > 0 && (
-          <div class={`border border-zee-border rounded-xl p-4 md:p-5 ${audioComplete ? '' : 'mb-3'}`}>
+        {/* Row listing — shown whenever any rows exist. Each row has a
+            per-beat "Regenerate" button that deletes one R2 object + one
+            D1 row and re-runs the pipeline with force=true; producer's
+            head-check means only the deleted beat regenerates. */}
+        {audioRows.length > 0 && pieceId && (
+          <div class={`border border-zee-border rounded-xl p-4 md:p-5 mb-3`}>
             <p class="text-xs text-zee-muted mb-3">
               <span class="font-medium text-zee-text">{audioRows[0].model}</span>
               <span class="opacity-40 mx-2">·</span>
@@ -614,64 +617,89 @@ function publishedDisplay(): string {
                   <span class="text-xs text-zee-muted tabular-nums shrink-0">
                     {r.character_count.toLocaleString()} chars
                   </span>
+                  <button
+                    type="button"
+                    class="audio-regen-beat-btn text-[11px] px-2 py-1 border border-zee-border rounded hover:bg-zee-border/30 transition-colors shrink-0"
+                    data-piece-id={pieceId}
+                    data-beat={r.beat_name}
+                  >
+                    Regenerate
+                  </button>
                 </li>
               ))}
             </ul>
+            <p class="text-xs text-zee-muted mt-3 leading-relaxed">
+              Per-beat regen deletes just that clip and re-runs the pipeline. Other beats keep playing for readers. Cloudflare cache may serve the old clip for a short window — hard-refresh to confirm.
+            </p>
+            <p id="audio-beat-status" class="text-xs text-zee-muted mt-2"></p>
           </div>
         )}
 
-        {/* Retry affordance — shown whenever audio is NOT complete.
-            Three sub-states: failed step / partial rows with no recorded
-            failure (stalled) / zero rows. */}
-        {!audioComplete && (
-          <div class="border border-zee-border rounded-xl p-4 md:p-5">
-            {audioFailureReason ? (
-              <>
-                <p class="text-sm text-zee-text mb-2">
-                  <span class="text-zee-gold font-medium">Audio pipeline failed</span> at <code class="text-xs bg-zee-border/40 px-1 rounded">{audioFailureStep?.step}</code>.
-                </p>
-                <p class="text-xs text-zee-muted mb-4 leading-relaxed">{audioFailureReason}</p>
-              </>
-            ) : audioRows.length > 0 ? (
-              <p class="text-sm text-zee-text mb-4">
-                <span class="text-zee-gold font-medium">Audio incomplete</span> — expected {expectedBeats} beat{expectedBeats === 1 ? '' : 's'}, have {audioRows.length}. The pipeline may have stalled without recording an error.
+        {/* Whole-piece retry block. Behaviour gated on has_audio:
+            - complete (has_audio=1): Start over only. Continue is meaningless
+              when every beat already exists on R2.
+            - incomplete with rows: Continue + Start over (today's behaviour).
+            - incomplete with no rows: Retry audio only. */}
+        <div class="border border-zee-border rounded-xl p-4 md:p-5">
+          {audioComplete ? (
+            <p class="text-sm text-zee-text mb-4">
+              <span class="text-zee-primary font-medium">Audio published ✓</span> — use <strong>Start over</strong> to force a full rewrite (e.g. after a normaliser change), or the per-beat <strong>Regenerate</strong> buttons above for a surgical fix.
+            </p>
+          ) : audioFailureReason ? (
+            <>
+              <p class="text-sm text-zee-text mb-2">
+                <span class="text-zee-gold font-medium">Audio pipeline failed</span> at <code class="text-xs bg-zee-border/40 px-1 rounded">{audioFailureStep?.step}</code>.
               </p>
-            ) : (
-              <p class="text-sm text-zee-muted mb-4 italic">
-                No audio yet for this piece. Run the audio pipeline from here.
-              </p>
-            )}
-            <div class="flex flex-wrap items-center gap-3">
+              <p class="text-xs text-zee-muted mb-4 leading-relaxed">{audioFailureReason}</p>
+            </>
+          ) : audioRows.length > 0 ? (
+            <p class="text-sm text-zee-text mb-4">
+              <span class="text-zee-gold font-medium">Audio incomplete</span> — expected {expectedBeats} beat{expectedBeats === 1 ? '' : 's'}, have {audioRows.length}. The pipeline may have stalled without recording an error.
+            </p>
+          ) : (
+            <p class="text-sm text-zee-muted mb-4 italic">
+              No audio yet for this piece. Run the audio pipeline from here.
+            </p>
+          )}
+          <div class="flex flex-wrap items-center gap-3">
+            {!audioComplete && (
               <button
                 id="audio-retry-btn"
                 data-date={date}
+                data-piece-id={pieceId}
                 data-mode="continue"
                 class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
               >
                 {audioRows.length > 0 ? 'Continue' : 'Retry audio'}
               </button>
-              {audioRows.length > 0 && (
-                <button
-                  id="audio-retry-fresh-btn"
-                  data-date={date}
-                  data-mode="fresh"
-                  data-count={audioRows.length}
-                  class="px-4 py-2 border border-zee-border text-zee-text rounded-lg text-sm font-medium hover:bg-zee-border/20 transition-colors"
-                >
-                  Start over
-                </button>
-              )}
-              <span id="audio-retry-status" class="text-xs text-zee-muted"></span>
-            </div>
-            {audioRows.length > 0 && (
-              <p class="text-xs text-zee-muted mt-3 leading-relaxed">
-                <strong class="text-zee-text">Continue</strong> resumes where the prior attempt stopped — reuses the {audioRows.length} existing clip{audioRows.length === 1 ? '' : 's'}.
-                <span class="mx-1">·</span>
-                <strong class="text-zee-text">Start over</strong> wipes all existing clips + D1 rows and regenerates every beat from scratch.
-              </p>
             )}
+            {audioRows.length > 0 && (
+              <button
+                id="audio-retry-fresh-btn"
+                data-date={date}
+                data-piece-id={pieceId}
+                data-mode="fresh"
+                data-count={audioRows.length}
+                data-audio-complete={audioComplete ? '1' : '0'}
+                class="px-4 py-2 border border-zee-border text-zee-text rounded-lg text-sm font-medium hover:bg-zee-border/20 transition-colors"
+              >
+                Start over
+              </button>
+            )}
+            <span id="audio-retry-status" class="text-xs text-zee-muted"></span>
           </div>
-        )}
+          {audioRows.length > 0 && (
+            <p class="text-xs text-zee-muted mt-3 leading-relaxed">
+              {!audioComplete && (
+                <>
+                  <strong class="text-zee-text">Continue</strong> resumes where the prior attempt stopped — reuses the {audioRows.length} existing clip{audioRows.length === 1 ? '' : 's'}.
+                  <span class="mx-1">·</span>
+                </>
+              )}
+              <strong class="text-zee-text">Start over</strong> wipes all existing clips + D1 rows and regenerates every beat from scratch.{audioComplete && ' Readers will briefly have no audio until the pipeline completes.'}
+            </p>
+          )}
+        </div>
       </section>
 
       <!-- Scanner candidates -->
@@ -828,32 +856,50 @@ function publishedDisplay(): string {
 </BaseLayout>
 
 <script>
-  // Two retry buttons: "Continue" (resume from where it stopped) and
-  // "Start over" (wipe existing R2 + D1 rows, regenerate all). Start over
-  // requires a confirm() dialog because it costs ElevenLabs credits to
-  // regenerate content we already have.
+  // Three retry paths:
+  //   - "Continue" (resume from where it stopped) — only shown when audio
+  //     is incomplete; has_audio=1 guard on the backend refuses otherwise.
+  //   - "Start over" (wipe existing R2 + D1 rows, regenerate all) — always
+  //     available when any audio rows exist. Confirm() dialog warns
+  //     about cost AND (on complete pieces) reader-visible downtime.
+  //   - "Regenerate" per beat — deletes one R2 object + one D1 row, leaves
+  //     has_audio=1 so other beats keep playing, regenerates just that
+  //     beat via producer's R2 head-check. Surgical fix path.
   const continueBtn = document.getElementById('audio-retry-btn') as HTMLButtonElement | null;
   const freshBtn = document.getElementById('audio-retry-fresh-btn') as HTMLButtonElement | null;
   const statusEl = document.getElementById('audio-retry-status');
+  const beatStatusEl = document.getElementById('audio-beat-status');
+  const beatBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.audio-regen-beat-btn'));
+
+  function buildRetryUrl(btn: HTMLButtonElement, extraParams: Record<string, string> = {}) {
+    const pieceId = btn.dataset.pieceId;
+    const date = btn.dataset.date;
+    const qs = new URLSearchParams(extraParams);
+    if (pieceId) qs.set('piece_id', pieceId);
+    else if (date) qs.set('date', date);
+    return `/api/agents/audio-retry?${qs.toString()}`;
+  }
 
   async function runRetry(btn: HTMLButtonElement, mode: 'continue' | 'fresh') {
     if (!statusEl) return;
-    const date = btn.dataset.date;
-    if (!date) return;
 
     if (mode === 'fresh') {
       const count = btn.dataset.count ?? '0';
-      const msg = `Start over will DELETE ${count} existing audio clip${count === '1' ? '' : 's'} and their R2 objects, then regenerate every beat from scratch. This costs ElevenLabs credits. Continue?`;
+      const audioComplete = btn.dataset.audioComplete === '1';
+      const tail = audioComplete
+        ? ' Readers will have NO audio on this piece until regen completes (~2–5 minutes).'
+        : '';
+      const msg = `Start over will DELETE ${count} existing audio clip${count === '1' ? '' : 's'} and their R2 objects, then regenerate every beat from scratch. This costs ElevenLabs credits.${tail} Continue?`;
       if (!window.confirm(msg)) return;
     }
 
-    // Lock both buttons while the request is in flight
+    // Lock both whole-piece buttons while the request is in flight
     if (continueBtn) continueBtn.disabled = true;
     if (freshBtn) freshBtn.disabled = true;
     statusEl.textContent = mode === 'fresh' ? 'Wiping and regenerating…' : 'Starting…';
 
     try {
-      const res = await fetch(`/api/agents/audio-retry?date=${date}&mode=${mode}`, { method: 'POST' });
+      const res = await fetch(buildRetryUrl(btn, { mode }), { method: 'POST' });
       if (!res.ok) {
         let detail = res.statusText;
         try {
@@ -866,8 +912,6 @@ function publishedDisplay(): string {
         return;
       }
       statusEl.textContent = 'Started — refresh in a minute to see results.';
-      // Nudge: auto-reload after 60s so operator sees the updated audio rows
-      // without having to manually refresh.
       setTimeout(() => window.location.reload(), 60_000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Network error';
@@ -879,6 +923,44 @@ function publishedDisplay(): string {
 
   continueBtn?.addEventListener('click', () => runRetry(continueBtn, 'continue'));
   freshBtn?.addEventListener('click', () => runRetry(freshBtn, 'fresh'));
+
+  for (const beatBtn of beatBtns) {
+    beatBtn.addEventListener('click', async () => {
+      if (!beatStatusEl) return;
+      const beat = beatBtn.dataset.beat ?? '';
+      const pieceId = beatBtn.dataset.pieceId ?? '';
+      if (!beat || !pieceId) {
+        beatStatusEl.textContent = 'Missing beat or piece_id — button is misconfigured.';
+        return;
+      }
+      const msg = `Regenerate audio for beat "${beat}"? This deletes the existing clip and costs ElevenLabs credits. Cloudflare cache may serve the old clip briefly — hard-refresh to hear the new one.`;
+      if (!window.confirm(msg)) return;
+
+      beatBtns.forEach((b) => { b.disabled = true; });
+      beatStatusEl.textContent = `Regenerating "${beat}"…`;
+
+      try {
+        const qs = new URLSearchParams({ mode: 'beat', piece_id: pieceId, beat });
+        const res = await fetch(`/api/agents/audio-retry?${qs.toString()}`, { method: 'POST' });
+        if (!res.ok) {
+          let detail = res.statusText;
+          try {
+            const body = await res.json() as { error?: string };
+            if (body.error) detail = body.error;
+          } catch { /* not JSON */ }
+          beatStatusEl.textContent = `Failed: ${res.status} ${detail}`;
+          beatBtns.forEach((b) => { b.disabled = false; });
+          return;
+        }
+        beatStatusEl.textContent = `Started — refresh in a minute to see the updated "${beat}".`;
+        setTimeout(() => window.location.reload(), 60_000);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Network error';
+        beatStatusEl.textContent = `Failed: ${msg}`;
+        beatBtns.forEach((b) => { b.disabled = false; });
+      }
+    });
+  }
 
   // Zita-synthesis manual trigger — fires Learner.analyseZitaPatternsDaily
   // for this piece without waiting for the 01:45 UTC day+1 alarm. The

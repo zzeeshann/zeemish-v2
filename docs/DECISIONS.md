@@ -2,6 +2,34 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23: Provider-agnostic TTS normaliser + admin per-beat audio regen
+
+**Context:** The 2026-04-23 cannabis piece ("Trump Administration Reclassifies Cannabis…") contains dense Roman numerals — "Schedule I, II, III, IV and V". ElevenLabs reads single-letter Roman numerals as English letter names: `I` becomes the pronoun "I", `V` becomes the letter "V". The issue is at the TTS layer, not the writing, and will recur for any Roman-numeral-heavy piece (amendments, monarchs, chapters) regardless of which audio provider we use. Separately, the admin per-piece page hides the audio retry buttons the moment `has_audio = 1` — so there's no affordance to refresh an already-published piece after a pipeline-level fix like this one, and no per-beat surgical option.
+
+**Decisions + shipping:**
+
+1. **New module `agents/src/shared/tts-normalize.ts`.** Single `normalizeForTTS(text)` export. Three passes: multi-char standalone Roman numerals (`III` → `three`) always convert; single-char Roman numerals (`I`, `V`, `X`…) convert only when preceded by a curated context word (`Schedule`, `Class`, `Phase`, `Title`, `Pope`, `King`, `Louis`, …) to protect the English pronoun "I"; a list-continuation pass then catches trailing bare Romans in the same clause (the "Schedule IV and V" case — seeded by the first two passes). The existing `Zeemish → Zee-mish` aliasing moved into the same module. `audio-producer.ts`'s `prepareForTTS` now ends with `normalizeForTTS(stripped)`. Regression harness at `agents/scripts/verify-normalize.mjs` (20 cases, runs via `pnpm verify-normalize` — same pattern as `verify-splice.mjs`).
+
+2. **Conversion target: spelled-out words** (`Schedule IV` → `Schedule four`, not `Schedule 4`). Rationale: every TTS reads "four" as the cardinal; Arabic numerals like "Schedule 4" are read as "Schedule fourth" by some providers in ordinal contexts. Spelling the number out makes the fix provider-agnostic, which is the whole point of the module living upstream of the ElevenLabs-specific code. Character-count drift from the conversion is a few chars per beat (well under the 20k budget).
+
+3. **Per-beat regen: new `Director.retryAudioBeat(pieceId, beatName)` method.** Deletes exactly one R2 object + one `daily_piece_audio` row, keeps `has_audio=1` so the other beats keep playing for readers, then calls `retryAudio(pieceId, force=true)` — producer's R2 head-check means only the deleted beat regenerates. Publisher's splice is a no-op when the rebuilt `audioBeats` map serialises identically to frontmatter (same beat names, same deterministic R2 paths). `retryAudio` gained a `force?: boolean` parameter (defaults `false`) so the 2026-04-22 has_audio=1 double-fire guard stays in place for UI-triggered Continue but is bypassable by per-beat regen.
+
+4. **Admin UI always-visible retry.** Previously the whole retry block was gated `{!audioComplete && (...)}` — on `has_audio=1` operators saw zero controls. Now: per-beat "Regenerate" button on every audio row (confirm dialog warns about CDN cache → hard-refresh to hear new); Start-over button always visible when rows exist (confirm dialog warns about reader-visible downtime on published pieces); Continue button only when `!audioComplete` (it's a no-op once every beat exists). Small "Audio published ✓" chip in the section header when complete.
+
+5. **Endpoint extended.** `/api/agents/audio-retry` (site worker) + `/audio-retry` (agents worker) both accept a new `mode=beat&beat=<kebab-name>` alongside the existing `continue`/`fresh` modes. Both also now accept `piece_id=<uuid>` as an alternative to `date` for unambiguous resolution at multi-per-day. Beat-name validated against `/^[a-z0-9-]+$/` on both sides (defense in depth — Director re-validates too).
+
+**Trade-offs:**
+- CDN caching: regenerated clips live at the same deterministic R2 key → same `public_url`. Browsers/Cloudflare may serve the stale clip until cache expires. Admin UI explicitly surfaces the hard-refresh requirement. Cache-header tuning on `/audio/*` is a separate project.
+- Publisher splice is a no-op during per-beat regen (the `audioBeats` frontmatter map serialises identically). This is fine — the actual fresh MP3 is on R2 at the same URL. `has_audio` stays `1` throughout so no second commit is needed. But it means there's no git-history breadcrumb for "beat X regenerated at time T" — observer_events + pipeline_log carry that signal instead.
+- Roman-numeral false positives: the regex is deliberately conservative. `IIII` (invalid Roman) is preserved unchanged (round-trip parse rejects it). `WWII` is preserved (no word boundary inside the token). `V-neck` is preserved (no number-word seed for pass 3). Trade-off: a bare `V` in prose without a context word won't convert — but that's the cost of protecting "I" as a pronoun, and the context-word list covers the realistic cases.
+- `retryAudio(pieceId, force=true)` from `retryAudioBeat` bypasses the has_audio guard that was added as defense-in-depth for the 2026-04-17 corruption. Safe because the corruption cause (spliceAudioBeats regex bug in commit `55fce9f`) is separately fixed; the guard remains for UI-triggered Continue.
+
+**Files:** NEW [agents/src/shared/tts-normalize.ts](../agents/src/shared/tts-normalize.ts), NEW [agents/scripts/verify-normalize.mjs](../agents/scripts/verify-normalize.mjs), EDIT [agents/src/audio-producer.ts](../agents/src/audio-producer.ts), EDIT [agents/src/director.ts](../agents/src/director.ts), EDIT [agents/src/server.ts](../agents/src/server.ts), EDIT [agents/package.json](../agents/package.json), EDIT [src/pages/api/agents/audio-retry.ts](../src/pages/api/agents/audio-retry.ts), EDIT [src/pages/dashboard/admin/piece/[date]/[slug].astro](../src/pages/dashboard/admin/piece/[date]/[slug].astro).
+
+**Verification:** 20-case regression harness passes (`pnpm verify-normalize`), `verify-splice` regression still passes, agents typecheck clean aside from pre-existing server.ts SubAgent errors (one new instance of the same pattern on the new `retryAudioBeat` stub call — consistent with prior `retryAudio`/`retryAudioFresh` calls). Live verification: regenerate a beat on the 2026-04-23 cannabis piece (the trigger piece) after deploy and confirm "Schedule three/four/five" pronunciation.
+
+---
+
 ## 2026-04-22: Admin polish — observer feed cap + pipeline history per-piece + word_count canonical
 
 **Context:** Final three points from the FOLLOWUPS audit entry. Not bugs — policy/design calls that had been deferred as "needs your input." Taken together, they close the audit entry fully.

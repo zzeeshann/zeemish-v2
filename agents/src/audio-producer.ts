@@ -1,5 +1,6 @@
 import { Agent } from 'agents';
 import type { Env } from './types';
+import { normalizeForTTS } from './shared/tts-normalize';
 
 /**
  * Audio brief for a daily piece. `pieceId` is the primary identity
@@ -248,11 +249,12 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
   }
 
   /**
-   * Strip MDX/HTML and apply pronunciation substitutions.
-   *
-   * Pronunciation: "Zeemish" → "Zee-mish". ElevenLabs' multilingual v2
-   * model doesn't support IPA phonemes (flash_v2 only), but plain-text
-   * aliasing works on every model and needs no PLS dictionary upkeep.
+   * Strip MDX/HTML, then hand off to the provider-agnostic normaliser
+   * in shared/tts-normalize.ts (Zeemish prosody alias + Roman-numeral
+   * conversion). Stripping stays here because the regex-heavy MDX
+   * cleanup is specific to the producer's input shape; the normaliser
+   * deals only with plain prose so it can be reused by any future TTS
+   * provider.
    */
   private prepareForTTS(text: string): string {
     const stripped = text
@@ -263,9 +265,7 @@ export class AudioProducerAgent extends Agent<Env, AudioProducerState> {
       .replace(/\*(.*?)\*/g, '$1')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-    return stripped
-      .replace(/\bZeemish\b/g, 'Zee-mish')
-      .replace(/\bzeemish\b/g, 'zee-mish');
+    return normalizeForTTS(stripped);
   }
 
   /**

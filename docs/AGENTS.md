@@ -109,7 +109,8 @@ Learner: runs off-pipeline on reader engagement data
 - **Role:** Generates per-beat MP3 audio via ElevenLabs, saves to R2, writes `daily_piece_audio` rows.
 - **Voice:** Frederick Surrey (British, calm, narrative) — `j9jfwdrw7BRfcR43Qohk` (added to "My Voices" for stability against shared-library removal).
 - **Model / format:** `eleven_multilingual_v2`, output `mp3_44100_96`, `use_speaker_boost: true`, `speed: 0.95`, `style: 0.3`, `stability: 0.6`, `similarity_boost: 0.75`.
-- **Process:** Extract beats from MDX → `prepareForTTS` (strip tags + "Zeemish → Zee-mish" alias) → sum chars → reject if > CHAR_CAP → per beat: R2 head-check → POST to ElevenLabs (with `previous_request_ids` rolling-3 window for prosodic stitching) → R2 put → upsert `daily_piece_audio` row.
+- **Process:** Extract beats from MDX → `prepareForTTS` (strip tags, then hand off to [`agents/src/shared/tts-normalize.ts`](../agents/src/shared/tts-normalize.ts) for the `Zeemish → Zee-mish` prosody alias and Roman-numeral → spelled-word conversion — `Schedule IV` → `Schedule four`) → sum chars → reject if > CHAR_CAP → per beat: R2 head-check → POST to ElevenLabs (with `previous_request_ids` rolling-3 window for prosodic stitching) → R2 put → upsert `daily_piece_audio` row.
+- **Text normaliser (2026-04-23):** `shared/tts-normalize.ts` is provider-agnostic by design — lives upstream of the ElevenLabs-specific code so a future alternative TTS can reuse the same rules. Three-pass Roman-numeral conversion protects the English pronoun "I" (single-letter Romans only convert after a curated context word like `Schedule|Phase|Title|King|Louis`). Regression harness: [`agents/scripts/verify-normalize.mjs`](../agents/scripts/verify-normalize.mjs) (20 cases, `pnpm verify-normalize`). See DECISIONS 2026-04-23 "Provider-agnostic TTS normaliser".
 - **Budget:** 20,000-char hard cap per piece. Over-cap aborts BEFORE any API spend via `AudioBudgetExceededError` (Director catches, escalates to Observer).
 - **Retry:** 3 attempts with 1s/2s exponential backoff on 5xx / network errors / timeouts. Per-attempt `AbortSignal.timeout(90_000)` guards against silent TCP stalls (raised from 30s on 2026-04-22 after a ~2960-char beat exceeded the old cap on the happy path). 4xx fails fast (bad key, bad voice, quota).
 - **Separation:** Never touches git. Never sets `has_audio`. Never knows Publisher exists.
@@ -161,9 +162,16 @@ Learner: runs off-pipeline on reader engagement data
 POST /daily-trigger
 # Header: Authorization: Bearer <ADMIN_SECRET>
 
-# Retry audio only for an already-published piece (requires auth)
-# Invoked by admin dashboard "Retry audio" button after an audio failure.
-POST /audio-retry?date=YYYY-MM-DD
+# Retry audio for a published piece (requires auth)
+# Invoked by admin dashboard retry buttons — Continue / Start over / per-beat Regenerate.
+# Piece identification: piece_id (preferred, unambiguous) or date (latest-on-date fallback).
+# Modes:
+#   - continue (default): R2 head-check fills missing beats. Guarded has_audio=1 no-op.
+#   - fresh: wipe R2 + D1 + has_audio, regenerate every beat from scratch.
+#   - beat: delete one (piece_id, beat_name) row + R2 object, regen just that beat.
+# See DECISIONS 2026-04-23 "Provider-agnostic TTS normaliser + admin per-beat audio regen".
+POST /audio-retry?piece_id=<uuid>&mode=continue|fresh|beat[&beat=<kebab>]
+POST /audio-retry?date=YYYY-MM-DD&mode=continue|fresh|beat[&beat=<kebab>]
 
 # Director status (requires auth)
 GET /status

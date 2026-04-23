@@ -183,54 +183,99 @@ export default {
       }
     }
 
-    // Audio retry: POST /audio-retry?date=YYYY-MM-DD&mode=continue|fresh
-    // Re-runs just the audio pipeline for an already-published piece
-    // after an earlier audio failure. Text is already permanent —
-    // this call cannot un-publish or revise the piece's prose.
+    // Audio retry: POST /audio-retry?(piece_id=<uuid>|date=YYYY-MM-DD)&mode=continue|fresh|beat&beat=<beat-name>
+    // Re-runs the audio pipeline for an already-published piece after
+    // an earlier audio failure OR for a post-publish refresh (e.g.
+    // after a normaliser change). Text is already permanent — this
+    // call cannot un-publish or revise the piece's prose.
     //
-    // mode=continue (default): R2 head-check skips already-generated
-    // beats, fills in missing ones. Safe, cheap, resumes where prior
-    // attempt left off.
+    // Piece identification: prefer `piece_id` (unambiguous at multi-per-day).
+    // `date` fallback picks the latest published piece for that date.
     //
-    // mode=fresh: deletes existing R2 clips + D1 rows + has_audio flag
-    // first, then regenerates every beat from scratch. Used when the
-    // existing audio is bad.
+    // Modes:
+    //   - continue (default): R2 head-check skips already-generated beats,
+    //     fills in missing ones. Safe, cheap, resumes where prior attempt
+    //     left off. Guarded: no-op when has_audio=1.
+    //   - fresh: deletes existing R2 clips + D1 rows + has_audio flag
+    //     first, then regenerates every beat from scratch. Used when
+    //     existing audio is bad.
+    //   - beat: deletes one R2 clip + one D1 row (piece_id + beat_name),
+    //     leaves has_audio=1, then runs the pipeline with force=true so
+    //     the producer's head-check regenerates only the removed beat.
+    //     Used for surgical fixes (e.g. Roman-numeral pronunciation).
     if (url.pathname === '/audio-retry' && request.method === 'POST') {
       try {
-        const date = url.searchParams.get('date') ?? '';
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid date (YYYY-MM-DD)' }), {
-            status: 400, headers: corsHeaders(request),
-          });
+        const mode = (() => {
+          const raw = url.searchParams.get('mode');
+          return raw === 'fresh' || raw === 'beat' ? raw : 'continue';
+        })();
+
+        // Resolve pieceId — accept either explicit piece_id or date lookup.
+        let pieceId = url.searchParams.get('piece_id') ?? '';
+        let date = url.searchParams.get('date') ?? '';
+        if (pieceId) {
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
+            return new Response(JSON.stringify({ error: 'Invalid piece_id (expected UUID)' }), {
+              status: 400, headers: corsHeaders(request),
+            });
+          }
+          // Backfill date from D1 for the response payload.
+          const row = await env.DB
+            .prepare('SELECT date FROM daily_pieces WHERE id = ? LIMIT 1')
+            .bind(pieceId)
+            .first<{ date: string }>();
+          if (!row) {
+            return new Response(JSON.stringify({ error: `No piece with id ${pieceId}` }), {
+              status: 404, headers: corsHeaders(request),
+            });
+          }
+          date = row.date;
+        } else {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return new Response(JSON.stringify({ error: 'Missing or invalid piece_id or date' }), {
+              status: 400, headers: corsHeaders(request),
+            });
+          }
+          // At interval_hours=24 there's exactly one piece per date;
+          // at multi-per-day we pick the latest via ORDER BY published_at
+          // DESC to match the "retry the most recent" intent.
+          const pieceRow = await env.DB
+            .prepare('SELECT id FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
+            .bind(date)
+            .first<{ id: string }>();
+          if (!pieceRow?.id) {
+            return new Response(JSON.stringify({ error: `No piece published on ${date}` }), {
+              status: 404, headers: corsHeaders(request),
+            });
+          }
+          pieceId = pieceRow.id;
         }
-        // Cadence Phase 5: retryAudio(Fresh) take a piece_id, not a date
-        // (scope per piece, not per day). Admin still hits this endpoint
-        // with ?date=... — look up piece_id from daily_pieces here.
-        // At interval_hours=24 (current prod) there's exactly one piece
-        // per date; at multi-per-day we pick the latest via ORDER BY
-        // published_at DESC to match the "retry the most recent" intent.
-        const pieceRow = await env.DB
-          .prepare('SELECT id FROM daily_pieces WHERE date = ? ORDER BY published_at DESC LIMIT 1')
-          .bind(date)
-          .first<{ id: string }>();
-        if (!pieceRow?.id) {
-          return new Response(JSON.stringify({ error: `No piece published on ${date}` }), {
-            status: 404, headers: corsHeaders(request),
-          });
+
+        // mode=beat requires a beat name. Validate shape here so the
+        // director method only sees trusted input.
+        let beatName: string | null = null;
+        if (mode === 'beat') {
+          beatName = url.searchParams.get('beat') ?? '';
+          if (!/^[a-z0-9-]+$/.test(beatName)) {
+            return new Response(JSON.stringify({ error: 'mode=beat requires &beat=<kebab-case-name>' }), {
+              status: 400, headers: corsHeaders(request),
+            });
+          }
         }
-        const pieceId = pieceRow.id;
-        const mode = url.searchParams.get('mode') === 'fresh' ? 'fresh' : 'continue';
+
         const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
         const run = mode === 'fresh'
           ? director.retryAudioFresh(pieceId)
-          : director.retryAudio(pieceId);
+          : mode === 'beat'
+            ? director.retryAudioBeat(pieceId, beatName!)
+            : director.retryAudio(pieceId);
         ctx.waitUntil(
           run.catch((err) => {
             const message = err instanceof Error ? err.message : 'Unknown error';
             console.error(`[audio-retry:${mode}] failed for piece ${pieceId} (${date}):`, message);
           }),
         );
-        return new Response(JSON.stringify({ status: 'started', date, pieceId, mode }), {
+        return new Response(JSON.stringify({ status: 'started', date, pieceId, mode, beat: beatName }), {
           status: 202, headers: corsHeaders(request),
         });
       } catch (err) {

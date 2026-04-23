@@ -906,8 +906,13 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
    *
    * Idempotent — if audio already landed, Producer's R2 head-check
    * skips generation, Auditor re-verifies, Publisher's splice is a no-op.
+   *
+   * `force=true` bypasses the has_audio=1 short-circuit and is reserved
+   * for internal callers that have already deleted the specific beat(s)
+   * they want regenerated (retryAudioBeat). UI-triggered Continue keeps
+   * force=false so the 2026-04-17-class double-fire guard stays in place.
    */
-  async retryAudio(pieceId: string): Promise<void> {
+  async retryAudio(pieceId: string, force = false): Promise<void> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
       throw new Error(`retryAudio: invalid pieceId "${pieceId}"`);
     }
@@ -926,12 +931,15 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     // `55fce9f`). Defense-in-depth: refuse the work, surface via
     // Observer so the operator notices. "Start over" (retryAudioFresh)
     // is the escape hatch — it wipes has_audio first so it always runs.
-    if (piece.has_audio === 1) {
+    // Per-beat regen (retryAudioBeat) passes force=true after deleting
+    // just the target beat; producer's head-check then regenerates only
+    // the missing row.
+    if (!force && piece.has_audio === 1) {
       const observer = await this.subAgent(ObserverAgent, 'observer');
       await observer.logError(
         'audio',
         0,
-        `retryAudio no-op: piece ${pieceId} already has audio published (has_audio=1). Use "Start over" to regenerate.`,
+        `retryAudio no-op: piece ${pieceId} already has audio published (has_audio=1). Use "Start over" or per-beat Regenerate to trigger a rewrite.`,
         pieceId,
       );
       return;
@@ -1025,6 +1033,64 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
 
       // Delegate to existing retryAudio — it handles MDX read + audio pipeline
       await this.retryAudio(pieceId);
+    } finally {
+      keepAliveDispose();
+    }
+  }
+
+  /**
+   * Regenerate a single beat's audio without touching the other beats.
+   * Narrow-scope cousin of retryAudioFresh — deletes exactly one R2
+   * object + one daily_piece_audio row, leaves has_audio=1 so readers
+   * keep seeing the audio player for the other beats, then runs the
+   * full audio pipeline (force=true). The producer's R2 head-check
+   * auto-skips the beats that still exist on R2, so only the deleted
+   * beat regenerates. Publisher's splice is a no-op when the rebuilt
+   * audioBeats map serialises identically to the previously-committed
+   * frontmatter (same beat names, same deterministic R2 paths).
+   *
+   * Admin "Regenerate" button per-row invokes this path. Primary use:
+   * refreshing one beat after a normaliser change (e.g. Roman-numeral
+   * pronunciation) without touching the other four.
+   */
+  async retryAudioBeat(pieceId: string, beatName: string): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
+      throw new Error(`retryAudioBeat: invalid pieceId "${pieceId}"`);
+    }
+    if (!/^[a-z0-9-]+$/.test(beatName)) {
+      throw new Error(`retryAudioBeat: invalid beatName "${beatName}"`);
+    }
+
+    const row = await this.env.DB
+      .prepare('SELECT r2_key FROM daily_piece_audio WHERE piece_id = ? AND beat_name = ? LIMIT 1')
+      .bind(pieceId, beatName)
+      .first<{ r2_key: string }>();
+    if (!row) {
+      // No existing row — either the beat name is wrong or this beat
+      // was never generated (e.g. pipeline stopped mid-way). For the
+      // latter case, operator should use "Continue" on the whole piece.
+      // Log and bail so we don't hide a typo.
+      const observer = await this.subAgent(ObserverAgent, 'observer');
+      await observer.logError(
+        'audio',
+        0,
+        `retryAudioBeat: no daily_piece_audio row for piece ${pieceId} beat "${beatName}". Use Continue to generate missing beats.`,
+        pieceId,
+      );
+      return;
+    }
+
+    const keepAliveDispose = await this.keepAlive();
+    try {
+      await this.env.AUDIO_BUCKET.delete(row.r2_key);
+      await this.env.DB
+        .prepare('DELETE FROM daily_piece_audio WHERE piece_id = ? AND beat_name = ?')
+        .bind(pieceId, beatName)
+        .run();
+      // Leave has_audio=1 intact — the other beats still play for
+      // readers. runAudioPipeline will re-UPDATE has_audio=1 after
+      // Publisher (no-op if already 1).
+      await this.retryAudio(pieceId, /* force */ true);
     } finally {
       keepAliveDispose();
     }
