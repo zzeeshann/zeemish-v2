@@ -13,6 +13,21 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-23: CDN cache invalidation on per-beat audio regen
+
+**Surfaced:** 2026-04-23 during live verification of the admin per-beat Regenerate button (shipped in commit `ce3de81`, DECISIONS 2026-04-23 "Provider-agnostic TTS normaliser + admin per-beat audio regen").
+
+**Hypothesis:** Audio R2 keys are deterministic (`audio/daily/{date}/{piece_id}/{beat_name}.mp3`) — regenerating a beat overwrites the same key, so the URL stays identical. Site worker's `/audio/*` catch-all route serves R2 objects with `Cache-Control: public, max-age=31536000, immutable` (1-year edge cache). After per-beat regen, returning readers may keep hearing the stale cached MP3 at browser + Cloudflare edge until the cache TTL expires. First-time listeners hear the new clip; hard-refresh bypasses for returning listeners. Today's admin UI explicitly warns about this in the per-beat Regenerate confirm dialog, and the live verification flow included a manual hard-refresh step.
+
+**Investigation hints:**
+- `src/pages/audio/[...path].ts` — the site-worker route serving R2 audio. Cache-Control header source.
+- Options: (a) short-circuit cache on a known "recently regenerated" signal (would need D1 read per audio request — too expensive); (b) append a cache-buster to `public_url` on regen (e.g. `?v={request_id}`) and update the splice to propagate it — requires Publisher commit on every regen, undoes some of the Fix 2 benefit from `891c6f2`; (c) invalidate Cloudflare cache via API on regen (requires an API token + a write path from Director); (d) drop the `immutable` and lower `max-age` (trades universal browser cache speed for freshness — bandwidth cost).
+- Option (c) is cleanest conceptually — regen is a rare operator action, not per-reader. Option (d) is the 5-minute fix if we just want "stop caching for a year."
+
+**Priority:** low. Per-beat regen is an operator action; operators know to hard-refresh. Impact scales with regen frequency — if we start running it weekly for voice-contract improvements, priority becomes medium.
+
+---
+
 ## [resolved] 2026-04-22: Admin / dashboard / public pages — full multi-per-day audit for pooling + stale references
 
 **Status:** fully resolved across 9 commits on 2026-04-22. Observer events pooling (the original trigger) resolved via migration 0020. All 5 numbered points (including the daily_candidates.selected bug + residual WHERE date = ? + 3 admin/dashboard audit items surfaced 2026-04-22 evening) closed — see inline strikethroughs.

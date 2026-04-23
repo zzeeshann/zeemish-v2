@@ -311,11 +311,29 @@ Admin Astro pages (also ADMIN_EMAIL-gated): `/dashboard/admin/`, `/dashboard/adm
 ## Audio — retry, troubleshooting, cost
 
 ### Retry audio for a piece
-If an audio phase failed (observer escalation titled `Audio failure: …`), visit `/dashboard/admin/piece/{date}/` and press **Retry audio**. That proxies to `POST /audio-retry?date={date}` on the agents worker, which re-reads the committed MDX from GitHub and re-runs Producer → Auditor → publishAudio. Idempotent: R2 head-check skips already-generated beats; `INSERT OR REPLACE` refreshes rows; `publishAudio` detects identical content and returns without a new commit.
 
-Via curl:
+Admin deep-dive at `/dashboard/admin/piece/{date}/{slug}/` exposes three retry affordances. Pick by scope of the fix:
+
+- **Continue** — only visible when audio is incomplete (`has_audio=0` + partial rows). Resume from where the prior run stopped. R2 head-check skips already-generated beats, fills in the missing ones. Safe, cheap, no ElevenLabs cost for completed beats. Guarded: refuses when `has_audio=1` (a prior attempt hit this guard on 2026-04-22 — "refuses-to-double-fire" defense-in-depth).
+- **Start over** — always visible when audio rows exist. Wipes every R2 clip + D1 row + `has_audio` flag, regenerates every beat from scratch. Scary confirm dialog — readers on an already-published piece briefly have no audio until the rerun completes. Use when the existing audio is bad overall (wrong prompt, wrong voice settings, normaliser change landed that needs every beat reprocessed, etc).
+- **Regenerate** (per-beat button on every audio row) — always visible. Deletes one R2 object + one `daily_piece_audio` row, keeps `has_audio=1` so the other beats keep playing for readers, regenerates just that one beat. Use for surgical fixes (one Roman-numeral beat, one mispronounced word, etc). Cloudflare CDN may serve the stale clip for a short window — hard-refresh the public page to confirm the new clip is live.
+
+Endpoint shape (same on both workers):
+```
+POST /audio-retry?piece_id=<uuid>&mode=continue|fresh|beat[&beat=<kebab-name>]
+POST /audio-retry?date=YYYY-MM-DD&mode=continue|fresh|beat[&beat=<kebab-name>]
+```
+Prefer `piece_id` — unambiguous at multi-per-day cadence. `date` fallback resolves to the latest published piece on that date.
+
+Via curl (whole piece, continue):
 ```bash
-curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?date=2026-04-18" \
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?date=2026-04-18&mode=continue" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+
+Via curl (single beat — needs piece_id):
+```bash
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?piece_id=<uuid>&mode=beat&beat=hook" \
   -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
 
@@ -339,18 +357,31 @@ npx wrangler d1 execute zeemish --remote --command \
   "SELECT COALESCE(SUM(character_count), 0) as chars FROM daily_piece_audio WHERE date = date('now');"
 ```
 
-### Force-regenerate one beat's audio
-(Rare — normally covered by the retry flow above.) Delete the R2 object + row, then retry:
+### Force-regenerate one beat's audio (manual fallback)
+Normally covered by the admin page's per-beat **Regenerate** button (2026-04-23). If the admin UI is unreachable or you're automating, the manual path is:
 ```bash
-# Delete from R2 (set BUCKET to zeemish-audio)
-npx wrangler r2 object delete zeemish-audio/audio/daily/2026-04-18/hook.mp3
-
-# Delete the row
+# Find the piece_id first (admin page URL has it; or via D1):
 npx wrangler d1 execute zeemish --remote --command \
-  "DELETE FROM daily_piece_audio WHERE date = '2026-04-18' AND beat_name = 'hook';"
+  "SELECT id FROM daily_pieces WHERE date = '2026-04-18' ORDER BY published_at DESC LIMIT 1;"
 
-# Retry
-curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?date=2026-04-18" \
+# Retry via endpoint (cleanest — Director handles D1 + R2 deletion atomically):
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?piece_id=<uuid>&mode=beat&beat=hook" \
+  -H "Authorization: Bearer YOUR_ADMIN_SECRET"
+```
+If you need to manually clean state (e.g. to test the head-check path without the Director endpoint):
+```bash
+# Look up the r2_key — it's stored verbatim in daily_piece_audio.r2_key.
+# Post-migration 0015 the PK is (piece_id, beat_name) — query by those,
+# not by date.
+npx wrangler d1 execute zeemish --remote --command \
+  "SELECT r2_key FROM daily_piece_audio WHERE piece_id = '<uuid>' AND beat_name = 'hook';"
+
+npx wrangler r2 object delete zeemish-audio/<r2_key-from-above>
+npx wrangler d1 execute zeemish --remote --command \
+  "DELETE FROM daily_piece_audio WHERE piece_id = '<uuid>' AND beat_name = 'hook';"
+
+# Then Continue retry to regenerate the missing beat via head-check:
+curl -X POST "https://zeemish-agents.zzeeshann.workers.dev/audio-retry?piece_id=<uuid>&mode=continue" \
   -H "Authorization: Bearer YOUR_ADMIN_SECRET"
 ```
 
