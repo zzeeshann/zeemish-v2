@@ -2,6 +2,40 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.1 — `categories` + `piece_categories` schema
+
+**Context:** Area 2 opens the 14th agent — Categoriser — plus a library category filter and an admin management page. Six sub-tasks, schema-first discipline: no code that writes to these tables can land until the tables exist in production. Sub-task 2.1 is the plumbing commit.
+
+**Decisions:**
+
+1. **Two new tables, both additive.** `categories` holds the taxonomy (id, slug, name, description, locked, piece_count, created_at, updated_at). `piece_categories` is the join (piece_id, category_id, confidence, created_at) with composite PK `(piece_id, category_id)`. Full shape in [migrations/0021_categories.sql](../migrations/0021_categories.sql) header. Rollback = `DROP TABLE` on both — empty at migration time, no backfill to reverse.
+
+2. **`piece_count` denormalised on `categories`.** Library chips render sorted by count on every page load (sub-task 2.4). A correlated `COUNT(pc.piece_id) GROUP BY` on each render is fine at 5 categories but ugly as the taxonomy grows; the write path (Categoriser insert, admin merge/delete) is low-frequency. Maintained by the writer; admin page gets a "Recount" escape hatch (sub-task 2.5) for drift recovery. Same defensive shape as any future migration backfill.
+
+3. **`slug` stored, not derived from `name`.** Rename updates `name`; `slug` only changes on explicit operator edit or on merge (target's slug wins). Keeps `/library/?cat=chokepoints` URLs stable across renames — important if a library URL ever leaks into anyone's bookmark.
+
+4. **Composite PK on `piece_categories`** gives idempotency. Categoriser can safely re-run over a piece without producing duplicate rows; the pre-insert guard on sub-task 2.2 is a correctness layer on top of this safety net.
+
+5. **No REFERENCES FK declarations.** Consistent with every other join column across 20 prior migrations (`daily_piece_audio.piece_id`, `pipeline_log.piece_id`, `audit_results.piece_id`, `learnings.piece_id`, …). D1 doesn't enforce FKs at the schema level in this codebase; application layer owns integrity. Admin delete is gated on `piece_count=0` (sub-task 2.5) so orphans can't arise.
+
+6. **`locked` as INTEGER (0/1), no CHECK on `confidence`.** Consistent with `has_audio`, `has_interactive`, `passed`, `applied_to_prompts` (INTEGER booleans) and `learnings.confidence` / `audit_results.score` (INTEGER 0–100, no CHECK). Application layer clamps and validates.
+
+7. **Two indexes on `categories`, two on `piece_categories`.** `idx_categories_slug` for library route lookups (alongside the UNIQUE auto-index, harmless redundancy and makes the EXPLAIN readable). `idx_categories_piece_count` DESC for the chip-sort read path. `idx_piece_categories_piece` for per-piece lookup (per-piece admin + drawer). `idx_piece_categories_category` for per-category filter (library chip) and piece_count recount.
+
+**Trade-offs:**
+- Denormalised `piece_count` creates a drift surface (Categoriser/admin must bump + decrement correctly). Accepted — the recount escape hatch is cheap to build and the read-path win is real as the taxonomy grows.
+- Stored `slug` means a rename doesn't auto-update the URL; operators must edit slug manually when they want the URL to follow. Deliberate — bookmark stability beats auto-slugging.
+- `(piece_id, category_id)` PK means a piece can't appear twice in the same category even if Categoriser is re-invoked with higher confidence. Upsert pattern (`INSERT OR REPLACE`) writes the newer row on re-run; acceptable since re-runs are manual operator actions.
+- No seed rows. Initial taxonomy emerges from sub-task 2.3's backfill over existing published pieces, oldest first. Avoids a guessed taxonomy that later has to unwind.
+
+**Files:** NEW [migrations/0021_categories.sql](../migrations/0021_categories.sql). EDIT [docs/SCHEMA.md](./SCHEMA.md) (two new table entries + migration-summary line + header counts 14→16 tables / 20→21 migrations).
+
+**Verification:** Migration applied cleanly (`wrangler d1 migrations apply zeemish --remote` → 7 commands, 1.27ms, ✅). `PRAGMA table_info(categories)` returned 8 columns in the expected shape. `PRAGMA table_info(piece_categories)` returned 4 columns. All 4 custom indexes present (`idx_categories_slug`, `idx_categories_piece_count`, `idx_piece_categories_piece`, `idx_piece_categories_category`) alongside SQLite auto-indexes for PKs + UNIQUE slug. `SELECT COUNT(*)` on both tables returned 0 as expected.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (evening): Dashboard `isRunningNow` heuristic + gerund progress phrasing
 
 **Context:** User reported `/dashboard/` was showing "Pipeline running — currently in publisher commits the audio." for today's 2026-04-23 cannabis piece, even though audio had long since completed (`has_audio=1`, commit `891c6f2` earlier in the day). Two bugs compounded.

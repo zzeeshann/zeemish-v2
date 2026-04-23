@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**14 tables across 20 migrations.**
+**16 tables across 21 migrations.**
 
 ## Reader-side tables
 
@@ -252,7 +252,35 @@ Seeded values: `interval_hours = '24'` (preserves current 1-piece/day production
 
 Migration: `0016_admin_settings.sql`
 
-## Migrations summary (20 migrations, 14 tables)
+### categories
+Taxonomy for browsing the library by subject and for the Categoriser agent's reuse-bias assignments. One row per category. Operator-curated (rename / merge / delete / lock) from `/dashboard/admin/categories/`; populated from day one by the Categoriser agent and the one-time seed script over pre-Categoriser published pieces.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| slug | TEXT NOT NULL UNIQUE | kebab-case. Powers the `/library/` category filter URL. Stored on the row (not derived from `name`) so a rename never silently breaks external bookmarks; slug only changes on explicit operator edit or on merge (target wins). |
+| name | TEXT NOT NULL | Human display form, e.g. "Chokepoints & Supply" |
+| description | TEXT | One-liner of what belongs here. Shown to Categoriser in its system prompt so the reuse-bias has real signal; also shown on the admin page. Nullable. |
+| locked | INTEGER NOT NULL DEFAULT 0 | 1 = Categoriser MUST NOT reassign away from this category (can still assign TO it). Enforced in agent logic, not schema. |
+| piece_count | INTEGER NOT NULL DEFAULT 0 | Denormalised counter — library renders chips sorted by count on every request. Maintained by the writer (Categoriser insert + admin merge/delete). Admin page has a "Recount" escape hatch for drift. |
+| created_at | INTEGER NOT NULL | Unix ms |
+| updated_at | INTEGER NOT NULL | Unix ms, bumped on any mutation |
+
+Indexes: `idx_categories_slug` on `slug` (explicit, alongside the UNIQUE auto-index), `idx_categories_piece_count` on `piece_count DESC`. Migration: `0021_categories.sql`.
+
+### piece_categories
+Join table — one row per (piece, category) assignment. Categoriser writes 1–3 rows per piece; admin merge/delete rewrites in bulk inside a transaction.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| piece_id | TEXT NOT NULL | `daily_pieces.id`. Non-enforced FK, consistent with the rest of this codebase's join columns. |
+| category_id | TEXT NOT NULL | `categories.id`. Same non-enforced FK convention. |
+| confidence | INTEGER NOT NULL | 0–100. Categoriser's confidence in this specific assignment. No CHECK; application layer clamps. |
+| created_at | INTEGER NOT NULL | Unix ms |
+
+PK: **composite `(piece_id, category_id)`** — idempotent; Categoriser can safely re-run. Indexes: `idx_piece_categories_piece` on `piece_id` (per-piece lookup), `idx_piece_categories_category` on `category_id` (per-category filter + piece_count recount). Migration: `0021_categories.sql`.
+
+## Migrations summary (21 migrations, 16 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -273,3 +301,4 @@ Migration: `0016_admin_settings.sql`
 - `0018_pipeline_log_piece_id.sql` — multi-per-day piece_id schema fix Phase 1. Added nullable `piece_id TEXT` to `pipeline_log` + `idx_pipeline_log_piece`. Completes the piece_id column coverage across all three day-keyed tables (0014 had `audit_results` + `daily_candidates`; this finishes the set). Additive ALTER, no snapshot needed. See DECISIONS 2026-04-22 "piece_id columns on day-keyed tables".
 - `0019_piece_id_backfill.sql` — multi-per-day piece_id schema fix Phase 2. Manual (not auto-applied) — commented UPDATEs run via `wrangler d1 execute`, same pattern as 0012 and 0014 Step 2. Two strategies: pre-2026-04-22 rows via `daily_pieces.date` join (unambiguous at 1/day), 2026-04-22 rows via midpoint split at timestamp `1776850364493` between the two pieces' `published_at`. 512 null rows populated across the three tables (9 `audit_results` + 153 `pipeline_log` + 350 `daily_candidates`). 0 NULL remaining across all three. Verified row-by-row against production D1.
 - `0020_observer_events_piece_id.sql` — multi-per-day audit. Added nullable `piece_id TEXT` to `observer_events` + `idx_observer_events_piece`. Additive ALTER, no backfill — historical rows stay NULL and surface on per-piece admin via the existing 36h day-of-publish window fallback. New writes from `agents/src/observer.ts` (13 helpers, piece-scoped signature extended) and `src/lib/observer-events.ts` (optional `pieceId` field) populate piece_id going forward. System-event writers (admin settings changes, Zita rate limits) keep piece_id NULL permanently.
+- `0021_categories.sql` — Area 2 sub-task 2.1. Created `categories(id, slug UNIQUE, name, description, locked, piece_count, created_at, updated_at)` + `piece_categories(piece_id, category_id, confidence, created_at)` with composite PK. Data surface for the 14th agent (Categoriser, sub-task 2.2) plus the library category filter (sub-task 2.4) and admin management page (sub-task 2.5). Both tables empty at migration time — populated organically by Categoriser on new pieces and by a one-time seed script (sub-task 2.3) over pre-Categoriser pieces. Additive, rollback = DROP both tables.

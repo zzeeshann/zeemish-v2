@@ -16,6 +16,12 @@ An autonomous multi-agent publishing system. 13 AI agents scan the news, decide 
 
 **LAUNCHED 2026-04-18 at https://zeemish.io.** Tag: `v1.0.0`. Old breathing-tools site at zeemish.io retired (custom-domain binding moved from `zeemish-site` worker to `zeemish-v2` worker via Cloudflare dashboard). New site live with daily piece, audio, engagement tracking, public + admin dashboard, security headers on auth-touching surfaces. Workers.dev URL still active as fallback. The exact git commit at launch is what `v1.0.0` points at — use it as the reference if anyone asks "what shipped on day one".
 
+## Area 2 — Categoriser + category taxonomy (2026-04-23 late evening, in progress)
+
+Six-sub-task arc adding the 14th agent. Each sub-task ships as one commit with docs synced. 2.1 schema; 2.2 CategoriserAgent + Director hook; 2.3 seed existing pieces; 2.4 library category filter; 2.5 admin management page; 2.6 "13 → 14 agents" cascade across code, README, book ch09.
+
+**Sub-task 2.1 — `categories` + `piece_categories` schema.** Migration 0021 creates two additive tables, both empty at migration time. `categories(id, slug UNIQUE, name, description, locked, piece_count, created_at, updated_at)` + `piece_categories(piece_id, category_id, confidence, created_at)` with composite PK. Key shape decisions: `piece_count` is denormalised (library chip-sort read path wins; writer maintains; admin "Recount" is the drift escape hatch in sub-task 2.5). `slug` stored not derived so renames don't silently break library URLs. No CHECK, no REFERENCES FK — consistent with every other join column in this codebase. See DECISIONS 2026-04-23 (late evening) "Area 2 sub-task 2.1 — `categories` + `piece_categories` schema" and [docs/SCHEMA.md](docs/SCHEMA.md) for the full shape. SCHEMA.md header now reads "16 tables across 21 migrations".
+
 ## UI display-layer sweep (2026-04-23 evening, 5 commits)
 
 Session focus: dashboard + admin surface quality pass. Five commits between `bc47c2f` and `dc870a1`, all display-layer. No schema, no agent, no pipeline-semantic changes. Each has its own DECISIONS 2026-04-23 (evening) entry.
