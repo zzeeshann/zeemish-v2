@@ -6,7 +6,7 @@ import { getCollection } from 'astro:content';
 import { getUser } from '../../lib/db';
 import { formatDate } from '../../lib/format';
 import { auditTier, auditTierLabel } from '../../lib/audit-tier';
-import { pipelineStepLabel } from '../../lib/pipeline-steps';
+import { pipelineStepProgress } from '../../lib/pipeline-steps';
 import { getIntervalHours, nextRunRelative } from '../../lib/cadence';
 import { deriveSlug } from '../../lib/slug';
 
@@ -201,9 +201,14 @@ try {
     .first<{ step: string; status: string; run_id: string; created_at: number }>();
   if (lastStep) {
     lastPipelineStep = { step: lastStep.step, status: lastStep.status, tMs: lastStep.created_at, runId: lastStep.run_id };
-    // Pipeline counts as "running" only if the latest step is today and non-terminal.
-    const terminal = ['done', 'error', 'skipped'].includes(lastStep.step);
-    isRunningNow = lastStep.run_id === today && !terminal;
+    // Pipeline counts as "running" iff the most recent step is from today
+    // AND its status is literally 'running'. Previously we checked step
+    // NAME against a terminal list ('done', 'error', 'skipped') — but
+    // director.ts writes step='audio-publishing', status='done' as the
+    // terminal success row for audio, so step-name alone mis-reads a
+    // completed pipeline as still running. Same bug class as Task 1's
+    // admin Pipeline History verdict fix.
+    isRunningNow = lastStep.run_id === today && lastStep.status === 'running';
   }
 
 } catch { /* D1 may be empty in dev — everything above stays at defaults */ }
@@ -227,7 +232,7 @@ const nextRunStr = nextRunRelative(nowMs, intervalHours);
 // Header subtitle — adapts to state.
 let subtitle: string;
 if (isRunningNow && lastPipelineStep) {
-  subtitle = `Pipeline running — currently in ${pipelineStepLabel(lastPipelineStep.step).toLowerCase()}.`;
+  subtitle = `Pipeline running — ${pipelineStepProgress(lastPipelineStep.step)}.`;
 } else if (todaysPiece) {
   subtitle = lifetimeCount === 1
     ? `Today's piece is live. The first one.`
@@ -321,7 +326,7 @@ function shortDate(iso: string): string {
         <span class="w-2.5 h-2.5 rounded-full bg-zee-gold shrink-0 animate-pulse" aria-hidden="true"></span>
         <span class="text-sm text-zee-muted">Pipeline running —</span>
         {lastPipelineStep && (
-          <span class="text-sm font-medium">currently in {pipelineStepLabel(lastPipelineStep.step).toLowerCase()}</span>
+          <span class="text-sm font-medium">{pipelineStepProgress(lastPipelineStep.step)}</span>
         )}
       </div>
     )}
