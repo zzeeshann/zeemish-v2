@@ -281,6 +281,71 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** Categoriser call ran — one metered info event per run so cost
+   *  drift is visible over time. Same shape as logReflectionMetered
+   *  and logZitaSynthesisMetered. Fires on both skipped and written
+   *  paths — the skipped path (piece already categorised, idempotent
+   *  re-run) logs no Claude call but still leaves a breadcrumb so
+   *  "did the categoriser run?" has a visible answer. */
+  async logCategoriserMetered(
+    date: string,
+    title: string,
+    metrics: {
+      skipped: boolean;
+      assignmentsWritten: number;
+      novelCategoriesCreated: number;
+      novelCategoryNames: string[];
+      considered: number;
+      tokensIn: number;
+      tokensOut: number;
+      durationMs: number;
+    },
+    pieceId: string | null = null,
+  ): Promise<void> {
+    if (metrics.skipped) {
+      await this.writeEvent({
+        severity: 'info',
+        title: `Categorisation skipped: ${title}`,
+        body: `"${title}" (${date}) already has categories. No Claude call fired. Latency: ${metrics.durationMs}ms (DB only).`,
+        context: { date, ...metrics },
+        piece_id: pieceId,
+      });
+      return;
+    }
+    const novelNote = metrics.novelCategoriesCreated > 0
+      ? ` Created ${metrics.novelCategoriesCreated} new categor${metrics.novelCategoriesCreated === 1 ? 'y' : 'ies'}: ${metrics.novelCategoryNames.join(', ')}.`
+      : '';
+    await this.writeEvent({
+      severity: 'info',
+      title: `Categorised: ${title}`,
+      body: `"${title}" (${date}) assigned to ${metrics.assignmentsWritten} categor${metrics.assignmentsWritten === 1 ? 'y' : 'ies'} (considered ${metrics.considered}).${novelNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+      context: { date, ...metrics },
+      piece_id: pieceId,
+    });
+  }
+
+  /** Categoriser call failed — non-retriable by design, worth a warn
+   *  so the admin feed knows the piece missed its category
+   *  assignments. The piece is live; a missed categorisation isn't
+   *  catastrophic — the library filter just won't surface this piece
+   *  under a category until the seed script or a manual admin run
+   *  retags it. Same posture as logLearnerFailure /
+   *  logReflectionFailure / logZitaSynthesisFailure. */
+  async logCategoriserFailure(
+    date: string,
+    title: string,
+    reason: string,
+    pieceId: string | null = null,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Categorisation missed: ${title}`,
+      body: `Categoriser failed for "${title}" (${date}). Reason: ${reason}. The piece is live; it'll just miss category assignments until a manual retag.`,
+      context: { date, reason },
+      piece_id: pieceId,
+    });
+  }
+
   /** Audio pipeline failed somewhere — text is already live, admin
    *  needs to know so they can retry. Escalation severity so it
    *  surfaces in the admin feed next to low-quality publishes. */

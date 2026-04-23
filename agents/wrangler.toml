@@ -116,6 +116,14 @@ deleted_classes = ["CuratorAgent", "DrafterAgent"]
 tag = "v11"
 new_sqlite_classes = ["CuratorAgent", "DrafterAgent"]
 
+[[durable_objects.bindings]]
+name = "CATEGORISER"
+class_name = "CategoriserAgent"
+
+[[migrations]]
+tag = "v12"
+new_sqlite_classes = ["CategoriserAgent"]
+
 # R2 bucket for audio storage
 [[r2_buckets]]
 binding = "AUDIO_BUCKET"

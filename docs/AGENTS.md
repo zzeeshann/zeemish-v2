@@ -4,7 +4,7 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**13 agents total — all wired.** Audio Producer + Audio Auditor are live as of 2026-04-18, slotted in after Publisher as a ship-and-retry phase (text commits first; audio follows as a second commit). Hard 20k-char budget cap per piece protects against runaway ElevenLabs spend.
+**14 agents total — all wired.** Audio Producer + Audio Auditor are live as of 2026-04-18, slotted in after Publisher as a ship-and-retry phase. CategoriserAgent is the 14th, live as of 2026-04-23 (Area 2 sub-task 2.2) — runs off-pipeline after `publishing done`, same shape as Learner's post-publish analysis. Hard 20k-char budget cap per piece protects against runaway ElevenLabs spend.
 
 ## Design principles (all agents)
 
@@ -34,7 +34,7 @@ Observer: receives events from every agent throughout
 Learner: runs off-pipeline on reader engagement data
 ```
 
-## The 13 agents
+## The 14 agents
 
 ### 1. ScannerAgent
 - **Role:** Fetches news from Google News RSS (6 categories), deduplicates, stores candidates in D1.
@@ -148,9 +148,22 @@ Learner: runs off-pipeline on reader engagement data
 - **File:** `agents/src/learner.ts`
 - **Prompts:** `agents/src/learner-prompt.ts` (`LEARNER_POST_PUBLISH_PROMPT` for producer-side, `LEARNER_ANALYSE_PROMPT` for reader-side, `LEARNER_ZITA_PROMPT` for Zita-question synthesis)
 
-### 13. ObserverAgent
-- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logDailyRunSkipped()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `getRecentEvents()`, `getDailyDigest()`
+### 13. CategoriserAgent
+- **Role:** Assigns 1–3 categories to each just-published daily piece. 14th agent, lives off-pipeline after `publishing done` (same shape as Learner's post-publish analysis and Drafter.reflect). Strongly biased toward reusing an existing category — creates a new one only when the existing taxonomy genuinely doesn't cover the piece.
+- **Reuse bias:** The prompt names the anti-pattern directly — a taxonomy that grows a category for every piece becomes a headline list, not a map. Reuses when an existing category fits at confidence ≥60 (`CATEGORISER_REUSE_CONFIDENCE_FLOOR`). Creates at most one new category per call, and only for *subjects* (durable, could hold 10+ future pieces) — not topic-of-the-week labels.
+- **Input:** `pieceId` (UUID, pre-allocated by Director), `date` (for logging/return shape), final MDX (Director re-reads from GitHub and passes in — same pattern as Drafter.reflect).
+- **Output:** `CategoriserResult` — `{pieceId, date, skipped, assignmentsWritten, novelCategoriesCreated, novelCategoryNames, considered, tokensIn, tokensOut, durationMs}`. Surfaced back to Director for metered logging via `observer.logCategoriserMetered`.
+- **Idempotent:** short-circuits with `skipped: true` if the piece already has `piece_categories` rows, no Claude call. Belt-and-braces on top of the composite PK `(piece_id, category_id)` which blocks duplicate rows anyway.
+- **Locked-category semantic:** the `categories.locked` flag (set from admin UI in sub-task 2.5) means "MUST NOT reassign AWAY from this category." For this agent that's a no-op — it only INSERTs, never DELETEs or re-tags. The flag is enforced at admin-time (merge/delete paths). Documented in the agent header for future reference.
+- **Method:** `categorise(pieceId, date, mdx)`
+- **Maintains `categories.piece_count`:** denormalised counter bumped alongside each `piece_categories` INSERT so the library chip-sort read path stays cheap. Admin page's "Recount" action (sub-task 2.5) is the drift escape hatch.
+- **Failure posture:** Non-retriable by design — a DB / Claude / JSON failure logs to `observer_events` via `logCategoriserFailure` and moves on. The piece is live; a missed categorisation just means the library filter won't surface this piece under a category until a manual retag (seed script or admin UI).
+- **File:** `agents/src/categoriser.ts`
+- **Prompt:** `agents/src/categoriser-prompt.ts`
+
+### 14. ObserverAgent
+- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed, categoriser metered/failed) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logDailyRunSkipped()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `logCategoriserMetered()`, `logCategoriserFailure()`, `getRecentEvents()`, `getDailyDigest()`
 - **piece_id threading (2026-04-22, migration 0020):** every piece-scoped helper accepts an optional trailing `pieceId: string | null = null`. Director threads piece_id through all 13 call sites — pieceId is pre-allocated at `triggerDailyPiece` top per the multi-per-day piece_id schema fix. `logDailyRunSkipped` uses the EXISTING piece's id (the piece blocking the slot). System events (admin_settings_changed, zita_rate_limited, zita_claude_error, zita_handler_error) stay piece_id=NULL — they're cross-cutting, not per-piece. Per-piece admin query prefers `WHERE piece_id = ?` with a 36h OR-fallback for legacy NULL rows (pre-0020 events + site-worker events that haven't threaded pieceId yet). See DECISIONS 2026-04-22 "observer_events.piece_id column for per-piece admin scoping".
 - **Site-origin events (2026-04-21):** `zita_history_truncated`, `zita_rate_limited`, `zita_claude_error`, `zita_handler_error` — written directly from `src/pages/api/zita/chat.ts` via [`src/lib/observer-events.ts`](../src/lib/observer-events.ts), which mirrors this agent's `writeEvent` shape. Same table, same feed — the admin Observer section doesn't discriminate by origin. The site-worker helper signature gained an optional `pieceId` field in 0020 but current call sites don't populate it (would need zita-chat client to receive + forward piece_id — deferred as a cross-cutting refactor).
 - **File:** `agents/src/observer.ts`
@@ -184,6 +197,14 @@ GET /events?limit=20
 
 # Engagement report (requires auth)
 GET /engagement?course=daily
+
+# Categoriser manual trigger (requires auth)
+# Fires the 14th agent against an already-published piece. Used for
+# (a) verifying sub-task 2.2 before the seed script in 2.3, (b)
+# retagging after admin merge/delete (sub-task 2.5), (c) re-running
+# after a Categoriser prompt change. Idempotent — the agent skips
+# pieces that already have piece_categories rows.
+POST /categorise-trigger?piece_id=<uuid>
 ```
 
 ## How to deploy

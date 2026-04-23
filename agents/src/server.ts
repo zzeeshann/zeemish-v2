@@ -20,6 +20,7 @@ export { AudioAuditorAgent } from './audio-auditor';
 export { ScannerAgent } from './scanner';
 export { CuratorAgent } from './curator';
 export { DrafterAgent } from './drafter';
+export { CategoriserAgent } from './categoriser';
 // Course workflow removed — daily pieces only
 
 /** Check admin auth — bearer token only (no query params — they leak in logs) */
@@ -72,7 +73,7 @@ export default {
     }
 
     // Admin endpoints require auth
-    const adminPaths = ['/daily-trigger', '/audio-retry', '/zita-synthesis-trigger', '/status', '/digest', '/events', '/engagement'];
+    const adminPaths = ['/daily-trigger', '/audio-retry', '/zita-synthesis-trigger', '/categorise-trigger', '/status', '/digest', '/events', '/engagement'];
     if (adminPaths.some((p) => url.pathname === p) && !checkAuth(request, env)) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), {
         status: 401,
@@ -330,6 +331,61 @@ export default {
         return new Response(JSON.stringify({ status: 'started', date, pieceId, title }), {
           status: 202, headers: corsHeaders(request),
         });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 500, headers: corsHeaders(request),
+        });
+      }
+    }
+
+    // Categoriser manual trigger: POST /categorise-trigger?piece_id=<uuid>
+    // Fires Director.categoriseScheduled against an already-published
+    // piece, without waiting for the natural post-publish alarm. Used
+    // for (a) testing the Categoriser path after a prompt or logic
+    // change, (b) retagging a piece after admin merge/delete
+    // operations (sub-task 2.5), (c) verifying Area 2 sub-task 2.2
+    // ships green before the seed script in 2.3 processes the
+    // backfill. Idempotent — Categoriser short-circuits with
+    // skipped=true if the piece already has piece_categories rows.
+    if (url.pathname === '/categorise-trigger' && request.method === 'POST') {
+      try {
+        const pieceId = url.searchParams.get('piece_id') ?? '';
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pieceId)) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid piece_id (UUID)' }), {
+            status: 400, headers: corsHeaders(request),
+          });
+        }
+        const pieceRow = await env.DB
+          .prepare('SELECT date, headline FROM daily_pieces WHERE id = ? LIMIT 1')
+          .bind(pieceId)
+          .first<{ date: string; headline: string }>();
+        if (!pieceRow) {
+          return new Response(JSON.stringify({ error: `No piece with id ${pieceId}` }), {
+            status: 404, headers: corsHeaders(request),
+          });
+        }
+        // Resolve filePath the same way Director does at publish time.
+        const slug = pieceRow.headline.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+        const filePath = `content/daily-pieces/${pieceRow.date}-${slug}.mdx`;
+        const director = await getAgentByName<DirectorAgent>(env.DIRECTOR, 'default');
+        ctx.waitUntil(
+          director.categoriseScheduled({
+            pieceId,
+            date: pieceRow.date,
+            title: pieceRow.headline,
+            filePath,
+          }).catch((err) => {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.error(`[categorise-trigger] failed for piece ${pieceId}:`, message);
+          }),
+        );
+        return new Response(JSON.stringify({
+          status: 'started',
+          pieceId,
+          date: pieceRow.date,
+          title: pieceRow.headline,
+        }), { status: 202, headers: corsHeaders(request) });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         return new Response(JSON.stringify({ error: message }), {

@@ -2,6 +2,48 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.2 — CategoriserAgent (14th agent)
+
+**Context:** With schema in place (sub-task 2.1), 2.2 adds the 14th agent that actually populates it. Single-purpose agent, same off-pipeline pattern as Learner's post-publish analysis and Drafter.reflect.
+
+**Decisions:**
+
+1. **One file, one prompt, one method.** `agents/src/categoriser.ts` + `agents/src/categoriser-prompt.ts`. Method `categorise(pieceId, date, mdx)` returns `CategoriserResult` with per-run metrics. Same shape as Drafter.reflect — takes MDX from caller rather than re-reading from GitHub itself, keeps the agent ignorant of file paths.
+
+2. **Director hook — scheduled alarm, not inline.** New `categoriseScheduled` method at Director fires via `this.schedule(1, 'categoriseScheduled', {pieceId, date, title, filePath})` immediately after `publishing done`. Sits right before the audio schedule so alarm ordering is deterministic (producer + self-reflection + categoriser + audio, all fire in order). Scheduled method re-reads MDX via `PublisherAgent.readPublishedMdx` — same pattern as `reflectOnPieceScheduled`, keeps scheduled-row payloads small (filePath only, not body).
+
+3. **Strongly reuse-biased prompt.** The prompt names the anti-pattern directly — "a taxonomy that grows a new category for every piece becomes a headline list, not a map." Numeric floor: reuse when any existing category fits at confidence ≥60 (`CATEGORISER_REUSE_CONFIDENCE_FLOOR`). At most one new category per call, and only for *subjects* (durable, could hold 10+ future pieces), never topic-of-the-week labels. Prompt also asks Claude to check *underlying subject* against existing descriptions, not just headline keywords — prevents "different word, same concept" splits.
+
+4. **Novel category validation + collision guard at the agent layer.** Slug normalisation via `normaliseSlug` (lowercase, diacritic strip, non-alnum → `-`, bounded length). Pre-INSERT SELECT against `existingBySlug` → if Claude proposes a name that normalises to an existing slug, reuse that category instead of creating a duplicate. Post-INSERT try/catch — if the INSERT throws on a UNIQUE violation (race between two concurrent categoriser runs proposing the same slug), SELECT the winner and reuse its id. Name clamped to 100 chars, description to 500.
+
+5. **`piece_count` maintained in the same transaction as `piece_categories` INSERT.** Each assignment does `INSERT INTO piece_categories` + `UPDATE categories SET piece_count = piece_count + 1, updated_at = ?`. Sub-task 2.5's merge/delete flows will decrement on the same path. Drift surface accepted; admin "Recount" is the escape hatch. D1 per-DB serial consistency makes the atomic increment safe under concurrent runs on different pieces.
+
+6. **Idempotence at two layers.** (a) Pre-insert guard — `SELECT COUNT(*) FROM piece_categories WHERE piece_id = ?` short-circuits with `skipped: true` and no Claude call if the piece already has any rows. (b) Composite PK `(piece_id, category_id)` blocks duplicate rows underneath. The pre-check saves the cost of a Sonnet call on re-runs; the PK is the correctness floor.
+
+7. **Locked semantic is inert for this agent.** `categories.locked = 1` means "Categoriser MUST NOT reassign AWAY from this category" (per sub-task 2.1 design). Since the agent only INSERTs — never DELETEs or re-tags — the flag has no effect on this code path. Enforced at admin-time (merge/delete in sub-task 2.5). Documented in agent header so future maintainers don't add spurious checks.
+
+8. **Failure = logged, not retried.** Same posture as `analyseProducerSignalsScheduled` and `reflectOnPieceScheduled`: a DB / Claude / JSON parse failure surfaces via `observer.logCategoriserFailure` (warn severity) and the alarm returns. The piece is live; a missed categorisation means the library filter won't surface this piece under a category until a manual retag via the seed script or the admin UI. Piece is never blocked.
+
+9. **Metered success logging.** `observer.logCategoriserMetered` fires on both `skipped` and written paths (info severity, same shape as `logReflectionMetered` and `logZitaSynthesisMetered`) — tokens-in/out + latency + assignments-written + novel-names. Cost drift visible over time without a separate metrics pipeline. The skipped path fires with zero tokens + DB-only latency so "did categoriser run?" has a visible answer.
+
+10. **New admin endpoint `/categorise-trigger?piece_id=<uuid>`.** Mirrors `/zita-synthesis-trigger`. Three purposes: (a) verifying sub-task 2.2 ships green before 2.3's seed script; (b) operator retag after sub-task 2.5 admin merge/delete; (c) re-running after a Categoriser prompt change. ADMIN_SECRET bearer-gated, validates piece_id as UUID shape, resolves filePath the same way Director does at publish, fires via `ctx.waitUntil(director.categoriseScheduled(…))`. The idempotence guard in the agent makes "did it already categorise?" a safe retry.
+
+**Trade-offs:**
+- MDX excerpt capped at 2000 chars (`BODY_EXCERPT_MAX_CHARS`) — enough to show the hook + first teaching beat, keeps backfill cost predictable across 8 pieces × 3 years × 1 piece/day at scale. A 20k-char piece would bust the prompt budget without this cap. Potential cost: a piece whose categorical signal is buried past the first 2000 chars gets under-informed categorisation. Accepted; the headline + underlying_subject + first chunk carries the weight for categorisation.
+- Pre-insert COUNT query adds one DB round-trip per call. At one call per piece per day, noise against the Sonnet call cost.
+- `categories.piece_count` bumped on INSERT but not decremented on `piece_categories` row delete here (this agent never deletes). Decrement logic lives in sub-task 2.5's admin merge/delete paths. If a future code path deletes a piece_categories row without updating piece_count, drift happens — admin "Recount" escape hatch covers it.
+- Slug collision fallback turns a proposed novel category into an existing-category reuse silently. Logged only in the returned `assignmentsWritten` count, not distinctly flagged. A misbehaving prompt returning slug-collisions every run would look like "no novel categories" in metrics; acceptable because this isn't a likely failure mode and the admin UI in 2.5 will surface the full categories list either way.
+- Director schedules categoriser BEFORE audio, both at +1s and +2s. GitHub eventual consistency on freshly pushed content: a ~2s read-delay on categoriser's re-read of the just-committed MDX. Same issue the reflect schedule has — handled the same way (404 means "not yet propagated", logs failure, agent moves on; next cron run on that piece re-tries via `/categorise-trigger` or seed).
+- `/categorise-trigger` endpoint bypasses the reuse bias's main intent (taxonomy stability) to the extent that operators can blindly re-categorise. Guarded in practice by ADMIN_SECRET + the agent's idempotence skip — the trigger is primarily for pieces that don't yet have categories.
+
+**Files:** NEW [agents/src/categoriser.ts](../agents/src/categoriser.ts), NEW [agents/src/categoriser-prompt.ts](../agents/src/categoriser-prompt.ts). EDIT [agents/src/director.ts](../agents/src/director.ts) (import + schedule call + categoriseScheduled alarm), [agents/src/observer.ts](../agents/src/observer.ts) (logCategoriserMetered + logCategoriserFailure), [agents/src/server.ts](../agents/src/server.ts) (export + `/categorise-trigger` endpoint), [agents/src/types.ts](../agents/src/types.ts) (`CATEGORISER` binding), [agents/wrangler.toml](../agents/wrangler.toml) (DO binding + migration tag v12). Docs: [docs/AGENTS.md](./AGENTS.md) (Categoriser section + endpoint doc), [CLAUDE.md](../CLAUDE.md) (Area 2 2.2 entry).
+
+**Verification:** Typecheck clean on every new/touched file; server.ts still has its 18 pre-existing SubAgent errors (unchanged). `pnpm build` on the site worker clean (no cross-worker drift). Agents worker deployed successfully — `env.CATEGORISER (CategoriserAgent)` binding listed in wrangler output. Live categorisation verified via sub-task 2.3's seed script over all 8 existing pieces (next commit) — the seed script exercises the exact same `Director.categoriseScheduled` → `CategoriserAgent.categorise` path.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.1 — `categories` + `piece_categories` schema
 
 **Context:** Area 2 opens the 14th agent — Categoriser — plus a library category filter and an admin management page. Six sub-tasks, schema-first discipline: no code that writes to these tables can land until the tables exist in production. Sub-task 2.1 is the plumbing commit.

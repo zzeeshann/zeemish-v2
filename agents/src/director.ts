@@ -11,6 +11,7 @@ import { DrafterAgent } from './drafter';
 import { AudioProducerAgent, AudioBudgetExceededError } from './audio-producer';
 import { AudioAuditorAgent } from './audio-auditor';
 import { LearnerAgent } from './learner';
+import { CategoriserAgent } from './categoriser';
 import { getAdminSetting, parseIntervalHours } from './shared/admin-settings';
 import type { Env, DirectorState, DirectorPhase, DailyPieceBrief } from './types';
 import type { VoiceAuditResult } from './voice-auditor';
@@ -491,6 +492,23 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       title: brief.headline,
     });
 
+    // ─── Post-publish categorisation (14th agent, off-pipeline) ──────
+    // Fires immediately after publishing done, same shape as producer
+    // learnings + self-reflection. Categoriser assigns 1–3 categories
+    // to the piece — strongly biased toward reusing the existing
+    // taxonomy. Non-blocking, non-retriable: a failure logs to
+    // observer_events and moves on. The filePath is in the payload so
+    // the alarm callback can re-read the committed MDX from GitHub
+    // (same pattern as reflectOnPieceScheduled — keeps scheduled-row
+    // payloads small). See DECISIONS 2026-04-23 (late evening) "Area
+    // 2 sub-task 2.2 — CategoriserAgent".
+    await this.schedule(1, 'categoriseScheduled', {
+      pieceId,
+      date: today,
+      title: brief.headline,
+      filePath: publishResult.filePath,
+    });
+
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
     // Schedule audio to run in an alarm-triggered invocation instead of
     // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
@@ -634,6 +652,56 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
         .logReflectionFailure(date, title, reason, pieceId)
+        .catch(() => { /* observer write failure never blocks */ });
+      // non-retriable: logged, moving on
+    }
+  }
+
+  /**
+   * Alarm callback — runs the Categoriser on a just-published piece
+   * in a fresh DO invocation. Scheduled by `triggerDailyPiece` right
+   * after `publishing done`, same shape as the Learner + self-
+   * reflection schedules.
+   *
+   * Re-reads the committed MDX from GitHub rather than carrying it
+   * in the payload — keeps scheduled-row payloads small. Idempotence
+   * is belt-and-braces: the agent's internal guard returns
+   * `skipped: true` if the piece already has piece_categories rows,
+   * and the composite PK on piece_categories blocks duplicate rows
+   * underneath that.
+   *
+   * Non-retriable on failure (same posture as analyseProducerSignals
+   * and reflect): Director catches, logs via observer, moves on. The
+   * piece is live; a missed categorisation just means the library
+   * filter won't surface this piece under a category until a manual
+   * retag (via the seed script or the admin UI in sub-task 2.5).
+   */
+  async categoriseScheduled(payload: {
+    pieceId: string;
+    date: string;
+    title: string;
+    filePath: string;
+  }): Promise<void> {
+    const { pieceId, date, title, filePath } = payload;
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    try {
+      const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
+      const current = await publisher.readPublishedMdx(filePath);
+      if (!current) {
+        await observer
+          .logCategoriserFailure(date, title, `MDX not found at ${filePath}`, pieceId)
+          .catch(() => { /* observer write failure never blocks */ });
+        return;
+      }
+      const categoriser = await this.subAgent(CategoriserAgent, 'categoriser');
+      const result = await categoriser.categorise(pieceId, date, current.mdx);
+      await observer
+        .logCategoriserMetered(date, title, result, pieceId)
+        .catch(() => { /* observer write failure never blocks */ });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      await observer
+        .logCategoriserFailure(date, title, reason, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }
