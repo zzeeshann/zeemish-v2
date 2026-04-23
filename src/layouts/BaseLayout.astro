@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { AGENT_COUNT } from '../lib/constants';
 
 interface Props {
   title: string;
@@ -70,6 +71,9 @@ const ogImageUrl = new URL('/og-image.svg', Astro.site ?? Astro.url).toString();
     <footer class="w-full max-w-3xl mx-auto px-6 pt-12 pb-10 border-t border-zee-border/50 mt-8">
       <p class="text-sm italic text-zee-muted text-center mb-2">
         Educate yourself for humble decisions.
+      </p>
+      <p class="text-xs text-zee-muted/70 text-center mb-2">
+        Made by {AGENT_COUNT} agents.
       </p>
       <p class="text-xs text-zee-muted/70 text-center">
         &copy; 2026 Zeemish
