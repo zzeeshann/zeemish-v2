@@ -87,8 +87,12 @@ export interface InteractiveGeneratorResult {
   date: string;
   skipped: boolean;            // true when piece already has interactive_id
   declined: boolean;           // true when Claude returned the empty shape
-  committed: boolean;          // true when file + D1 writes landed (passed audit)
-  auditorMaxFailed: boolean;   // true when ALL rounds failed — no commit
+  committed: boolean;          // true when file + D1 writes landed
+  auditorMaxFailed: boolean;   // true when ALL rounds failed audit — shipped
+                               // as quality_flag='low' alongside committed=true
+                               // (2026-04-24 reversal of abandon-on-max-fail).
+  qualityFlag: 'low' | null;   // 'low' when auditorMaxFailed on a shipped
+                               // round; null when clean pass.
   interactiveId: string | null;
   slug: string | null;
   title: string | null;
@@ -131,23 +135,33 @@ interface InteractiveGeneratorState {
  *   - `skipped`       daily_pieces.interactive_id already set
  *   - `declined`      Claude returned the empty shape (first round or
  *                     any revision round — concept-too-redundant)
- *   - `committed`     a round passed all four audit dimensions; file
- *                     + D1 rows written
- *   - `auditorMaxFailed`  3 rounds exhausted without passing; NO
- *                     commit, NO D1 row. Retry via admin button or
- *                     /interactive-generate-trigger. See DECISIONS
- *                     2026-04-24 "Area 4 sub-task 4.5 — Auditor + the
- *                     abandon-on-max-fail decision".
+ *   - `committed (clean)`  a round passed all four audit dimensions;
+ *                     file + D1 rows written with quality_flag=NULL.
+ *                     Result shape: {committed: true, auditorMaxFailed:
+ *                     false, qualityFlag: null}.
+ *   - `committed (low)`  3 rounds exhausted without passing audit;
+ *                     the LAST attempt is still shipped with
+ *                     quality_flag='low'. File + D1 rows written;
+ *                     last-beat prompt surfaces it; admin UI marks
+ *                     it FLAGGED LOW. Result shape: {committed: true,
+ *                     auditorMaxFailed: true, qualityFlag: 'low'}.
+ *                     See DECISIONS 2026-04-24 "Loosen essence rule
+ *                     + ship-as-low on max-fail" — this reverses
+ *                     4.5's abandon-not-low decision.
  *
- * Why abandon on max-fail instead of shipping with quality_flag='low':
- *   1. Interactives are structural (3–5 Qs, fixed shape) — unlike prose,
- *      there's no "mostly-fine salvage" from a max-failed round.
- *   2. The permanence rule stays clean: no low-quality content lands
- *      permanently in git.
- *   3. Retry is trivially supported: interactive_id IS NULL → Generator
- *      runs fresh on next trigger.
- *   4. No quality_flag='low' state to filter from readers or the
- *      sub-task 4.6 last-beat prompt.
+ * Why ship-as-low (2026-04-24 reversal of 4.5's abandon posture):
+ *   - 4.5 abandoned on max-fail because "no mostly-fine salvage from a
+ *     max-failed round" — but the real-world 2026-04-24 FISA piece ran
+ *     showed max-fails were caused by the auditor's over-strict
+ *     interpretation of "pattern-match to details" (catching concept
+ *     echoes and structural analogies, not concrete detail leaks).
+ *   - The paired essence-rule loosening makes genuine max-fails rare;
+ *     when they do happen, a 3-rounds-refined quiz is still a better
+ *     reader artefact than a 404. "It can't be that bad after 3 tries"
+ *     (user, 2026-04-24).
+ *   - Permanence rule still respected — quality_flag='low' is the same
+ *     mechanism daily_pieces use for sub-85 voice score; readers see a
+ *     "Rough" tier tag, admin sees "FLAGGED LOW", operator can retry.
  *
  * Does NOT touch the published piece's content. Does NOT orchestrate.
  * Fail-silent posture: throws on infrastructure failure (Claude down,
@@ -195,6 +209,7 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         declined: false,
         committed: false,
         auditorMaxFailed: false,
+        qualityFlag: null,
         interactiveId: piece.interactive_id,
         slug: null,
         title: null,
@@ -344,6 +359,7 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         declined: true,
         committed: false,
         auditorMaxFailed: false,
+        qualityFlag: null,
         interactiveId: null,
         slug: null,
         title: null,
@@ -359,38 +375,18 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       };
     }
 
-    if (!passed) {
-      // Auditor max-fail: abandon. No commit, no D1 row.
-      this.setState({
-        ...this.state,
-        interactivesAuditorMaxFailed: this.state.interactivesAuditorMaxFailed + 1,
-      });
-      return {
-        pieceId,
-        date,
-        skipped: false,
-        declined: false,
-        committed: false,
-        auditorMaxFailed: true,
-        interactiveId: null,
-        slug: lastQuiz?.slug ?? null,
-        title: lastQuiz?.title ?? null,
-        concept: lastQuiz?.concept ?? null,
-        questionCount: lastQuiz?.questions.length ?? 0,
-        revisionCount: Math.max(0, roundsUsed - 1),
-        roundsUsed,
-        voiceScore: lastAudit?.voice.score ?? null,
-        finalAudit: lastAudit ? summariseAudit(lastAudit) : null,
-        tokensIn: cumulativeTokensIn,
-        tokensOut: cumulativeTokensOut,
-        durationMs: Date.now() - started,
-      };
-    }
-
-    // ── 5. Passed path: commit + D1 writes ───────────────────────
+    // ── 5. Commit path — passed cleanly OR shipped-as-low ────────
+    //
+    // Both paths fall through to the same commit logic. The only
+    // difference is `qualityFlag`: null for clean passes, 'low' when
+    // all rounds failed audit (2026-04-24 reversal of 4.5's abandon).
+    // `auditorMaxFailed` stays as a terminal-semantics flag so observers
+    // + admin surfaces can distinguish shipped-clean vs shipped-low.
     if (!lastQuiz) {
-      throw new Error('generate: passed path reached without a lastQuiz');
+      throw new Error('generate: commit path reached without a lastQuiz');
     }
+    const qualityFlag: 'low' | null = passed ? null : 'low';
+    const auditorMaxFailed = !passed;
 
     const finalSlug = await this.resolveFreeSlug(lastQuiz.slug);
     lastQuiz.slug = finalSlug;
@@ -407,6 +403,9 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         sourcePieceId: pieceId,
         publishedAt,
         voiceScore: lastAudit?.voice.score ?? undefined,
+        // Only write qualityFlag when 'low'; omit when clean so the
+        // content-collection schema's `.optional()` stays the default.
+        ...(qualityFlag === 'low' ? { qualityFlag: 'low' } : {}),
         content: {
           type: 'quiz',
           questions: lastQuiz.questions,
@@ -422,7 +421,9 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       PublisherAgent,
       `interactive-publisher-${lastQuiz.slug}`,
     );
-    const commitMsg = `feat(interactives): ${lastQuiz.title} (${lastQuiz.slug})`;
+    const commitMsg = qualityFlag === 'low'
+      ? `feat(interactives): ${lastQuiz.title} (${lastQuiz.slug}) [flagged low]`
+      : `feat(interactives): ${lastQuiz.title} (${lastQuiz.slug})`;
     await publisher.publishToPath(filePath, fileContent, commitMsg);
 
     const voiceScore = lastAudit?.voice.score ?? null;
@@ -433,7 +434,7 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         `INSERT INTO interactives
          (id, slug, type, title, concept, source_piece_id, content_json,
           voice_score, quality_flag, revision_count, published_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
       )
       .bind(
         interactiveId,
@@ -443,6 +444,7 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         lastQuiz.concept,
         pieceId,
         voiceScore,
+        qualityFlag,
         revisionCount,
         publishedAt,
         publishedAt,
@@ -454,9 +456,15 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       .bind(interactiveId, pieceId)
       .run();
 
+    // Counter bookkeeping: bump `interactivesGenerated` either way (a
+    // shipped-low interactive is still generated content on the site).
+    // Bump `interactivesAuditorMaxFailed` only on the low path so the
+    // ratio clean-vs-low stays legible in the DO state.
     this.setState({
       ...this.state,
       interactivesGenerated: this.state.interactivesGenerated + 1,
+      interactivesAuditorMaxFailed:
+        this.state.interactivesAuditorMaxFailed + (auditorMaxFailed ? 1 : 0),
     });
 
     return {
@@ -465,7 +473,8 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       skipped: false,
       declined: false,
       committed: true,
-      auditorMaxFailed: false,
+      auditorMaxFailed,
+      qualityFlag,
       interactiveId,
       slug: lastQuiz.slug,
       title: lastQuiz.title,

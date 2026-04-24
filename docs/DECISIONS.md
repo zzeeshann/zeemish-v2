@@ -2,6 +2,42 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Loosen InteractiveAuditor essence rule + ship-as-low on max-fail (reverses 4.5's abandon)
+
+**Context / trigger:** Interactive Generator's first real-world run on 2026-04-24 (FISA piece "Why Bills Fail Twice Before They Pass", pieceId `71e2f879…`) max-failed all 3 audit rounds on `essence`. Operator inspection of the top-3 failure citations revealed the auditor catching concept-echoes and structural analogies — not concrete detail-leaks. Specifically:
+
+1. Q2 option A "expansion of authority and others want restriction" flagged for echoing the FISA expansion-vs-restriction debate (borderline fair).
+2. Q4 explanation "configuration A satisfies constraints {1,2,3}, configuration B satisfies {1,4,5}" flagged because three numbered sets mirror the piece's three coalitions (structural analogy, not detail-leak).
+3. Q5 option D "External observers assess the process as legitimate" flagged for echoing the piece's legitimacy-via-visibility concept (concept echo — which IS the point of the quiz).
+
+The auditor prompt's [six enumerated fail rules](../agents/src/interactive-auditor-prompt.ts) (proper nouns, dates, quoted phrases, recognisable industry framing, reference words, specific numbers) are correctly strict. The prose opener — "must not pattern-match to details" — was being interpreted by Claude more broadly than the enumerated list, catching concept-match and shape-match that aren't actually fail conditions.
+
+Operator judgement (2026-04-24 session): "make it less strikt... it cant be that bad after 3 tries". Two paired fixes shipped together.
+
+**Decisions:**
+
+1. **Loosen the essence rule's interpretation, not the rule itself.** Kept the 6 concrete "Fail if" detail-leak conditions verbatim. Added an explicit "Do NOT fail for" list naming concept-match, generic concept terminology, structural analogies, worked numeric examples, and thematic echo as EXPECTED, not violations. Rewrote the prose opener to frame same-concept testing as "the GOAL of the quiz" (capitalised) so Claude doesn't interpret concept-overlap as a reference leak. Added a self-test at the end ("Would a stranger with no knowledge of the piece still be able to answer this from general understanding?") so the auditor has one operational check instead of two philosophical anchors that conflict.
+
+2. **Ship-as-low on round-3 max-fail instead of abandon. Reverses 4.5's decision.** When all 3 rounds fail audit, the Generator now commits the last attempt with `quality_flag='low'` + `qualityFlag: 'low'` in the content-collection JSON, same mechanism daily_pieces already use for sub-85 voice score. Readers see a "Rough" tier tag; admin shows "FLAGGED LOW"; operator retry button still works. Reasons for reversing 4.5:
+   - 4.5's "no mostly-fine salvage from a max-failed round" was theoretical; the real-world failure mode turned out to be auditor-over-strict, not generator-produces-garbage. A 3-rounds-refined quiz is still a useful reader artefact.
+   - The paired essence-rule loosening makes genuine max-fails rare. Ship-as-low acts as a safety net for the remaining edge cases.
+   - Permanence rule still clean — `quality_flag='low'` is an EXPLICIT marker, not an implicit lowering of the bar. Sub-task 4.1's `quality_flag` column and sub-task 4.6's mention of future-proofing ("vestigial after 4.5's abandon-on-max-fail... future-proofs any future ship-as-low mode") were both deliberate hedges for exactly this reversal.
+
+3. **Drop the `qualityFlag !== 'low'` filter in [src/pages/daily/[date]/[slug].astro](../src/pages/daily/[date]/[slug].astro) last-beat prompt lookup.** Without this change, flagged-low interactives would exist at `/interactives/<slug>/` but never surface to readers in the normal flow — publishing in name only. Dropping the filter treats them like daily_pieces with `quality_flag='low'`: readers see them, the tier tag warns of quality, but the artefact is available. Matches the operator's request that they "publish" (be reader-accessible, not just URL-resolvable).
+
+4. **Terminal-state semantics on `InteractiveGeneratorResult`.** `committed: true` now covers both clean passes and shipped-low. `auditorMaxFailed: true` alongside `committed: true` distinguishes shipped-low from clean-pass. New field `qualityFlag: 'low' | null` on the result matches what's written to D1 + the file. DO state counters: `interactivesGenerated` bumps either way (a shipped-low quiz is still generated content); `interactivesAuditorMaxFailed` only bumps on the low path so clean-vs-low ratio stays legible.
+
+5. **Observer event shape and severity.** The prior `warn` "Interactive auditor max-fail: ... No commit, no D1 row" event is replaced with a `warn` "Interactive shipped (flagged low): ..." event that names the file path, slug, failed gates, top issues, and explicit language that readers see it with a "Rough" tier tag. Severity stays `warn` even though it's a publish — operator introspection on the admin feed should still bubble up low-quality ships for possible retry. Clean passes stay `info`.
+
+6. **Admin UI unchanged in this commit.** Admin already renders `interactiveRow.quality_flag === 'low'` as "⚠ low quality" on the piece deep-dive (lines 816 of [piece/[date]/[slug].astro](../src/pages/dashboard/admin/piece/[date]/[slug].astro)) and the "Retry interactive" button stays available regardless of whether the existing interactive is clean or flagged. Both surfaces handle the new shipped-low state without edit.
+
+**Trade-offs / explicit non-goals:**
+- No prompt loosening for the other three dimensions (voice, structure, factual). They haven't shown over-strictness; don't touch.
+- No change to the 3-round retry count. Three rounds is right — the fix is in the audit interpretation + the terminal posture, not the loop size.
+- Rollback is two `git revert`s (auditor prompt + generator+observer+route+docs). No schema, no migration, no data unwind.
+
+**Verification trigger:** operator hits "Retry interactive" from the admin piece page for `71e2f879-0578-4618-8766-33c6f3ce19a8`. Expected outcome: either a clean pass (auditor loosening was sufficient) or a shipped-low commit (auditor still flags but reader gets the quiz). Either outcome is a functional improvement over the pre-2026-04-24 abandon terminal. If the retry produces yet another max-fail on concept-echoes (not concrete detail leaks), iterate on the auditor prompt further.
+
 ## 2026-04-24: Curator prompt enriched with recent-piece semantic context (duplicate-pick fix)
 
 **Context / trigger:** At `interval_hours=12` the 2026-04-24 02:00 UTC and 14:00 UTC cron slots both produced pieces about the same news event — a US soldier charged with using classified intelligence to bet $400K on Maduro's ouster via a prediction market. Both pieces taught the same underlying subject (information asymmetry / prediction markets). Drafter, reading the learnings feed, produced twin titles ("When Someone Knows the Future" / "When One Person Knows the Future") — smoking gun that Curator handed it the same subject twice. The 14:01 UTC piece was deleted under operator-led cleanup; this entry covers the prevention commit.

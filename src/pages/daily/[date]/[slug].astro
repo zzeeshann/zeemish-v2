@@ -10,14 +10,15 @@ export async function getStaticPaths() {
   // Cross-collection self-join — for each daily piece, find the
   // interactive whose sourcePieceId matches (Area 4 sub-task 4.6).
   // The content collection is the source of truth (per 4.2); no D1
-  // lookup or runtime fetch needed. `qualityFlag !== 'low'` is a
-  // defensive filter — after 4.5's abandon-on-max-fail decision, no
-  // committed interactive has quality_flag='low', but the check
-  // future-proofs a hypothetical "ship-as-low" mode.
+  // lookup or runtime fetch needed. The prior `qualityFlag !== 'low'`
+  // filter was dropped 2026-04-24 when Generator switched from
+  // abandon-on-max-fail to ship-as-low — flagged-low interactives are
+  // still useful to readers (same posture as flagged-low daily pieces)
+  // and surface via the last-beat prompt alongside clean passes.
   const interactives = await getCollection('interactives');
   const interactiveByPiece = new Map<string, (typeof interactives)[number]>();
   for (const i of interactives) {
-    if (i.data.sourcePieceId && i.data.qualityFlag !== 'low') {
+    if (i.data.sourcePieceId) {
       interactiveByPiece.set(i.data.sourcePieceId, i);
     }
   }

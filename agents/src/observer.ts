@@ -346,14 +346,17 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
-  /** InteractiveGenerator ran — five terminal states:
-   *  - skipped:           piece already has interactive_id (idempotent re-run)
-   *  - declined:          Claude returned empty shape (concept redundant)
-   *  - committed:         a round passed the full audit; file + D1 written
-   *  - auditorMaxFailed:  3 rounds exhausted without passing; NO commit
-   *  Info severity on skipped / declined / committed; warn on auditor-
-   *  max-fail (operator may want to retry). Mirrors logCategoriserMetered
-   *  extended for the audit loop. */
+  /** InteractiveGenerator ran — four terminal states:
+   *  - skipped:                    piece already has interactive_id (idempotent re-run)
+   *  - declined:                   Claude returned empty shape (concept redundant)
+   *  - committed (clean):          a round passed; quality_flag NULL; info severity
+   *  - committed (max-fail → low): 3 rounds failed; last attempt shipped with
+   *                                quality_flag='low'; warn severity (operator
+   *                                may want to retry for a cleaner quiz, but
+   *                                readers can already use what shipped).
+   *  Info severity on skipped / declined / committed-clean; warn on the
+   *  committed-low path. (2026-04-24 reversal of 4.5's abandon-on-max-fail.)
+   *  Mirrors logCategoriserMetered extended for the audit loop. */
   async logInteractiveGeneratorMetered(
     date: string,
     title: string,
@@ -404,6 +407,15 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       });
       return;
     }
+    // Committed path — two sub-shapes:
+    //   (a) auditorMaxFailed=false: clean pass, info severity.
+    //   (b) auditorMaxFailed=true:  3 rounds failed audit; last attempt
+    //       shipped with quality_flag='low'. Warn severity — operator
+    //       may want to retry for a cleaner quiz, but readers can
+    //       already use what shipped. (2026-04-24 reversal of 4.5's
+    //       abandon-on-max-fail.)
+    const voiceNote = metrics.voiceScore !== null ? ` Voice ${metrics.voiceScore}/100.` : '';
+    const revisionNote = metrics.revisionCount > 0 ? ` (${metrics.revisionCount} revision${metrics.revisionCount === 1 ? '' : 's'})` : '';
     if (metrics.auditorMaxFailed) {
       const gates = metrics.finalAudit
         ? [
@@ -420,16 +432,13 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
         : '';
       await this.writeEvent({
         severity: 'warn',
-        title: `Interactive auditor max-fail: ${title}`,
-        body: `Generator for "${title}" (${date}) exhausted ${metrics.roundsUsed} rounds without passing audit. Failed gates (final round): ${gates}.${issuesLine} No commit, no D1 row — piece stays live without an interactive. Retry via /interactive-generate-trigger or the admin Retry button. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+        title: `Interactive shipped (flagged low): ${title}`,
+        body: `Generator for "${title}" (${date}) exhausted ${metrics.roundsUsed} rounds without passing audit but SHIPPED the last attempt with quality_flag='low' → "${metrics.quizTitle}" (${metrics.questionCount} questions, /interactives/${metrics.slug}/). Failed gates (final round): ${gates}.${issuesLine} Readers see it with a "Rough" tier tag; admin UI marks FLAGGED LOW. Retry via /interactive-generate-trigger or admin Retry button for a cleaner quiz. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
         context: { date, ...metrics },
         piece_id: pieceId,
       });
       return;
     }
-    // Committed path.
-    const voiceNote = metrics.voiceScore !== null ? ` Voice ${metrics.voiceScore}/100.` : '';
-    const revisionNote = metrics.revisionCount > 0 ? ` (${metrics.revisionCount} revision${metrics.revisionCount === 1 ? '' : 's'})` : '';
     await this.writeEvent({
       severity: 'info',
       title: `Interactive generated: ${title}`,

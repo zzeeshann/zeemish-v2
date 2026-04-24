@@ -55,9 +55,9 @@ Score 100 if you'd leave it untouched. Score 85 if minor polish. Score below 85 
 
 ## 3. Essence not reference (binary pass/fail — THIS IS THE PRIMARY BAR)
 
-A stranger reading the quiz without having read the piece must find it useful. A reader of the piece must not pattern-match to details.
+A stranger reading the quiz without having read the piece must find it useful. Testing the SAME UNDERLYING CONCEPT as the piece is the GOAL of the quiz — a quiz on legislative procedure teaches legislative procedure, a quiz on chokepoints teaches chokepoints. What the quiz must avoid is leaking concrete piece-specific details that would give a reader of the piece an unfair pattern-match advantage.
 
-Check against the piece's body excerpt. Fail if:
+Check against the piece's body excerpt. Fail ONLY if one or more of these concrete detail-leaks appears:
 - Any proper noun from the piece appears in the quiz (company names, people, cities, countries, agencies, product names, event names).
 - Specific dates, years, or timeframes from the piece appear in the quiz.
 - A sentence or phrase from the piece is quoted or lightly paraphrased in the quiz.
@@ -65,7 +65,16 @@ Check against the piece's body excerpt. Fail if:
 - The quiz uses "according to", "as described", "in the article", "as we saw above".
 - Any specific number from the piece (dollar amounts, percentages, counts) appears in the quiz UNLESS that number is the universal form of the concept.
 
-When you pass essence, say so plainly. When you fail, cite the specific quiz text that references the piece + the matching piece text.
+Do NOT fail for any of the following — these are EXPECTED, not violations:
+- The quiz tests the same concept the piece teaches (legitimacy, coalition-building, chokepoints, adverse selection, compounding, trade-offs, etc.) using abstract framing. This is the POINT of the quiz, not a violation.
+- The quiz uses the same generic terminology the piece used to explain a concept (e.g. "legitimacy", "visibility", "expansion", "restriction", "threshold", "trade-off", "bottleneck", "asymmetry"). Generic concept words are not detail leaks.
+- The quiz uses structural analogies that happen to have the same shape as something in the piece (e.g. "three competing groups", "two configurations with overlapping constraints"). Shape-match is not detail-leak.
+- The quiz uses worked numeric examples (e.g. {1,2,3} and {1,4,5}, or "a factory producing 100 widgets") that illustrate a mechanism. These are teaching tools, not references — unless the specific numbers ARE from the piece (covered by fail condition 6).
+- Thematic echo — the quiz's tone, emphasis, or framing resonates with the piece's tone. That's good writing, not a reference violation.
+
+The test to apply: "Would a stranger who has NEVER read the piece still be able to answer this from general understanding of the concept?" If yes → pass, regardless of whether a piece-reader might feel thematic familiarity. Familiarity is not an unfair advantage; proper nouns, dates, and quoted phrases are.
+
+When you pass essence, say so plainly. When you fail, cite the specific quiz text that references the piece + the matching piece text — from the enumerated fail list above, NOT from concept-match, structural-analogy, or thematic echo.
 
 ## 4. Factual (binary pass/fail)
 
