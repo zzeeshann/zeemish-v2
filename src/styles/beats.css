@@ -175,6 +175,7 @@ lesson-shell[data-active] lesson-beat > h2:first-child + p {
   margin-bottom: 1rem;
   padding-bottom: 1rem;
   border-bottom: 1px dashed rgba(232, 228, 222, 0.8);
+  text-align: right;
 }
 
 .beat-nav-interactive-link {
