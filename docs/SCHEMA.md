@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**16 tables across 21 migrations.**
+**18 tables across 22 migrations.**
 
 ## Reader-side tables
 
@@ -190,14 +190,15 @@ Published daily teaching pieces.
 | beat_count | INTEGER | |
 | voice_score | INTEGER | |
 | fact_check_passed | INTEGER | |
-| has_interactive | INTEGER | 0 or 1 |
+| has_interactive | INTEGER | **Deprecated as of migration 0022.** Scaffolded in 0006, never read or written by any code path, always 0 in production. `interactive_id` (below) is the single source of truth for "does this piece have an interactive". Column stays physical because SQLite DROP COLUMN would require a `daily_pieces` table rebuild (blast radius too big for hygiene). No writer touches it going forward. |
 | reading_minutes | INTEGER | |
 | quality_flag | TEXT | NULL = normal, 'low' = audit failed after max revisions |
 | has_audio | INTEGER | 0 or 1. Flipped to 1 by `Publisher.publishAudio` when the audio second-commit succeeds. Never set by Producer or Auditor. |
+| interactive_id | TEXT | `interactives.id` (UUID) for the 1:1 interactive generated for this piece. NULL = no interactive. Set by InteractiveGeneratorAgent's final publish step (sub-task 4.4). Nullable, non-enforced FK, consistent with codebase convention. Indexed via `idx_daily_pieces_interactive`. Added migration 0022. |
 | published_at | INTEGER | |
 | created_at | INTEGER | |
 
-Migrations: `0006_daily_pieces.sql`, `0009_quality_flag.sql`, `0010_audio_pipeline.sql` (added `has_audio`)
+Migrations: `0006_daily_pieces.sql`, `0009_quality_flag.sql`, `0010_audio_pipeline.sql` (added `has_audio`), `0022_interactives.sql` (added `interactive_id`; deprecated `has_interactive`)
 
 ### daily_piece_audio
 Per-beat audio rows — one row per `<lesson-beat>` per piece. Producer writes; Auditor reads; Publisher reads for the second-commit frontmatter splice; transparency drawer + admin deep-dive page render from this.
@@ -280,7 +281,44 @@ Join table — one row per (piece, category) assignment. Categoriser writes 1–
 
 PK: **composite `(piece_id, category_id)`** — idempotent; Categoriser can safely re-run. Indexes: `idx_piece_categories_piece` on `piece_id` (per-piece lookup), `idx_piece_categories_category` on `category_id` (per-category filter + piece_count recount). Migration: `0021_categories.sql`.
 
-## Migrations summary (21 migrations, 16 tables)
+## Interactives tables
+
+### interactives
+Standalone teaching artefacts — first-class concept, not a piece sub-feature. First type is `quiz`; extensible to `breathing`, `game`, `chart`, etc. Each has its own URL at `/interactives/<slug>/` and is useful without reading the source piece ("essence not reference"). Generated post-publish by InteractiveGeneratorAgent (15th agent, sub-task 4.4); audited by InteractiveAuditorAgent (16th agent, sub-task 4.5) with up to 3 revision rounds.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| slug | TEXT NOT NULL UNIQUE | kebab-case. Powers `/interactives/<slug>/`. Stored, not derived — renames don't break URLs. |
+| type | TEXT NOT NULL | `'quiz'` initially; extensible. Loose TEXT, no CHECK — consistent with `learnings.source` / `observer_events.severity`. |
+| title | TEXT NOT NULL | Display title. |
+| concept | TEXT | The essence — what this teaches. Nullable for minimally-authored cases. |
+| source_piece_id | TEXT | `daily_pieces.id` the Generator was triggered from. Nullable (standalone-authored interactives in future). Non-enforced FK. |
+| content_json | TEXT | Type-specific payload. Semantic depends on sub-task 4.2's content-home decision — if content-collection is authoritative, this is a queryable mirror for admin/debug; if D1, it's the source. |
+| voice_score | INTEGER | 0–100 from InteractiveAuditor. |
+| quality_flag | TEXT | NULL = passed; `'low'` = audit max-failed (3 rounds). Mirrors `daily_pieces.quality_flag`. Readers still reach the interactive at its URL; last-beat prompt (sub-task 4.6) filters it out. |
+| revision_count | INTEGER NOT NULL DEFAULT 0 | Auditor rounds used (0–3). |
+| published_at | INTEGER | Unix ms. Null while Generator/Auditor loop runs; set on final accept. |
+| created_at | INTEGER NOT NULL | Unix ms |
+
+Indexes: `idx_interactives_slug` (explicit, alongside UNIQUE auto-index), `idx_interactives_source_piece` on `source_piece_id`, `idx_interactives_published_at` on `published_at DESC`. Migration: `0022_interactives.sql`.
+
+### interactive_engagement
+Append-only event log of reader interactions with interactives. Not aggregated per day like `engagement` — per-question correctness arrays don't aggregate cleanly, and the natural shape is events (offered / started / completed / skipped). Aggregation happens at query time.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| user_id | TEXT NOT NULL | `users.id`. Anonymous-first — middleware always guarantees a user. Non-enforced FK. |
+| interactive_id | TEXT NOT NULL | `interactives.id`. Non-enforced FK. |
+| event_type | TEXT NOT NULL | `'offered'` \| `'started'` \| `'completed'` \| `'skipped'`. Loose TEXT. |
+| score | INTEGER | Correct-count for `completed` rows; null otherwise. |
+| per_question_correctness | TEXT | JSON array e.g. `[1,0,1,1,0]` for `completed` rows; null otherwise. |
+| created_at | INTEGER NOT NULL | Unix ms |
+
+Indexes: `idx_int_engagement_user` on `user_id`, `idx_int_engagement_interactive` on `interactive_id`, `idx_int_engagement_int_type` on `(interactive_id, event_type)`. Migration: `0022_interactives.sql`.
+
+## Migrations summary (22 migrations, 18 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -302,3 +340,4 @@ PK: **composite `(piece_id, category_id)`** — idempotent; Categoriser can safe
 - `0019_piece_id_backfill.sql` — multi-per-day piece_id schema fix Phase 2. Manual (not auto-applied) — commented UPDATEs run via `wrangler d1 execute`, same pattern as 0012 and 0014 Step 2. Two strategies: pre-2026-04-22 rows via `daily_pieces.date` join (unambiguous at 1/day), 2026-04-22 rows via midpoint split at timestamp `1776850364493` between the two pieces' `published_at`. 512 null rows populated across the three tables (9 `audit_results` + 153 `pipeline_log` + 350 `daily_candidates`). 0 NULL remaining across all three. Verified row-by-row against production D1.
 - `0020_observer_events_piece_id.sql` — multi-per-day audit. Added nullable `piece_id TEXT` to `observer_events` + `idx_observer_events_piece`. Additive ALTER, no backfill — historical rows stay NULL and surface on per-piece admin via the existing 36h day-of-publish window fallback. New writes from `agents/src/observer.ts` (13 helpers, piece-scoped signature extended) and `src/lib/observer-events.ts` (optional `pieceId` field) populate piece_id going forward. System-event writers (admin settings changes, Zita rate limits) keep piece_id NULL permanently.
 - `0021_categories.sql` — Area 2 sub-task 2.1. Created `categories(id, slug UNIQUE, name, description, locked, piece_count, created_at, updated_at)` + `piece_categories(piece_id, category_id, confidence, created_at)` with composite PK. Data surface for the 14th agent (Categoriser, sub-task 2.2) plus the library category filter (sub-task 2.4) and admin management page (sub-task 2.5). Both tables empty at migration time — populated organically by Categoriser on new pieces and by a one-time seed script (sub-task 2.3) over pre-Categoriser pieces. Additive, rollback = DROP both tables.
+- `0022_interactives.sql` — Area 4 sub-task 4.1. Created `interactives(id, slug UNIQUE, type, title, concept, source_piece_id, content_json, voice_score, quality_flag, revision_count, published_at, created_at)` + `interactive_engagement(id, user_id, interactive_id, event_type, score, per_question_correctness, created_at)` append-only event log. Added `daily_pieces.interactive_id TEXT` as the single source of truth for "piece has an interactive" — deprecated the unused `has_interactive` INTEGER column scaffolded in 0006 (left physical since SQLite DROP COLUMN would require a `daily_pieces` rebuild with too-wide blast radius). Data surface for the 15th + 16th agents (InteractiveGenerator + InteractiveAuditor, sub-tasks 4.4 + 4.5). All new tables empty at migration time. Additive, rollback = DROP both new tables (the `daily_pieces.interactive_id` column stays inert when null if code is rolled back).

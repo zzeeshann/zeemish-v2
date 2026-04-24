@@ -13,6 +13,22 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-24: Per-round audit notes for interactives
+
+**Surfaced:** 2026-04-24 during Area 4 sub-task 4.1 schema design. InteractiveAuditor (sub-task 4.5) runs up to 3 revision rounds, same pattern as Integrator on daily pieces. Daily pieces persist per-round audit detail in `audit_results` (auditor / passed / score / notes / draft_id / piece_id / created_at) — operators can see the full revision history on the admin piece-detail page. Interactives currently persist only `revision_count` on the `interactives` row itself. Round-level notes (what the auditor flagged, what changed between rounds) are not captured.
+
+**Hypothesis:** Not wrong to defer. For the minimum Generator+Auditor loop to work, `revision_count` (did it pass on round 1 / 2 / 3?) is enough. Per-round notes become valuable (a) when a debugging session needs to understand *why* an interactive was revised and what changed, OR (b) when 4.5 ships and we find the auditor's flags are worth surfacing on the admin page like daily-piece audit rounds are.
+
+**Investigation hints when resumed:**
+- Pattern: mirror `audit_results` with a new table `interactive_audit_results(id TEXT PK, interactive_id TEXT NOT NULL, round INTEGER NOT NULL, auditor TEXT NOT NULL, passed INTEGER NOT NULL, score INTEGER, notes TEXT, created_at INTEGER NOT NULL)` + composite index on `(interactive_id, round)`.
+- Writer site: InteractiveAuditor (sub-task 4.5) — write one row per round × auditor pair (voice / structure / essence / fact), same shape as `saveAuditResults` for daily pieces.
+- Reader site: admin interactive-detail page (not yet built — would be `/dashboard/admin/interactive/<slug>/` or similar).
+- Migration would be additive, empty at migration time.
+
+**Priority:** low. Revisit when 4.5 ships or the first debugging session needs the context — whichever comes first.
+
+---
+
 ## [open] 2026-04-24: Coherent null-pieceId handling on admin piece-detail page
 
 **Surfaced:** 2026-04-24 during Area 3 sub-task 3.2 code review. When a slug typo hits `/dashboard/admin/piece/<date>/<wrong-slug>/`, the content-collection lookup returns undefined → `pieceId = null`. Different sections handle this inconsistently:

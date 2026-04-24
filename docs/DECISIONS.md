@@ -2,6 +2,47 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.1 — `interactives` + `interactive_engagement` schema
+
+**Context:** Area 4 introduces interactives as a first-class system — standalone-addressable teaching artefacts (first type `quiz`, later `breathing` / `game` / `chart`), 1:1 with pieces but useful without reading the source piece ("essence not reference"). Two new agents (InteractiveGenerator + InteractiveAuditor) need a data surface. Sub-task 4.1 is schema only, no writer, no reader — plumbing that unblocks 4.2 onward.
+
+**Decisions:**
+
+1. **`daily_pieces.interactive_id TEXT` is the single source of truth for "piece has an interactive".** Not the pre-existing `daily_pieces.has_interactive INTEGER` column. `has_interactive` was scaffolded in migration 0006 but no writer, no reader, and no SELECT ever referenced it — every prod row is 0. Grep confirmed one TypeScript type declaration at [src/pages/dashboard/admin/piece/[date]/[slug].astro](src/pages/dashboard/admin/piece/[date]/[slug].astro) as the single hit, with no conditional rendering on it. Keeping both columns and syncing at write time would re-introduce the drift pattern we avoided with `categories.piece_count` in Area 2 (where we accepted denormalisation only because the library's chip-sort read path justified it). Here there's no read pressure. Single column, single truth.
+
+2. **`has_interactive` stays physical, deprecated.** SQLite `DROP COLUMN` requires a full `daily_pieces` table rebuild (snapshot → create-new → copy → drop-old → rename, the same dance as migration 0015 for `daily_piece_audio`). `daily_pieces` is the central piece table with 6+ other tables FK-referencing it — the blast radius of a rebuild for pure hygiene is too wide. Column stays, writers don't touch it, SCHEMA.md marks it deprecated with a forwarding note, the lone type declaration is removed in the same commit so there's zero consumers. The column sits inert (always 0) with zero runtime cost.
+
+3. **`interactive_engagement` is an append-only event log, not aggregated per day.** The existing `engagement` table aggregates views / completions / avg_time_seconds per (piece_id, course_id, date). For interactives, the natural shape is events — `offered` / `started` / `completed` / `skipped` — and completed events carry per-question correctness as a JSON array that doesn't aggregate cleanly (we care about individual-response distributions, not a sum). Events are cheap; aggregation at query time via GROUP BY / DISTINCT is the right layer. Mirrors how `observer_events` and `audit_results` work.
+
+4. **`content_json TEXT` on the row regardless of sub-task 4.2's content-home decision.** 4.2 will decide whether the authoritative content home is a git-versioned `content/interactives/` collection or D1's `content_json`. Either way the row exists for metadata (id, slug, type, title, quality_flag, voice_score, etc.) — and the column gives D1 a queryable copy for admin views, debugging, and any reader that prefers one source. If 4.2 picks content-collection, `content_json` is a convenience mirror the Generator writes on commit; if D1, it's the source. Shape is the same from the DB's perspective.
+
+5. **`type` as loose TEXT, no CHECK.** Consistent with `learnings.source`, `learnings.category`, `observer_events.severity`. First value is `'quiz'`; adding `'breathing'` / `'game'` / `'chart'` later is a zero-migration change. Application layer validates.
+
+6. **`revision_count INTEGER NOT NULL DEFAULT 0` on the row; no `interactive_audit_results` table yet.** Daily pieces persist per-round audit notes in `audit_results` so operators can see revision history on the admin page. For interactives, v1 only needs "did the Generator+Auditor loop pass on round 1 / 2 / 3?" — `revision_count` on the row captures that. Per-round notes become valuable when a debugging session needs to understand *why* an interactive was revised, or when 4.5 surfaces the auditor's flags on the (not-yet-built) admin interactive-detail page. FOLLOWUPS entry logged to revisit.
+
+7. **No FK REFERENCES anywhere.** Consistent with every other join column in this codebase's 21 prior migrations. Application layer owns integrity.
+
+8. **Quality-flag semantic mirrors `daily_pieces.quality_flag` exactly.** NULL = passed, `'low'` = auditor max-failed (3 revision rounds) but shipped anyway. Readers can still reach the interactive at its URL (`/interactives/<slug>/`), but the last-beat prompt on the source piece (sub-task 4.6) filters it out. Same ship-and-retry posture as the text pipeline's voice-fail-but-publish path.
+
+9. **Indexes chosen for Generator/Auditor writes + admin/reader reads.** `idx_interactives_slug` (lookup by URL slug — explicit alongside UNIQUE auto-index for clarity), `idx_interactives_source_piece` (reverse lookup "does this piece have an interactive"), `idx_interactives_published_at DESC` (admin list newest-first). On engagement: `idx_int_engagement_user` (reader's own history), `idx_int_engagement_interactive` (per-interactive completion stats), `idx_int_engagement_int_type` (event-type filter — "how many skipped vs completed").
+
+**Trade-offs:**
+- `has_interactive` sits in the schema as dead weight. A year from now, someone might see "why is this always 0?" and grep. Mitigation: SCHEMA.md marks it deprecated with a forwarding note; this DECISIONS entry explains why it wasn't dropped.
+- If we find `content_json` on the row is wasteful storage (large JSON × many interactives), we can null it out and fall back to content-collection reads. Reversible.
+- `revision_count` alone doesn't tell us *why* something was revised. Fine for v1 — the debugging case isn't urgent until we have interactives in production being revised.
+- Event-log table grows without bound. At scale (hundreds of interactives × thousands of readers), a periodic aggregation job into a summary table may be needed. Defer until we see the volume.
+
+**Rollback:** `DROP TABLE interactive_engagement; DROP TABLE interactives;` — both empty at migration time. `daily_pieces.interactive_id` stays physical (can't drop in SQLite without a rebuild); it sits nullable and inert if the code is rolled back. Same reasoning as why we don't rebuild to drop `has_interactive`.
+
+**Verified:** Migration 0022 applied cleanly to remote D1. PRAGMA confirmed:
+- `interactives` — 12 columns, types + nullability match spec, `revision_count` DEFAULT 0 correct.
+- `interactive_engagement` — 7 columns, correct NOT NULLs on user_id / interactive_id / event_type / created_at.
+- Indexes all present (3 on interactives + 1 UNIQUE auto-index; 3 on interactive_engagement).
+- `daily_pieces.interactive_id` appears at the end of the column list, nullable TEXT, `idx_daily_pieces_interactive` present.
+- Both new tables empty (COUNT = 0 each).
+
+Sets up 4.2 (content home + route) with everything it needs to either write a DB row or a content-collection file.
+
 ## 2026-04-24: Area 3 sub-task 3.4 — Admin "All pieces" month-grouped + collapsible
 
 **Context:** Admin home's All Pieces list is a flat scroll. At 9 pieces today it's fine; at 50 it's long; at 365 it's unusable. Library already month-groups (flat, no collapse) — admin should too, but collapsed by default to keep the rest of the control-room scannable.
