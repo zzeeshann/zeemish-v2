@@ -56,4 +56,50 @@ const dailyPieces = defineCollection({
   }),
 });
 
-export const collections = { dailyPieces };
+/**
+ * Interactives collection — standalone teaching artefacts.
+ * Lives in content/interactives/
+ * Filename format: {slug}.json
+ *
+ * Interactives are first-class (not a sub-feature of pieces). 1:1 with
+ * source pieces but useful without reading the piece ("essence not
+ * reference"). First type is `quiz`; extensible to `breathing`, `game`,
+ * `chart`, etc. — widen the `type` enum + add a branch to the
+ * discriminated union to add a new type.
+ *
+ * Source of truth: the JSON file. D1 row (`interactives` table) holds
+ * metadata for admin queries; `interactives.content_json` is nullable
+ * in v1 (file is authoritative).
+ */
+const interactives = defineCollection({
+  loader: glob({ pattern: '**/*.json', base: './content/interactives' }),
+  schema: z.object({
+    slug: z.string(),
+    type: z.enum(['quiz']),
+    title: z.string(),
+    concept: z.string().optional(),
+    sourcePieceId: z.string().uuid().optional(),
+    interactiveId: z.string().uuid(),
+    voiceScore: z.number().optional(),
+    qualityFlag: z.enum(['low']).optional(),
+    publishedAt: z.number(),
+    content: z.discriminatedUnion('type', [
+      z.object({
+        type: z.literal('quiz'),
+        questions: z
+          .array(
+            z.object({
+              question: z.string(),
+              options: z.array(z.string()).min(2).max(6),
+              correctIndex: z.number().int().min(0),
+              explanation: z.string(),
+            }),
+          )
+          .min(3)
+          .max(5),
+      }),
+    ]),
+  }),
+});
+
+export const collections = { dailyPieces, interactives };

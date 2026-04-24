@@ -294,7 +294,7 @@ Standalone teaching artefacts — first-class concept, not a piece sub-feature. 
 | title | TEXT NOT NULL | Display title. |
 | concept | TEXT | The essence — what this teaches. Nullable for minimally-authored cases. |
 | source_piece_id | TEXT | `daily_pieces.id` the Generator was triggered from. Nullable (standalone-authored interactives in future). Non-enforced FK. |
-| content_json | TEXT | Type-specific payload. Semantic depends on sub-task 4.2's content-home decision — if content-collection is authoritative, this is a queryable mirror for admin/debug; if D1, it's the source. |
+| content_json | TEXT | Type-specific payload. **Nullable convenience mirror in v1** — sub-task 4.2 chose content-collection (git-versioned `content/interactives/<slug>.json`) as the authoritative source of truth. Writers leave `content_json` NULL; readers always read from the file via `getCollection('interactives')`. Column stays on the row for future admin queries that want to filter/search by content shape without joining to the file system. |
 | voice_score | INTEGER | 0–100 from InteractiveAuditor. |
 | quality_flag | TEXT | NULL = passed; `'low'` = audit max-failed (3 rounds). Mirrors `daily_pieces.quality_flag`. Readers still reach the interactive at its URL; last-beat prompt (sub-task 4.6) filters it out. |
 | revision_count | INTEGER NOT NULL DEFAULT 0 | Auditor rounds used (0–3). |

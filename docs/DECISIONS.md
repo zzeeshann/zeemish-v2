@@ -2,6 +2,47 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.2 — content collection + route
+
+**Context:** Area 4 interactives are 1:1 with pieces but meant to work standalone. Sub-task 4.1 set up the DB surface; 4.2 picks where the actual content lives and renders it at a URL. The choice: git-versioned content collection (Option A) vs D1 `interactives.content_json` (Option B). Both paths are viable. The question is which better fits "useful standalone, independent, fixable on their own" and the established publishing architecture.
+
+**Decisions:**
+
+1. **Content collection wins. Files live at `content/interactives/<slug>.json`.** The user's explicit intent "fixable on their own" is the deciding factor — git-versioned content means a broken quiz fixes via a PR (edit JSON, push, CI rebuilds, deploys). With D1 as source of truth, a broken quiz fixes via a `wrangler d1 execute` UPDATE or a not-yet-built admin UI; both are worse operator ergonomics. Additionally: the daily-pieces flow already works this way (Publisher commits MDX → CI rebuilds → Cloudflare deploys), so the Generator (sub-task 4.4) reuses an existing mechanic rather than introducing a new one. The admin surface gets transparency for free — every interactive is a reviewable file in the repo, not a hidden row.
+
+2. **JSON over MDX.** Interactives are structured data (questions, options, correctIndex, explanation) — there's no teaching-prose body. MDX is the right format when the body IS the teaching; JSON is right when the structure IS the teaching. Later types (breathing params, chart data, game state) are also naturally JSON. Astro's `glob` loader handles `.json` natively via content collections.
+
+3. **`interactives.content_json` in D1 becomes a nullable convenience mirror, NOT source of truth.** v1 writers leave it NULL. Readers always go to `getCollection('interactives')`. The column stays for two reasons: (a) the 4.1 decision is still right — future admin filters may want to query content shape without filesystem joins; (b) removing it would require a `daily_pieces` / `interactives` table rebuild now that the column exists. Cost of leaving it null is zero bytes of storage per row. SCHEMA.md updated to reflect this clarification.
+
+4. **Schema uses a Zod `discriminatedUnion` on `type`.** First (and only) branch is `quiz` with constraints: 3–5 questions, 2–6 options per question, integer `correctIndex`, required `explanation` per question. Adding a new type (`breathing`, `chart`, `game`) is a two-step change: widen the `type` enum + add a branch to the union. No migration, no backfill. Build-time Zod validation means a malformed file fails CI, not production.
+
+5. **Prerender the route (`getStaticPaths`), don't SSR.** Interactives are self-contained files — no D1 needed to render. Matches daily pieces' prerender pattern; gives fast static HTML. SSR would be needed only if the page pulled anything from D1, which it doesn't (engagement tracking in 4.7 is a POST side-channel, not a render-time read). Library is SSR because it needs D1 category queries; interactives don't have that dependency.
+
+6. **`<quiz-card>` placeholder in 4.2, Web Component definition in 4.3.** Route emits `<quiz-card data-interactive-id="…">` with the full question set as a `<script type="application/json" data-quiz-content>` payload + a `<noscript>` fallback rendering the full Q&A list as a plain `<ol>`. Under JS-enabled with no custom element registered (the state during 4.2), the user sees the eyebrow + title + concept + back link but nothing where the quiz will be. Acceptable — 4.3 upgrades the element within a day. Under no-JS, the `<noscript>` list surfaces — verified via HTML fetch that the `<ol>` contains all questions, options, and "Answer: …" explanations.
+
+7. **404 behaviour via `getStaticPaths`.** Unknown slugs hit Astro's default 404 page (the project's custom `src/pages/404.astro`) — no explicit handling needed. Verified: `/interactives/nonexistent-slug/` returns HTTP 404.
+
+8. **Filename convention: `<slug>.json` (no date prefix).** Daily pieces use `YYYY-MM-DD-<slug>.mdx` because they're discovered and organised by date. Interactives are discovered and organised by slug — the URL is the slug. Adding a date prefix would force the URL/filename to diverge or embed a date nobody cares about. One slug = one file.
+
+9. **Test fixture is abstract, zero references to published pieces.** [content/interactives/chokepoints-and-cascades.json](../content/interactives/chokepoints-and-cascades.json) teaches the concept of chokepoints + cascading failures in fully generic terms — no mention of Hormuz, QVC, airlines, Iran, or any specific piece. This is both a functional test fixture and a concrete anchor for the "essence not reference" quality bar the Generator prompt (4.4) must enforce. If you read it and can't tell which piece it came from, the bar is met.
+
+**Trade-offs:**
+- Every new interactive triggers a full site rebuild (already the case for daily pieces — not new cost).
+- Generator's write path is more complex than a D1 INSERT (needs a GitHub Contents API call, same as Publisher's daily flow). Acceptable — the Publisher's existing infrastructure handles it with minimal new code in 4.4.
+- A 2026-04-24 build that prerenders everything at once will bundle all interactives into every deploy — fine until we have thousands of them, at which point we can revisit lazy/SSR.
+- Schema validation at build time means a malformed Generator output fails CI with a Zod error, not at render time — good (early failure) but means CI becomes the gate; a bad file blocks unrelated deploys. Mitigated because the Generator audits itself (4.5) before committing, so malformed files shouldn't reach git.
+
+**Verified:** preview server at :4321.
+- Route `/interactives/chokepoints-and-cascades/` returns 200, HTML is 78KB.
+- Page title "Chokepoints and Cascades", eyebrow "INTERACTIVE · QUIZ", concept rendered, back link to library.
+- `<quiz-card>` element present with `data-interactive-id` attribute matching the UUID in the fixture.
+- `<script type="application/json" data-quiz-content>` carries the full question set — parsed in-page, confirmed 4 questions, `type: quiz`, first question text matches fixture.
+- `<noscript>` fallback contains `<ol>` with all questions and "Answer: …" explanations (verified via fetched HTML inspection).
+- Unknown slug `/interactives/nonexistent-slug/` returns HTTP 404.
+- Zero console errors.
+
+**Rollback:** `git revert <commit>`. No migration in this commit (4.1 already shipped the tables). Deleting the content collection entry from `content.config.ts` + the `content/interactives/` dir + the `src/pages/interactives/` dir is a clean removal.
+
 ## 2026-04-24: Area 4 sub-task 4.1 — `interactives` + `interactive_engagement` schema
 
 **Context:** Area 4 introduces interactives as a first-class system — standalone-addressable teaching artefacts (first type `quiz`, later `breathing` / `game` / `chart`), 1:1 with pieces but useful without reading the source piece ("essence not reference"). Two new agents (InteractiveGenerator + InteractiveAuditor) need a data surface. Sub-task 4.1 is schema only, no writer, no reader — plumbing that unblocks 4.2 onward.

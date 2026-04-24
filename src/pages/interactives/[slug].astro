@@ -1,0 +1,68 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+export async function getStaticPaths() {
+  const all = await getCollection('interactives');
+  return all.map((entry) => ({
+    params: { slug: entry.data.slug },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const { data } = entry;
+const isLowQuality = data.qualityFlag === 'low';
+
+// The JSON script tag carries the full structured content to the
+// <quiz-card> custom element (defined in sub-task 4.3). Without JS,
+// the element doesn't upgrade and the server-rendered Q&A list inside
+// remains the progressive-enhancement fallback.
+const contentJson = JSON.stringify(data.content);
+---
+
+<BaseLayout title={data.title} description={data.concept} ogType="article">
+  <article class="mx-auto">
+    <p class="text-xs uppercase tracking-wider text-zee-muted mb-2">
+      Interactive · {data.type}
+    </p>
+    <h1 class="text-3xl font-bold text-zee-primary mb-3">{data.title}</h1>
+    {data.concept && (
+      <p class="text-lg text-zee-text/80 mb-6 leading-relaxed">{data.concept}</p>
+    )}
+
+    {isLowQuality && (
+      <div class="text-xs text-zee-muted border border-zee-border/50 rounded-md px-3 py-2 mb-6">
+        This interactive didn't pass all auditor gates. Kept live so nothing
+        goes dark, but it may have rough edges.
+      </div>
+    )}
+
+    {data.type === 'quiz' && data.content.type === 'quiz' && (
+      <quiz-card data-interactive-id={data.interactiveId}>
+        <script type="application/json" data-quiz-content set:html={contentJson} />
+        <noscript>
+          <ol class="space-y-6 list-decimal list-inside">
+            {data.content.questions.map((q) => (
+              <li class="leading-relaxed">
+                <p class="font-medium mb-2">{q.question}</p>
+                <ul class="list-disc list-inside pl-4 text-zee-text/80 space-y-1">
+                  {q.options.map((opt) => (
+                    <li>{opt}</li>
+                  ))}
+                </ul>
+                <p class="text-xs text-zee-muted mt-2">
+                  Answer: {q.options[q.correctIndex]}. {q.explanation}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </noscript>
+      </quiz-card>
+    )}
+
+    <p class="text-xs text-zee-muted mt-10">
+      <a href="/library/" class="hover:text-zee-primary transition-colors">← Back to library</a>
+    </p>
+  </article>
+</BaseLayout>

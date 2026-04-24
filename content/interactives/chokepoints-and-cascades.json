@@ -1,0 +1,58 @@
+{
+  "slug": "chokepoints-and-cascades",
+  "type": "quiz",
+  "title": "Chokepoints and Cascades",
+  "concept": "How a single narrow point in a system — physical, economic, or procedural — can determine the shape of everything downstream.",
+  "interactiveId": "a8ed83b7-5892-4c09-ba1e-969c88c01de9",
+  "publishedAt": 1777672800000,
+  "voiceScore": 90,
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "A chokepoint in a system is best described as:",
+        "options": [
+          "The point where something goes wrong most often",
+          "A narrow section through which the whole system's flow must pass",
+          "The most expensive component in the system",
+          "The first place a new user encounters friction"
+        ],
+        "correctIndex": 1,
+        "explanation": "A chokepoint is a constraint every unit of flow has to cross. Failure rate, cost, and user friction can cluster there, but those are consequences — the defining property is that the rest of the system depends on it."
+      },
+      {
+        "question": "Why does a small disruption at a chokepoint often cause a much larger disruption downstream?",
+        "options": [
+          "Because the chokepoint handles unusually fragile work",
+          "Because downstream systems sized themselves to the chokepoint's steady throughput",
+          "Because chokepoints are always monitored less carefully than other parts",
+          "Because the operators of chokepoints tend to overreact"
+        ],
+        "correctIndex": 1,
+        "explanation": "Downstream capacity is built to match the chokepoint's normal flow. When the chokepoint narrows further, the mismatch cascades — inventory piles up on one side, runs dry on the other, and the effect grows as it moves outward."
+      },
+      {
+        "question": "Which of these is NOT a chokepoint pattern worth looking for?",
+        "options": [
+          "One vendor supplying most of an industry's raw input",
+          "A single person who must approve every decision in a team",
+          "A database schema that many services share but none own",
+          "A product used by many customers across many regions"
+        ],
+        "correctIndex": 3,
+        "explanation": "Broad use across regions is not a chokepoint — it's a distributed dependency. The first three are chokepoints because each one is a single point through which many things must pass."
+      },
+      {
+        "question": "If a chokepoint fails, the fastest useful response is usually:",
+        "options": [
+          "Find a way to skip the chokepoint entirely",
+          "Reduce the rate at which work arrives at it, so the backlog doesn't grow",
+          "Publicly identify who is responsible for the chokepoint",
+          "Rebuild the chokepoint to have higher capacity"
+        ],
+        "correctIndex": 1,
+        "explanation": "Skipping or rebuilding usually takes longer than the failure lasts. Slowing the arrival rate buys time and prevents the backlog from becoming its own problem. The other two take time, the first is often impossible, and the third doesn't help the flow."
+      }
+    ]
+  }
+}
