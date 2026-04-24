@@ -346,6 +346,76 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
+  /** InteractiveGenerator ran — success, skipped (piece already has
+   *  an interactive), or declined (Claude chose not to generate due
+   *  to concept redundancy). Info severity either way — operators
+   *  want visibility, not alarm. Mirrors logCategoriserMetered. */
+  async logInteractiveGeneratorMetered(
+    date: string,
+    title: string,
+    metrics: {
+      skipped: boolean;
+      declined: boolean;
+      committed: boolean;
+      interactiveId: string | null;
+      slug: string | null;
+      quizTitle: string | null;
+      concept: string | null;
+      questionCount: number;
+      tokensIn: number;
+      tokensOut: number;
+      durationMs: number;
+    },
+    pieceId: string | null = null,
+  ): Promise<void> {
+    if (metrics.skipped) {
+      await this.writeEvent({
+        severity: 'info',
+        title: `Interactive skipped: ${title}`,
+        body: `"${title}" (${date}) already has an interactive (${metrics.interactiveId}). No Claude call fired. Latency: ${metrics.durationMs}ms (DB only).`,
+        context: { date, ...metrics },
+        piece_id: pieceId,
+      });
+      return;
+    }
+    if (metrics.declined) {
+      await this.writeEvent({
+        severity: 'info',
+        title: `Interactive declined: ${title}`,
+        body: `Generator declined to produce a quiz for "${title}" (${date}) — concept likely too redundant with recent interactives. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+        context: { date, ...metrics },
+        piece_id: pieceId,
+      });
+      return;
+    }
+    await this.writeEvent({
+      severity: 'info',
+      title: `Interactive generated: ${title}`,
+      body: `"${title}" (${date}) → "${metrics.quizTitle}" (${metrics.questionCount} questions, /interactives/${metrics.slug}/). Concept: ${metrics.concept}. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+      context: { date, ...metrics },
+      piece_id: pieceId,
+    });
+  }
+
+  /** InteractiveGenerator failed — non-retriable. Piece stays live
+   *  without an interactive; operator can hit the trigger endpoint
+   *  to retry after fixing the underlying cause. Same posture as
+   *  logCategoriserFailure / logReflectionFailure. */
+  async logInteractiveGeneratorFailure(
+    date: string,
+    title: string,
+    reason: string,
+    pieceId: string | null = null,
+  ): Promise<void> {
+    await this.writeEvent({
+      severity: 'warn',
+      title: `Interactive generation failed: ${title}`,
+      body: `InteractiveGenerator failed for "${title}" (${date}). Reason: ${reason}. The piece is live; retry from admin or via /interactive-generate-trigger once the cause is fixed.`,
+      context: { date, reason },
+      piece_id: pieceId,
+    });
+  }
+
   /** Audio pipeline failed somewhere — text is already live, admin
    *  needs to know so they can retry. Escalation severity so it
    *  surfaces in the admin feed next to low-quality publishes. */

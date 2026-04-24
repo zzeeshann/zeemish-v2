@@ -161,9 +161,22 @@ Learner: runs off-pipeline on reader engagement data
 - **File:** `agents/src/categoriser.ts`
 - **Prompt:** `agents/src/categoriser-prompt.ts`
 
+### 15. InteractiveGeneratorAgent
+- **Role:** Produces a standalone-teaching multiple-choice quiz for each just-published daily piece. 15th agent (Area 4 sub-task 4.4), lives off-pipeline after `publishing done` (same shape as Categoriser and Drafter.reflect). Quiz teaches the UNDERLYING CONCEPT of the piece — never references, names, or quotes the piece itself. A stranger landing on the quiz's URL must find it useful without having read the source piece.
+- **"Essence not reference" bar:** Prompt (`INTERACTIVE_GENERATOR_PROMPT` in `interactive-generator-prompt.ts`) spends most of its words on this one rule. Explicit prohibitions on proper nouns, dates, quotes, and phrases like "according to the piece". Worked examples show right vs wrong quiz subjects for pieces about SEC filings, grid failures, and shipping chokepoints — each resolving to a pattern (information asymmetry / cascades / chokepoints) rather than the specific trigger. This is the core quality bar that makes interactives useful standalone; sub-task 4.5's InteractiveAuditor enforces it.
+- **Input:** `pieceId` (UUID, pre-allocated by Director), `date` (for logging), final MDX (Director re-reads from GitHub and passes in — same pattern as Categoriser / Drafter.reflect). Generator itself also reads the piece's categories from `piece_categories` and the 10 most recent interactives for diversity context.
+- **Output:** `InteractiveGeneratorResult` — `{pieceId, date, skipped, declined, committed, interactiveId, slug, title, concept, questionCount, tokensIn, tokensOut, durationMs}`. Surfaced back to Director for metered logging via `observer.logInteractiveGeneratorMetered`. Three terminal states: `skipped` (piece already has `daily_pieces.interactive_id`), `declined` (Claude returned the empty shape — typically because the concept is redundant with recent interactives), `committed` (file + D1 writes landed).
+- **Write path:** On success, commits `content/interactives/<slug>.json` via Publisher's `publishToPath` (refuses overwrite, same mechanic as daily-piece ship). Then INSERTs an `interactives` row (content_json stays NULL — file is source of truth per 4.2) and UPDATEs `daily_pieces.interactive_id`. Slug collision resolution: if the base slug exists, tries `-2`, `-3`, … up to `-5`; throws if all taken (signal that the concept is over-represented).
+- **Structural validation:** 4.4 ships with structural checks only — 3–5 questions, 2–6 options per question, integer `correctIndex` in bounds, non-empty `title` / `slug` / `concept` / `explanation`. Validation failure throws a specific error message which Director's alarm logs verbatim to `observer_events` (the message IS the ops signal). Real voice / essence / fact audit is sub-task 4.5's job — InteractiveAuditor wraps this agent's output with up to 3 revision rounds before the commit.
+- **Idempotent:** short-circuits with `skipped: true` if `daily_pieces.interactive_id` is already set. Decline path (`{slug: "", title: "", concept: "", questions: []}`) returns without commit or D1 write.
+- **Method:** `generate(pieceId, date, mdx)`
+- **Failure posture:** Non-retriable by design — Claude / JSON parse / validation / GitHub commit / D1 failure logs to `observer_events` via `logInteractiveGeneratorFailure` and moves on. The piece is live; a missed interactive is the degraded-but-fine state. Manual retry via `POST /interactive-generate-trigger?piece_id=<uuid>` once the cause is fixed.
+- **File:** `agents/src/interactive-generator.ts`
+- **Prompt:** `agents/src/interactive-generator-prompt.ts`
+
 ### 14. ObserverAgent
-- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed, categoriser metered/failed) to D1. Powers dashboard.
-- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logDailyRunSkipped()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `logCategoriserMetered()`, `logCategoriserFailure()`, `getRecentEvents()`, `getDailyDigest()`
+- **Role:** Logs events (published, escalated, errors, audio failures, learner failures, learning overflow, reflection metered/failed, Zita synthesis metered/failed, categoriser metered/failed, interactive generator metered/failed) to D1. Powers dashboard.
+- **Methods:** `logPublished()`, `logEscalation()`, `logError()`, `logAudioPublished()`, `logAudioFailure()`, `logDailyRunSkipped()`, `logLearnerFailure()`, `logLearnerOverflow()`, `logReflectionMetered()`, `logReflectionFailure()`, `logZitaSynthesisMetered()`, `logZitaSynthesisFailure()`, `logCategoriserMetered()`, `logCategoriserFailure()`, `logInteractiveGeneratorMetered()`, `logInteractiveGeneratorFailure()`, `getRecentEvents()`, `getDailyDigest()`
 - **piece_id threading (2026-04-22, migration 0020):** every piece-scoped helper accepts an optional trailing `pieceId: string | null = null`. Director threads piece_id through all 13 call sites — pieceId is pre-allocated at `triggerDailyPiece` top per the multi-per-day piece_id schema fix. `logDailyRunSkipped` uses the EXISTING piece's id (the piece blocking the slot). System events (admin_settings_changed, zita_rate_limited, zita_claude_error, zita_handler_error) stay piece_id=NULL — they're cross-cutting, not per-piece. Per-piece admin query prefers `WHERE piece_id = ?` with a 36h OR-fallback for legacy NULL rows (pre-0020 events + site-worker events that haven't threaded pieceId yet). See DECISIONS 2026-04-22 "observer_events.piece_id column for per-piece admin scoping".
 - **Site-origin events (2026-04-21):** `zita_history_truncated`, `zita_rate_limited`, `zita_claude_error`, `zita_handler_error` — written directly from `src/pages/api/zita/chat.ts` via [`src/lib/observer-events.ts`](../src/lib/observer-events.ts), which mirrors this agent's `writeEvent` shape. Same table, same feed — the admin Observer section doesn't discriminate by origin. The site-worker helper signature gained an optional `pieceId` field in 0020 but current call sites don't populate it (would need zita-chat client to receive + forward piece_id — deferred as a cross-cutting refactor).
 - **File:** `agents/src/observer.ts`
@@ -205,6 +218,14 @@ GET /engagement?course=daily
 # after a Categoriser prompt change. Idempotent — the agent skips
 # pieces that already have piece_categories rows.
 POST /categorise-trigger?piece_id=<uuid>
+
+# InteractiveGenerator manual trigger (requires auth)
+# Fires the 15th agent against an already-published piece. Used for
+# (a) testing the Generator path after a prompt change, (b) re-running
+# after a prior failure, (c) producing interactives for pre-Area-4
+# pieces. Idempotent — the agent skips pieces that already have
+# daily_pieces.interactive_id set.
+POST /interactive-generate-trigger?piece_id=<uuid>
 ```
 
 ## How to deploy

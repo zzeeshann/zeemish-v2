@@ -124,6 +124,14 @@ class_name = "CategoriserAgent"
 tag = "v12"
 new_sqlite_classes = ["CategoriserAgent"]
 
+[[durable_objects.bindings]]
+name = "INTERACTIVE_GENERATOR"
+class_name = "InteractiveGeneratorAgent"
+
+[[migrations]]
+tag = "v13"
+new_sqlite_classes = ["InteractiveGeneratorAgent"]
+
 # R2 bucket for audio storage
 [[r2_buckets]]
 binding = "AUDIO_BUCKET"

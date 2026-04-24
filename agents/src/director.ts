@@ -12,6 +12,7 @@ import { AudioProducerAgent, AudioBudgetExceededError } from './audio-producer';
 import { AudioAuditorAgent } from './audio-auditor';
 import { LearnerAgent } from './learner';
 import { CategoriserAgent } from './categoriser';
+import { InteractiveGeneratorAgent } from './interactive-generator';
 import { getAdminSetting, parseIntervalHours } from './shared/admin-settings';
 import type { Env, DirectorState, DirectorPhase, DailyPieceBrief } from './types';
 import type { VoiceAuditResult } from './voice-auditor';
@@ -509,6 +510,22 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       filePath: publishResult.filePath,
     });
 
+    // ─── Post-publish interactive generation (15th agent, off-pipeline) ─
+    // Same shape as Categoriser: fires 1s after publishing done in a
+    // fresh DO invocation, re-reads the MDX from GitHub inside the
+    // alarm handler (keeps scheduled-row payload small), fail-silent
+    // on error (piece is live regardless; no interactive is the
+    // degraded-but-fine state). Sub-task 4.5 wraps the Generator's
+    // output with an Auditor's voice/essence/fact gate — that work
+    // plugs into this same alarm path without moving the schedule.
+    // See DECISIONS 2026-04-24 "Area 4 sub-task 4.4 — InteractiveGeneratorAgent".
+    await this.schedule(1, 'generateInteractiveScheduled', {
+      pieceId,
+      date: today,
+      title: brief.headline,
+      filePath: publishResult.filePath,
+    });
+
     // ─── Audio pipeline (ship-and-retry, text already live) ──────────
     // Schedule audio to run in an alarm-triggered invocation instead of
     // inline. Cloudflare docs: HTTP-triggered DO invocations get evicted
@@ -702,6 +719,71 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
       const reason = err instanceof Error ? err.message : 'unknown error';
       await observer
         .logCategoriserFailure(date, title, reason, pieceId)
+        .catch(() => { /* observer write failure never blocks */ });
+      // non-retriable: logged, moving on
+    }
+  }
+
+  /**
+   * Alarm callback — runs the InteractiveGenerator on a just-published
+   * piece. Scheduled by `triggerDailyPiece` after `publishing done`,
+   * same posture as `categoriseScheduled` / `reflectOnPieceScheduled`.
+   *
+   * Generator depends on `piece_categories` being populated — the
+   * 1-second schedule delay for BOTH `categoriseScheduled` and this
+   * means they fire in a deterministic-ish order (same alarm tick).
+   * If Categoriser hasn't landed yet the Generator still runs; the
+   * diversity context just lacks category hints for one iteration.
+   * Acceptable — the essence-not-reference rule doesn't depend on
+   * categories; they're a nudge, not a requirement.
+   *
+   * Non-retriable on failure (same posture as Categoriser + Drafter
+   * .reflect): catches, logs via observer, moves on. Piece is live.
+   * Manual retry via POST /interactive-generate-trigger.
+   */
+  async generateInteractiveScheduled(payload: {
+    pieceId: string;
+    date: string;
+    title: string;
+    filePath: string;
+  }): Promise<void> {
+    const { pieceId, date, title, filePath } = payload;
+    const observer = await this.subAgent(ObserverAgent, 'observer');
+    try {
+      const publisher = await this.subAgent(PublisherAgent, `scheduled-reader-${date}`);
+      const current = await publisher.readPublishedMdx(filePath);
+      if (!current) {
+        await observer
+          .logInteractiveGeneratorFailure(date, title, `MDX not found at ${filePath}`, pieceId)
+          .catch(() => { /* observer write failure never blocks */ });
+        return;
+      }
+      const generator = await this.subAgent(InteractiveGeneratorAgent, 'interactive-generator');
+      const result = await generator.generate(pieceId, date, current.mdx);
+      await observer
+        .logInteractiveGeneratorMetered(
+          date,
+          title,
+          {
+            skipped: result.skipped,
+            declined: result.declined,
+            committed: result.committed,
+            interactiveId: result.interactiveId,
+            slug: result.slug,
+            quizTitle: result.title,
+            concept: result.concept,
+            questionCount: result.questionCount,
+            tokensIn: result.tokensIn,
+            tokensOut: result.tokensOut,
+            durationMs: result.durationMs,
+          },
+          pieceId,
+        )
+        .catch(() => { /* observer write failure never blocks */ });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      await observer
+        .logInteractiveGeneratorFailure(date, title, reason, pieceId)
         .catch(() => { /* observer write failure never blocks */ });
       // non-retriable: logged, moving on
     }
