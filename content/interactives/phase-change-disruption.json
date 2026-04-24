@@ -1,0 +1,70 @@
+{
+  "slug": "phase-change-disruption",
+  "type": "quiz",
+  "title": "Phase Change Disruption",
+  "concept": "How technological shifts fundamentally redefine what solutions mean rather than incrementally improving existing ones, making previously successful models obsolete regardless of execution quality.",
+  "interactiveId": "fe653886-82ad-46ac-9904-b345d08c2570",
+  "sourcePieceId": "59a7f53b-9a32-443e-bfa3-27af4471bbff",
+  "publishedAt": 1777063616351,
+  "voiceScore": 94,
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "What distinguishes a phase change disruption from incremental improvement?",
+        "options": [
+          "Phase change disruptions happen faster and affect more companies simultaneously",
+          "Phase change disruptions redefine the problem being solved rather than solving the existing problem better",
+          "Phase change disruptions require more capital investment to defend against",
+          "Phase change disruptions only affect companies that fail to innovate early enough"
+        ],
+        "correctIndex": 1,
+        "explanation": "Phase change disruptions change what customers value fundamentally—from scheduled demonstrations to on-demand access, from curated selection to infinite choice. A company solving the old problem excellently cannot compete because the problem itself has been redefined. The first option confuses speed with type of change."
+      },
+      {
+        "question": "Why do companies with early digital initiatives still fail during phase change disruptions?",
+        "options": [
+          "They lack sufficient technical expertise to execute digital strategies effectively",
+          "Their profitable core business creates structural barriers to cannibalizing themselves completely",
+          "They move too slowly due to bureaucratic decision-making processes",
+          "They underestimate how quickly customers will adopt new technologies"
+        ],
+        "correctIndex": 1,
+        "explanation": "Organizations optimize around their profitable model—incentives, metrics, culture, infrastructure all reinforce what works today. Fully embracing a phase change means destroying the source of current profits before the new model proves itself. This isn't a knowledge problem or speed problem; it's a structural problem where success creates its own trap."
+      },
+      {
+        "question": "A feature that creates competitive advantage in one era can become what during a phase change?",
+        "options": [
+          "A differentiator that commands premium pricing in the new model",
+          "A constraint that prevents adaptation to the new paradigm",
+          "A legacy asset that can be monetized during the transition period",
+          "An operational efficiency that reduces costs during disruption"
+        ],
+        "correctIndex": 1,
+        "explanation": "Scheduled programming created urgency and entertainment value when customers had limited alternatives. When customers can access infinite selection instantly, that same scheduling becomes a limitation—you must wait for what you want. What was once a strength becomes structural rigidity. The third option is tempting but treats the feature as neutral rather than actively constraining."
+      },
+      {
+        "question": "What signal most reliably indicates a phase change is occurring rather than normal competitive pressure?",
+        "options": [
+          "Market share erosion accelerates despite maintaining product quality and customer service",
+          "New entrants with different cost structures begin capturing marginal customers",
+          "The metrics that previously predicted success stop correlating with business outcomes",
+          "Customer complaints shift from execution issues to requests for fundamentally different features"
+        ],
+        "correctIndex": 2,
+        "explanation": "When viewer engagement, product demonstration quality, and host relationships—metrics that drove decades of growth—stop predicting revenue, the game has changed. Customers now optimize for different variables entirely. Option four is tempting but feature requests can be met within existing models; when your success metrics themselves become irrelevant, the problem has been redefined."
+      },
+      {
+        "question": "Why do phase change disruptions often feel inevitable only in retrospect?",
+        "options": [
+          "Historians selectively emphasize factors that confirm the outcome while ignoring contingencies",
+          "The new model's advantages seem obvious only after infrastructure and user behavior coevolve to support it",
+          "Companies in denial suppress internal warnings until collapse makes the pattern undeniable",
+          "Media narratives simplify complex multi-factor changes into clean before-and-after stories"
+        ],
+        "correctIndex": 1,
+        "explanation": "Infinite selection and instant comparison only work after logistics networks, payment systems, review aggregation, and customer comfort with buying unseen products all develop together. Before that coevolution, the old model's advantages—seeing demonstrations, trusted hosts, curated selection—are genuinely valuable. The disruption becomes inevitable only after the ecosystem shifts, not before."
+      }
+    ]
+  }
+}
