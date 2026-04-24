@@ -1,0 +1,70 @@
+{
+  "slug": "irreversible-decline-management",
+  "type": "quiz",
+  "title": "Irreversible Decline Management",
+  "concept": "How to extend functional life when resources only decrease, replacement is impossible, and every allocation decision is permanent.",
+  "interactiveId": "41a22823-b268-4926-b77b-d0605acc7c0a",
+  "sourcePieceId": "c7fb29ed-7a22-47c1-a4a4-a85ac20b77be",
+  "publishedAt": 1777066693412,
+  "voiceScore": 94,
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "What distinguishes irreversible decline management from standard resource allocation?",
+        "options": [
+          "The resource pool shrinks predictably over time and consumed resources cannot be replenished",
+          "The decisions are made by technical experts rather than business managers",
+          "The consequences of bad decisions are more expensive to fix",
+          "The resource constraints are more severe than in typical scenarios"
+        ],
+        "correctIndex": 0,
+        "explanation": "Irreversible decline adds two critical constraints absent from normal resource management: the total available pool only decreases, and any resource committed cannot be recovered. Severity alone doesn't create irreversibility—many high-stakes decisions can still be reversed or supplemented. The permanent one-way flow is what changes the decision calculus entirely."
+      },
+      {
+        "question": "When managing a system in irreversible decline, why does the order of shutdowns matter more than in reversible scenarios?",
+        "options": [
+          "Earlier shutdowns have more emotional impact on stakeholders",
+          "Each shutdown permanently eliminates future optionality—what you turn off now cannot rescue you later",
+          "Systems naturally degrade faster after the first component fails",
+          "Documentation requirements increase with each decision"
+        ],
+        "correctIndex": 1,
+        "explanation": "In reversible systems, you can course-correct—restart a paused service, rehire laid-off staff, reactivate a feature. Under irreversible decline, each shutdown erases that option forever. The component that seems expendable today might become critical tomorrow when other parts fail, but you've already lost the ability to use it. Sequencing becomes an exercise in forecasting which capabilities will matter most as the decline curve continues."
+      },
+      {
+        "question": "What is the primary function of a 'power budget' framework in irreversible decline?",
+        "options": [
+          "To distribute blame fairly when the system eventually fails completely",
+          "To make the rate of decline visible and force explicit prioritization of what survives longest",
+          "To identify which components are using resources inefficiently",
+          "To create accountability by documenting who approved each shutdown"
+        ],
+        "correctIndex": 1,
+        "explanation": "A power budget in decline management is a transparency tool—it makes the shrinking envelope explicit and transforms vague anxiety into concrete trade-offs. Without it, teams debate in abstractions. With it, they confront the math: if we keep A running, B and C must stop by this date. The tempting wrong answer—efficiency identification—assumes you can optimize your way out, but irreversible decline means even perfect efficiency only buys time, not escape."
+      },
+      {
+        "question": "Why might 'science value versus power consumption' be insufficient as the sole decision criterion under irreversible decline?",
+        "options": [
+          "It ignores the interdependencies—some low-value components enable high-value ones to function",
+          "Science value is too subjective to measure consistently over time",
+          "Power consumption measurements become less accurate as systems age",
+          "The formula gives too much weight to components that were expensive to build"
+        ],
+        "correctIndex": 0,
+        "explanation": "Pure value-per-watt ranking assumes components are independent—that you can simply rank and cull from the bottom. But systems have dependencies: the low-value sensor that calibrates the high-value instrument, the redundant computer that takes over when the primary fails. Shutting down a 'low-value' component might cripple something critical. Sunk cost (the tempting wrong answer) is irrelevant—what you paid to build it doesn't change what it enables now."
+      },
+      {
+        "question": "When does irreversible decline management become irrational to continue?",
+        "options": [
+          "When the total remaining resources drop below 50% of the original capacity",
+          "When the cost of making shutdown decisions exceeds the value of what remains operational",
+          "When the rate of decline accelerates beyond the original projections",
+          "When external stakeholders lose confidence in the system's leadership"
+        ],
+        "correctIndex": 1,
+        "explanation": "The termination point is economic, not technical: when the effort and attention consumed by triage exceeds what the diminished system still produces, you're destroying value to延长 something no longer worth its overhead. A system at 10% capacity delivering critical output justifies continued management; one at 60% capacity producing negligible value doesn't. Stakeholder confidence and projection accuracy are secondary—the question is whether management itself has become the largest drain on the system."
+      }
+    ]
+  }
+}
