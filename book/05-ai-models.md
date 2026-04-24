@@ -38,7 +38,7 @@ Each call costs money. Each call takes a few seconds to a minute depending on ho
 
 Claude is the model. The model is a single function, in the mathematical sense: text in, text out.
 
-Zeemish is not the model. Zeemish is a **system** built around the model. The system decides what text to send. The system remembers what the model said before. The system combines multiple calls into a workflow. The system stores the outputs in databases and publishes them to websites. The system has fourteen roles, quality gates, and a learning loop.
+Zeemish is not the model. Zeemish is a **system** built around the model. The system decides what text to send. The system remembers what the model said before. The system combines multiple calls into a workflow. The system stores the outputs in databases and publishes them to websites. The system has sixteen roles, quality gates, and a learning loop.
 
 This is the single most important distinction in this book. When people say "the AI did X," they usually mean "a system that uses an AI did X." The AI itself is a function. Everything interesting is in the system around it.
 

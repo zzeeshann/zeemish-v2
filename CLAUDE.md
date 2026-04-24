@@ -10,7 +10,7 @@
 
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 14 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, categorise them into the library taxonomy, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
+An autonomous multi-agent publishing system. 16 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, categorise them into the library taxonomy, generate a standalone quiz per piece, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces and an optional quiz at the end of each.
 
 ## Current state
 
@@ -109,7 +109,7 @@ Plan file `~/.claude/plans/what-is-the-current-polymorphic-reef.md`. Trigger: 20
 
 **Live verification + two afternoon cleanups (commit `891c6f2`).** User tested both per-beat regen (1 beat) and Start over (all 5 beats) on the 2026-04-23 cannabis piece. Pipeline healthy end-to-end both times; normaliser fired correctly (totalCharacters 6594 → 6635 from Roman-numeral spell-outs). Two small bugs surfaced during live inspection — **both pre-existing from 2026-04-22, not regressions from today's main commit** (initially misattributed; git log showed the symptom code paths predated today's work): (1) admin retry block displayed a stale `Durable Object reset` failure message from 6 hours earlier during a healthy Start-over because `audioFailureStep = pipeline.find(...)` had no time filter. Fixed by scoping to `created_at >= latestAudioRunStart` (most recent `audio-producing running` row). (2) Publisher made pure-reorder commits on per-beat regen because Director's `SELECT … ORDER BY generated_at ASC` moved the regen'd beat to the bottom of the `audioBeats` map. Fixed by switching to `ORDER BY beat_name ASC` for deterministic serialisation. Readers unaffected (site consumes map by key lookup). See DECISIONS 2026-04-23 (cont.) "Two cleanups surfaced by live verification".
 
-14 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened on the routes that matter. Daily pieces are the only content type.
+16 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened on the routes that matter. Daily pieces are the primary content type; interactives (quizzes, Area 4) are the secondary content type — standalone-addressable with their own URLs, 1:1 with pieces.
 
 Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships, Audio Producer narrates beat-by-beat via ElevenLabs, Audio Auditor verifies, Publisher second-commits the audio URLs into frontmatter. Audio runs in a ship-and-retry posture: text publishes the moment Integrator approves (a newspaper never skips a day); audio lands as a second commit when it's ready, or surfaces a retry button on the admin dashboard if it fails.
 
@@ -383,7 +383,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 14 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration + post-publish categorisation
+4. **Agent Team:** 16 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration + post-publish categorisation + post-publish interactive (quiz) generation
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching on hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day; admin-configurable)
@@ -393,7 +393,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 
 ### Two Workers
 - **zeemish-v2** — Astro site: pages + API routes. `https://zeemish.io` (custom domain; workers.dev URL still active as fallback)
-- **zeemish-agents** — 14 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-agents** — 16 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
@@ -404,9 +404,9 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 - Email: Resend (magic link from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
-### The 14 Agents (one job per agent, one file per agent)
+### The 16 Agents (one job per agent, one file per agent)
 
-Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner + Categoriser run off-pipeline post-publish.
+Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner + Categoriser + InteractiveGenerator (which internally calls InteractiveAuditor) run off-pipeline post-publish.
 
 1. **ScannerAgent** — reads the news every morning
 2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day).
@@ -422,6 +422,8 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
 13. **CategoriserAgent** — assigns 1–3 library categories to each piece post-publish (off-pipeline alarm), strongly biased toward reusing the existing taxonomy
 14. **ObserverAgent** — logs every pipeline event for the admin dashboard
+15. **InteractiveGeneratorAgent** — produces a standalone quiz per piece post-publish (off-pipeline alarm). Teaches the underlying concept, never references the source piece. Owns a produce→audit→revise loop up to 3 rounds; ships as `quality_flag='low'` on max-fail rather than abandoning.
+16. **InteractiveAuditorAgent** — single Claude call judges quizzes across voice / structure-pedagogy / essence-not-reference / factual dimensions. Called internally by InteractiveGenerator each round.
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
@@ -444,7 +446,7 @@ src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate,
 src/styles/             global.css (Tailwind) + beats.css + zita.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             14 agent files + 2 Area-4 agents awaiting the 15/16 cascade (Area 5) + per-agent prompt files + shared code
+agents/src/             16 agent files + per-agent prompt files + shared code
 migrations/             D1 schema migrations (0001-0022)
 content/interactives/   Standalone teaching artefacts (Area 4; quizzes as {slug}.json)
 docs/                   Living documentation
@@ -470,7 +472,7 @@ docs/handoff/           Original architecture + specs
 
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
-- `docs/AGENTS.md` — all 14 agents, endpoints, secrets
+- `docs/AGENTS.md` — all 16 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 18 D1 tables, 22 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)

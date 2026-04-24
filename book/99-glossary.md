@@ -4,7 +4,7 @@ Every term this book uses, in plain English. If you see a word you don't recogni
 
 ---
 
-**Agent.** A program that uses a language model to make one or more decisions, then acts on those decisions. In Zeemish's code, "agent" is also the name given to fourteen specific files that each handle one role in the pipeline — some use Claude (like Curator, Drafter, Categoriser), some don't (like Scanner, Publisher). See chapter 6.
+**Agent.** A program that uses a language model to make one or more decisions, then acts on those decisions. In Zeemish's code, "agent" is also the name given to sixteen specific files that each handle one role in the pipeline — some use Claude (like Curator, Drafter, Categoriser, Interactive Generator), some don't (like Scanner, Publisher). See chapter 6.
 
 **Alarm.** A scheduled callback in Cloudflare's Durable Object system. A Durable Object can tell itself "run this method N seconds from now," and the system will fire it in a fresh invocation with its own time budget. Zeemish uses alarms to run the audio pipeline, Learner, and Drafter self-reflection without blocking the main request.
 
@@ -26,7 +26,7 @@ Every term this book uses, in plain English. If you see a word you don't recogni
 
 **D1.** Cloudflare's relational database service. Based on SQLite. Zeemish uses it for structured data (pieces, audit results, learnings, users). See chapter 4.
 
-**Durable Object.** A special kind of Cloudflare Worker that has persistent state and lives in one specific location. Can remember things between calls. Zeemish's fourteen agents are each implemented as a Durable Object.
+**Durable Object.** A special kind of Cloudflare Worker that has persistent state and lives in one specific location. Can remember things between calls. Zeemish's sixteen agents are each implemented as a Durable Object.
 
 **ElevenLabs.** The voice-synthesis service Zeemish uses to turn piece text into audio narration. See chapter 7.
 

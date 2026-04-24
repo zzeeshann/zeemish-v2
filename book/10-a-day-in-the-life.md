@@ -1,6 +1,6 @@
 # 10 — A day in the life of a piece
 
-Chapter 9 introduced the fourteen roles. This chapter watches them work together, start to finish, on one piece.
+Chapter 9 introduced the sixteen roles. This chapter watches them work together, start to finish, on one piece.
 
 The piece we'll follow is `2026-04-19 — Why Jet Fuel Price Spikes Break Some Airlines and Not Others`. It really shipped. The timeline below is what actually happened.
 

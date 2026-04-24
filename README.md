@@ -6,7 +6,7 @@ Daily teaching, anchored in today's news, produced by a pipeline of specialised 
 
 ---
 
-Every morning, a pipeline of 14 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, categorises it into the library taxonomy, and publishes it to the live site. No human touches the piece before you read it. Cadence is admin-configurable via the `interval_hours` setting (allowed values: any divisor of 24; default 24 = one piece at 02:00 UTC).
+Every morning, a pipeline of 16 agents scans the news, picks the most teachable story, drafts a 1000–1500 word piece, audits it through voice / fact / structure gates, narrates it beat-by-beat via ElevenLabs, categorises it into the library taxonomy, generates a standalone quiz that teaches the same underlying concept, and publishes it all to the live site. No human touches the piece before you read it. Cadence is admin-configurable via the `interval_hours` setting (allowed values: any divisor of 24; default 24 = one piece at 02:00 UTC).
 
 You see the result the next morning — a daily teaching piece anchored in today's news, in plain English, with audio narration. A growing library of past pieces. No login needed to read.
 
@@ -14,7 +14,7 @@ The whole pipeline runs in public. Watch it on the [factory-floor dashboard](htt
 
 ## What it actually is
 
-An autonomous daily publishing pipeline of specialised Claude calls with a quality gate, orchestrated by Cloudflare Durable Objects, persisting to D1 / R2 / GitHub. The "14 agents" framing is a clean way to organise the code — fourteen distinct roles, one file per role. It is not a team of independent minds. It's a pipeline with memory.
+An autonomous daily publishing pipeline of specialised Claude calls with a quality gate, orchestrated by Cloudflare Durable Objects, persisting to D1 / R2 / GitHub. The "16 agents" framing is a clean way to organise the code — sixteen distinct roles, one file per role. It is not a team of independent minds. It's a pipeline with memory.
 
 As of 2026-04-19, that memory is closed into a loop. After every publish, two off-pipeline passes run: one reads the piece's own quality record (audit scores, revision rounds, which candidates Curator picked vs passed over) and writes patterns to a `learnings` table. The other asks the Drafter to reflect honestly on what it just wrote — what felt thin, which topic it was stretching on, what it would do differently. Both feed the Drafter's prompt on the next piece. Whether the loop produces real signal or polite noise is something we'll know after a week of pieces.
 
@@ -39,7 +39,7 @@ Honest software: the README tells you what it is, the dashboard shows you how it
 ## Repo map
 
 ```
-agents/src/             13 agent files (one per agent)
+agents/src/             16 agent files (one per agent)
 content/daily-pieces/   Published daily pieces (YYYY-MM-DD-slug.mdx)
 src/pages/              Site routes (Astro)
 src/interactive/        Web Components (lesson-shell, audio-player, zita-chat, quiz-card)
@@ -54,7 +54,7 @@ docs/handoff/           Original architecture briefs (frozen)
 
 - [CLAUDE.md](CLAUDE.md) — project context, current state, and "Critical lesson" sections worth reading before touching cache or headers
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — what's built, deviations from the original plan
-- [docs/AGENTS.md](docs/AGENTS.md) — the 14 agents in detail, endpoints, secrets
+- [docs/AGENTS.md](docs/AGENTS.md) — the 16 agents in detail, endpoints, secrets
 - [docs/SCHEMA.md](docs/SCHEMA.md) — D1 tables and migrations
 - [docs/RUNBOOK.md](docs/RUNBOOK.md) — how to run, deploy, trigger, revert
 - [docs/DECISIONS.md](docs/DECISIONS.md) — append-only decisions, with the *why*

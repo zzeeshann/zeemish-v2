@@ -1,8 +1,8 @@
 # 06 — What is an agent? (And what it's not)
 
-The word "agent" has had a rough year. It's been used to mean so many different things by so many different products that by the time you see "14 AI agents" on a website, you might reasonably wonder whether the phrase means anything at all.
+The word "agent" has had a rough year. It's been used to mean so many different things by so many different products that by the time you see "16 AI agents" on a website, you might reasonably wonder whether the phrase means anything at all.
 
-This chapter is about what the word actually means, what it doesn't mean, and what Zeemish's 14 agents actually are.
+This chapter is about what the word actually means, what it doesn't mean, and what Zeemish's 16 agents actually are.
 
 ## The simplest definition
 
@@ -54,9 +54,9 @@ A "robot" or "assistant" marketed on a website is not necessarily an agent. Mark
 
 And most importantly: **an agent is not an independent mind.** An agent does not wake up and decide what to do with its day. An agent runs when it's called, makes one decision (or a few), and stops. Between runs, it doesn't exist in any meaningful sense — it's just code, waiting.
 
-When you see "14 agents," don't picture 14 little people. Picture 14 specialised functions, each with one job, each using an LLM for one specific decision. That's what agents are in practice.
+When you see "16 agents," don't picture 16 little people. Picture 16 specialised functions, each with one job, each using an LLM for one specific decision. That's what agents are in practice.
 
-## Zeemish's fourteen roles, rated by agent-ness
+## Zeemish's sixteen roles, rated by agent-ness
 
 Not all of Zeemish's "agents" actually use a language model. Being honest about this matters. Here's the breakdown:
 
@@ -69,6 +69,8 @@ Not all of Zeemish's "agents" actually use a language model. Being honest about 
 - Integrator — takes auditor feedback and revises
 - Learner — looks at signals and writes patterns
 - Categoriser — assigns 1–3 library categories to each piece post-publish, strongly biased toward reusing the existing taxonomy
+- Interactive Generator — produces a quiz that teaches the same underlying concept as the piece, without referencing it
+- Interactive Auditor — judges that quiz across voice, structure, essence, and factual dimensions
 
 **Orchestrators and workers (no model, just code):**
 - Scanner — fetches news RSS feeds, dedupes
@@ -78,11 +80,11 @@ Not all of Zeemish's "agents" actually use a language model. Being honest about 
 - Publisher — commits to GitHub
 - Observer — logs events
 
-So of the fourteen, eight are "really agents" in the sense of using a language model to decide something. The other six are supporting code — necessary, but not making language-model decisions.
+So of the sixteen, ten are "really agents" in the sense of using a language model to decide something. The other six are supporting code — necessary, but not making language-model decisions.
 
 This is typical. A system doesn't need all its parts to be agents. It needs the right parts to be agents and the right parts to be plumbing.
 
-## Why the fourteen are split the way they are
+## Why the sixteen are split the way they are
 
 The design principle, stated plainly: give each role one job, and make that job either "use code" or "use the model," never both mixed into one file. This keeps the code easy to read and easy to change.
 
@@ -90,7 +92,7 @@ If Drafter had Scanner's job glued onto it, the Drafter file would be hard to re
 
 By keeping each agent's job small and focused, Zeemish stays changeable. Six months from now, if a new news source needs to be added, only Scanner changes. If the voice contract changes, only Voice Auditor changes. This is the whole reason to use the agent framing at all: it organises the code into small, changeable pieces.
 
-The 14-agent framing is true at the level of "this is how the code is organised." It is not true at the level of "these are independent collaborating minds." Don't confuse the organising principle with an autonomy claim.
+The 16-agent framing is true at the level of "this is how the code is organised." It is not true at the level of "these are independent collaborating minds." Don't confuse the organising principle with an autonomy claim.
 
 ## The question to ask about any agent system
 

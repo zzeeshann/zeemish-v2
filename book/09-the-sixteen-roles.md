@@ -1,8 +1,8 @@
-# 09 — The fourteen roles
+# 09 — The sixteen roles
 
-Chapter 6 explained what an agent is. Chapter 8 explained what Zeemish does. This chapter explains how the two fit together — the fourteen specific roles that make up Zeemish's daily pipeline.
+Chapter 6 explained what an agent is. Chapter 8 explained what Zeemish does. This chapter explains how the two fit together — the sixteen specific roles that make up Zeemish's daily pipeline.
 
-A quick reminder from chapter 6: eight of these roles use Claude to make decisions. The other six are supporting code. Both kinds matter. Both kinds are called "agents" in the repo because they each have one clear job and live in one file. That's the only thing the word "agent" promises in Zeemish.
+A quick reminder from chapter 6: ten of these roles use Claude to make decisions. The other six are supporting code. Both kinds matter. Both kinds are called "agents" in the repo because they each have one clear job and live in one file. That's the only thing the word "agent" promises in Zeemish.
 
 Here they are, in the order they run.
 
@@ -32,7 +32,7 @@ Here they are, in the order they run.
 
 **What it does:** Reads all 50 candidates. Picks one. Writes a brief — a short document explaining what the story is, what the underlying system is, what angle the piece should take, and roughly what beats the piece should have.
 
-**Claude call?** Yes. One call with the 50 candidates and a prompt asking for the most teachable one. Also sees the last 30 days of published headlines (so it can try for variety, though as of this writing, variety isn't strongly enforced — see FOLLOWUPS).
+**Claude call?** Yes. One call with the 50 candidates and a prompt asking for the most teachable one. Also sees the last 30 days of published headlines plus each one's underlying subject, so it can steer away from concepts the library just covered.
 
 **What "teachable" means in Zeemish's prompt:** a story where there's a real underlying system worth explaining, not just a headline. "Market rose 2%" is not teachable. "Market rose 2% on news of a chip shortage in a single factory" is teachable, because the factory-market connection reveals a chokepoint.
 
@@ -142,7 +142,36 @@ The effect compounds. Early pieces create the taxonomy because the list is short
 
 **Why post-publish and not inline:** Categorisation doesn't gate publishing. A piece going live with no category is still a piece; readers get it on `/daily/<date>/<slug>/` exactly as before. The category is metadata that adds a *browsing* surface — the library's chip bar — not a *correctness* surface. Running it off-pipeline, same shape as Learner and Drafter's self-reflection, keeps the publishing path short and fast.
 
-## 14. Observer
+## 14. Interactive Generator
+
+**Job:** Produce a standalone quiz that teaches the same underlying concept as the piece — without ever naming the piece.
+
+**What it does:** After Publisher ships, re-reads the published MDX and writes a 3–5 question multiple-choice quiz about the *concept* the piece taught. Commits the quiz as its own JSON file in `content/interactives/`. The quiz gets its own URL at `/interactives/<slug>/` and the daily piece's last beat carries a small "See if it landed →" link pointing at it.
+
+**Claude call?** Yes. Up to three — each attempt is handed to the Interactive Auditor (the next agent). If the audit fails, Generator revises with the auditor's feedback and tries again. Three rounds maximum.
+
+**Why "essence not reference":** If the quiz quizzed readers on the specific story (*what was the defendant's bet size?*, *which month did Schedule III reclassify?*), it would test memory of today's news, not understanding of the underlying pattern. The point of a quiz is to check whether a reader can recognise the concept somewhere else. So the quiz asks about the underlying shape — chokepoints, information asymmetry, cascades, legitimacy — not about the specific news event that made today's piece teachable. A stranger landing on the quiz's URL without having read the source piece should still find it useful.
+
+**What happens if it can't pass:** Three rounds exhausted without a clean pass, the quiz ships anyway with a `quality_flag='low'` marker. Readers see the same "Rough" tier tag that sub-85 daily pieces get. Admin UI flags it. Better to ship a refined-but-imperfect artefact than a 404.
+
+## 15. Interactive Auditor
+
+**Job:** Judge the quiz the Generator just produced.
+
+**What it does:** Reads the quiz against four dimensions — voice, structure, essence-not-reference, factual — in a single Claude call. Returns pass/fail with per-dimension feedback. The Generator uses that feedback to revise.
+
+The four dimensions:
+
+- **Voice.** Same rules as the daily-piece voice contract, adapted to quiz register. Questions read the same as teaching prose. No flattery.
+- **Structure.** 3–5 questions. Plausible wrong options. No "all of the above". Explanations that unpack both the right answer and why the tempting wrong one falls short.
+- **Essence.** The primary bar. The quiz must not name specifics — no proper nouns, no dates, no quoted phrases. Concept overlap is the goal; detail leaks are the violation. The rule had to be carefully loosened after the first real run: same-concept testing is *the goal*, not a violation; the auditor was briefly catching that as an essence leak and failing good quizzes.
+- **Factual.** External-world claims must be true as general statements. No web search here — evaluates against Claude's general knowledge, flags uncertain claims as issues.
+
+**Claude call?** Yes. One call per round, covering all four dimensions together.
+
+**Why one auditor instead of four:** A quiz is small — maybe 300 words total. The three separate auditors that gate a daily piece exist because a 1,500-word MDX file is complex enough to benefit from parallel specialised judgment. A 300-word quiz isn't. One coherent pass is both cheaper (roughly four times fewer API calls) and more consistent than four parallel ones that might contradict each other.
+
+## 16. Observer
 
 **Job:** Log every pipeline event.
 
@@ -154,12 +183,12 @@ The effect compounds. Early pieces create the taxonomy because the list is short
 
 ## Plus one more thing
 
-Chapter 14 will explain that Drafter has a second, separate role — reflecting on each piece after publication. This is not a fifteenth agent. It's a second method on the existing Drafter file, called post-publish, writing to `learnings` with `source='self-reflection'`.
+Chapter 14 will explain that Drafter has a second, separate role — reflecting on each piece after publication. This is not a seventeenth agent. It's a second method on the existing Drafter file, called post-publish, writing to `learnings` with `source='self-reflection'`.
 
 The reason Drafter does this rather than a new agent is simple: the thing that wrote the piece is the right thing to reflect on the piece. Reflection is not a new voice; it's the same voice, now looking back. One file, two jobs.
 
 ## If you remember one thing from this chapter
 
-The fourteen roles are the scaffolding. The scaffolding exists so each role can be small, focused, and changeable. The work happens inside the roles. The framing — "14 agents" — is a way of organising code, not a claim about collective intelligence.
+The sixteen roles are the scaffolding. The scaffolding exists so each role can be small, focused, and changeable. The work happens inside the roles. The framing — "16 agents" — is a way of organising code, not a claim about collective intelligence.
 
-The interesting thing isn't that there are fourteen of them. The interesting thing is what comes out the other end every morning.
+The interesting thing isn't that there are sixteen of them. The interesting thing is what comes out the other end every morning.

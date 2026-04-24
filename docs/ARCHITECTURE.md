@@ -40,7 +40,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Rate limiting on login (5 attempts per 15 min per IP)
 - [x] lesson-shell POSTs progress (fire-and-forget, offline-safe)
 
-### Stage 4 — Agent Team (complete — 14 agents, all wired)
+### Stage 4 — Agent Team (complete — 16 agents, all wired)
 - [x] Separate `agents/` Worker with Cloudflare Agents SDK (v0.11.1)
 - [x] DirectorAgent — pure orchestrator, zero LLM calls, hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC only), manual trigger
 - [x] CuratorAgent — picks most teachable story, plans beats (restored from v10 deletion; owns its prompt file)
