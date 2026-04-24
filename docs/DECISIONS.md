@@ -2,6 +2,38 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 3 sub-task 3.3 — Admin observer feed severity chips
+
+**Context:** Admin home shows 100 latest observer events chronologically. When something breaks at 2am UTC, the operator wants "what broke" first — scrolling past info-level metering and skipped-run chatter to find the one warn or escalation is the wrong shape. Add a filter at the top.
+
+**Decisions:**
+
+1. **Three chips: All · Warn · Escalation.** Confirmed severity set by grepping `agents/src/observer.ts` — only three values are ever written (`info | warn | escalation`; type declaration at line 6 is the source of truth). Info isn't its own chip because (a) the spec said All·Warn·Escalation explicitly, (b) info is operational noise the operator rarely wants to isolate — when isolating, you're looking for signals, not baselines. Info stays visible under "All". Counts render inline on each chip (`All 100 · Warn 4 · Escalation 2`) so the operator sees volume before clicking.
+
+2. **Client-side filter, no query param.** Admin is a real-time polling surface (pipeline status refreshes; the feed implicitly revalidates on reload). Persisting filter state in the URL would add friction without benefit — a triage session's filter choice is ephemerally session-local. Button-based chips with `aria-pressed` toggles, vanilla JS click handler mutates `card.style.display` + chip class state. Same pattern as the existing All-Pieces text filter on the same page, and visually matches the Area 2 library CategoryChips bar (rounded-full pills, `min-h-[44px]` mobile tap target, flex-wrap, primary background on active).
+
+3. **Chip counts computed in-memory from the already-loaded slice.** No extra D1 query. Astro frontmatter already loads 100 rows; `observerWarnCount` + `observerEscalationCount` are `.filter(...).length` on that slice. Implication: counts reflect the 100-row window, not lifetime severity totals. At current volume that window spans weeks; when it saturates, "100 events · 4 warn · 2 escalation" is still the right framing for recent-triage intent. Lifetime counts would lie about urgency (a 6-month-old escalation isn't the operator's current problem).
+
+4. **Empty-state copy when a filter zeros out.** "No events match this filter." appears when an active chip returns zero cards (e.g., clicking Warn on a week with no warns). Covers the edge case where chip counts update faster than the cards do — but in the current implementation counts are rendered from the same slice the cards come from, so this state should be rare. Defensive copy rather than dead code because future chip additions (e.g., filter by acknowledged state) might hit the path more often.
+
+5. **Inline in `admin.astro`, not a shared component.** The Area 2 library chip bar became a shared `<CategoryChips>` component because both `/library/` and `/library/<slug>/` use it. Severity chips are specific to one feed on one page — extracting to a component would add indirection without reuse. If a second feed ever needs severity filtering (per-piece admin observer section, maybe), revisit then.
+
+**Trade-offs:**
+- Chip counts don't update when events are acknowledged mid-session. The counts are rendered at page load time and reflect all loaded events regardless of ack state. Accepted: ack status is orthogonal to severity; operator triaging by severity doesn't care whether something was already acknowledged. If this feels wrong later, a "hide acknowledged" toggle is the natural follow-on, not severity-chip recounting.
+- Chip counts don't reflect events beyond the 100-row window. See decision (3) — this is intentional.
+- No "Info" chip. If operators later want to isolate info-level noise (diagnostic deep-dive), adding a fourth chip is 4 lines of markup + updating the count tally. Not worth building preemptively.
+
+**Files:** EDIT [`src/pages/dashboard/admin.astro`](../src/pages/dashboard/admin.astro) — 2 new count-derivation lines, chip bar markup block, ~20 lines of filter-handler JS appended to the existing `<script>`. EDIT [CLAUDE.md](../CLAUDE.md) (sub-task 3.3 entry under Area 3).
+
+**Verification:**
+- `pnpm build` clean.
+- Seeded 6 local observer events (3 info, 2 warn, 1 escalation). Curl'd admin page: 3 chips render with `All 6 · Warn 2 · Escalation 1`; every card carries `data-severity`; empty-state `<p>` present (hidden until zero-match). "All" chip initial state has `aria-pressed="true"` and primary background; others are idle.
+- Filter logic mirrored in a standalone simulation: click Warn → 2 cards visible; click Escalation → 1 card visible; click All → 6; zero-match case triggers empty state correctly.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-24: Area 3 sub-task 3.2 — Piece page observer events strictly scoped by piece_id
 
 **Context:** The admin piece-detail page's observer section was pooling both same-day pieces' events at 12h cadence, plus system events (admin_settings_changed, zita_rate_limited) that aren't about any piece. Migration 0020 added `observer_events.piece_id` on 2026-04-22, but the query on the piece page still OR'd with a 36h day-window fallback for legacy null-piece_id rows — and four site-worker Zita writers never had their piece_id threading completed (the "bigger cross-cutting refactor deferred" in CLAUDE.md from 2026-04-22). This sub-task closes that gap and drops the fallback.

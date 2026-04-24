@@ -51,6 +51,8 @@ let allPieces: (Piece & { rounds: number; candidates: number })[] = [];
 let lifetimeRuns = 0;
 let openEscalations = 0;
 let errorsThisWeek = 0;
+let observerWarnCount = 0;
+let observerEscalationCount = 0;
 let avgRevisionsLifetime: number | null = null;
 let learningCounts: LearningCounts = { producer: 0, selfReflection: 0, total: 0 };
 let pipelineHistory: {
@@ -110,6 +112,12 @@ try {
   observerEvents = events.results;
 
   openEscalations = observerEvents.filter((e) => e.severity === 'escalation' && !e.acknowledged_at).length;
+
+  // Severity chip counts — drive the chip bar above the feed + its
+  // match-this-filter hit counts. Computed against the in-memory slice
+  // of 100 rows we already loaded; no extra query.
+  observerWarnCount = observerEvents.filter((e) => e.severity === 'warn').length;
+  observerEscalationCount = observerEvents.filter((e) => e.severity === 'escalation').length;
 
   const weekMsAgo = nowMs - WEEK_MS;
   const errs = await db
@@ -352,10 +360,59 @@ function shortDate(iso: string): string {
     {observerEvents.length === 0 ? (
       <p class="text-zee-muted italic text-sm">No events yet.</p>
     ) : (
-      <div class="space-y-3">
+      <>
+        {/* Severity filter chips — 3 severities confirmed from the
+            agents/observer.ts writer enum (info/warn/escalation). When
+            something breaks at 2am UTC the operator opens admin and
+            wants "what broke" — warn + escalation is that signal. Info
+            is noise when triaging; it stays visible under "All".
+            Client-side filter (no URL state) — admin is a polling
+            surface, filter state is ephemerally session-local. */}
+        <nav class="mb-4" aria-label="Filter events by severity">
+          <ul class="flex flex-wrap gap-2">
+            <li>
+              <button
+                type="button"
+                data-severity-chip="all"
+                class="severity-chip inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-full text-sm font-medium border transition-colors bg-zee-primary text-white border-zee-primary"
+                aria-pressed="true"
+              >
+                All<span class="opacity-80">{observerEvents.length}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-severity-chip="warn"
+                class="severity-chip inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-full text-sm font-medium border transition-colors bg-transparent text-zee-text border-zee-border/80 hover:border-zee-primary/50 hover:text-zee-primary"
+                aria-pressed="false"
+              >
+                Warn<span class="text-zee-muted">{observerWarnCount}</span>
+              </button>
+            </li>
+            <li>
+              <button
+                type="button"
+                data-severity-chip="escalation"
+                class="severity-chip inline-flex items-center gap-1.5 min-h-[44px] px-4 py-2 rounded-full text-sm font-medium border transition-colors bg-transparent text-zee-text border-zee-border/80 hover:border-zee-primary/50 hover:text-zee-primary"
+                aria-pressed="false"
+              >
+                Escalation<span class="text-zee-muted">{observerEscalationCount}</span>
+              </button>
+            </li>
+          </ul>
+        </nav>
+        <p
+          id="severity-empty-state"
+          class="text-zee-muted italic text-sm py-6 hidden"
+        >
+          No events match this filter.
+        </p>
+      <div class="space-y-3" id="observer-feed">
         {observerEvents.map((event) => (
           <div
             data-event-id={event.id}
+            data-severity={event.severity}
             class={`event-card p-4 rounded-xl border ${
               !event.acknowledged_at
                 ? event.severity === 'escalation' ? 'border-zee-gold/40 bg-zee-gold/5' :
@@ -384,6 +441,7 @@ function shortDate(iso: string): string {
           </div>
         ))}
       </div>
+      </>
     )}
   </section>
 
@@ -751,6 +809,36 @@ function shortDate(iso: string): string {
       }
     });
   });
+
+  // Severity filter chips. Click toggles: only cards matching the
+  // active severity stay visible; "All" shows everything. Empty-state
+  // copy surfaces when a filter returns zero cards. Same classes as
+  // the library chip bar for visual consistency.
+  const chipActiveClass = ['bg-zee-primary', 'text-white', 'border-zee-primary'];
+  const chipIdleClass = ['bg-transparent', 'text-zee-text', 'border-zee-border/80', 'hover:border-zee-primary/50', 'hover:text-zee-primary'];
+  const severityChips = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-severity-chip]'));
+  const observerCards = Array.from(document.querySelectorAll<HTMLElement>('#observer-feed [data-severity]'));
+  const severityEmptyState = document.getElementById('severity-empty-state');
+  function applySeverityFilter(active: string) {
+    let anyVisible = false;
+    for (const card of observerCards) {
+      const show = active === 'all' || card.dataset.severity === active;
+      card.style.display = show ? '' : 'none';
+      if (show) anyVisible = true;
+    }
+    if (severityEmptyState) {
+      severityEmptyState.classList.toggle('hidden', anyVisible || observerCards.length === 0);
+    }
+    for (const chip of severityChips) {
+      const isActive = chip.dataset.severityChip === active;
+      chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+      chip.classList.remove(...chipActiveClass, ...chipIdleClass);
+      chip.classList.add(...(isActive ? chipActiveClass : chipIdleClass));
+    }
+  }
+  for (const chip of severityChips) {
+    chip.addEventListener('click', () => applySeverityFilter(chip.dataset.severityChip ?? 'all'));
+  }
 
   // Filter the All Pieces list (vanilla JS, same pattern as library).
   const filterInput = document.querySelector<HTMLInputElement>('[data-piece-filter]');
