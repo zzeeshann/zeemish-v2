@@ -13,6 +13,26 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-24: Coherent null-pieceId handling on admin piece-detail page
+
+**Surfaced:** 2026-04-24 during Area 3 sub-task 3.2 code review. When a slug typo hits `/dashboard/admin/piece/<date>/<wrong-slug>/`, the content-collection lookup returns undefined → `pieceId = null`. Different sections handle this inconsistently:
+- Lenient (fall back to date-keyed lookup, show *some* data): `piece` (most-recent by date), `audit_results` (by task_id='daily/<date>'), `pipeline_log` (by run_id), `daily_candidates` (by date).
+- Strict (query gated on `pieceId`, return empty): `daily_piece_audio`, `zita_messages`, `observer_events` (post-3.2).
+
+**Hypothesis:** Mixed behaviour is a historical artifact — the lenient fallbacks pre-date `piece_id` columns being on the child tables; the strict gates were added alongside the new columns in 2026-04-22 migrations. Neither mode is "wrong", but having both on one page is confusing: a bad slug shows piece/audit/pipeline data with an empty audio/zita/observer section, making it look like three sections silently failed rather than the slug being wrong.
+
+**Decision needed:** pick one side and apply consistently.
+- Option A — all lenient: add date-keyed fallback to audio / zita / observer queries when pieceId is null. Slug typo → shows day-view. Generous; may mislead at multi-per-day.
+- Option B — all strict: remove date fallback from piece / audit / pipeline / candidates queries when pieceId is null. Slug typo → renders the existing "No piece" error state. Honest; best in a world where all post-Phase-7 MDX has `pieceId` so the only way to hit null is a typo.
+
+**Recommendation:** B. Post-Phase-7 every MDX has pieceId and the content schema requires it. Null pieceId at runtime = operator typo; that deserves an error state, not partial data that looks plausible.
+
+**Investigation hints:** [src/pages/dashboard/admin/piece/[date]/[slug].astro](../src/pages/dashboard/admin/piece/[date]/[slug].astro) — the `if (pieceId) { ... } else { ... date-based fallback ... }` blocks around lines 128-188. Removing the else branches collapses the code by ~30 lines.
+
+**Priority:** low. Slug typos are operator-caused and caught the moment the operator notices "that's not my piece". Tightening is purely hygiene.
+
+---
+
 ## [observing] 2026-04-23: Admin categories page — deferred from Area 2 plan
 
 **Surfaced:** 2026-04-23 late evening during Area 2 execution. Original sub-task 2.5 scope: `/dashboard/admin/categories/` with name · slug · piece count · lock toggle · [Rename] [Merge] [Delete] per row, each action firing an `admin_category_*` observer event. Deliberately deferred — not dropped.

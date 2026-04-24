@@ -203,8 +203,12 @@ try {
       .all<ObserverRow>();
     observerEvents = obsRes.results;
   }
-  // When pieceId is null (pre-Phase-7 MDX without a pieceId frontmatter
-  // — shouldn't happen post-backfill) observerEvents stays empty.
+  // Null pieceId path is reachable via slug typo (`/piece/<date>/<wrong-slug>/`)
+  // — content-collection .find() returns undefined. In that case piece /
+  // audits / pipeline / candidates queries fall back to date-keyed lookup
+  // (lenient) while audio / zita / observer return empty (strict). That
+  // inconsistency is pre-existing, not a 3.2 regression; FOLLOWUPS has
+  // `[open] 2026-04-24: Coherent null-pieceId handling` to unify later.
 
   // Audio scoped by piece_id (migration 0015 rebuilt the PK there).
   if (pieceId) {
