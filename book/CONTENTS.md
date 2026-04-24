@@ -24,7 +24,7 @@ Status legend: **✓ written** · **○ outline** · **◇ vision** (describes a
 ### Part 3 — The Zeemish project
 
 - ✓ [08 — The idea](./08-zeemish-the-idea.md)
-- ✓ [09 — The thirteen roles](./09-the-thirteen-roles.md)
+- ✓ [09 — The fourteen roles](./09-the-fourteen-roles.md)
 - ✓ [10 — A day in the life of a piece](./10-a-day-in-the-life.md)
 - ○ [11 — The quality gates](./11-quality-gates.md)
 - ○ [12 — Publishing: from MDX to the live site](./12-publishing.md)

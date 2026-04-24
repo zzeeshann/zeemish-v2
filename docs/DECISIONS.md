@@ -2,6 +2,48 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.6 — "13 → 14 agents" cascade
+
+**Context:** Categoriser shipped in 2.2, seeded in 2.3, surfaced in 2.4. Every living doc that named the roster count is now wrong. One atomic sweep to catch all of them.
+
+**Decisions:**
+
+1. **Cascade shape: find every "13" / "thirteen" in living docs + book; decide case-by-case; update live claims, leave historical narrative.** Grep-driven, not mechanical replace. Three classes of hit:
+   - Live claims (README "14 agents scan the news", AGENTS.md "14 agents total", CLAUDE.md current-state summary, book chapter that enumerates the roles): **update**.
+   - Historical narrative (DECISIONS entries, FOLLOWUPS archive entries, docs/handoff original specs, CLAUDE.md bullets describing specific past commits): **leave**. These describe a past state; rewriting them would falsify the record.
+   - Code comments / source (tts-normalize.ts's word-number lookup table contains "thirteen" as an English number word): **leave** — unrelated to agent count.
+
+2. **Book chapter 09 rename, not edit-in-place.** `09-the-thirteen-roles.md` → `09-the-fourteen-roles.md` via `git mv` so history follows. Title updated, intro count updated ("fourteen specific roles"), Categoriser section slotted between Learner (12) and Observer (renumbered to 14). The "Plus one more thing" aside originally said "not a fourteenth agent" about Drafter's reflect method — with Categoriser now being the 14th, rephrased to "not a fifteenth agent" so the argument (reflect is a second method on Drafter, not a new agent) still reads correctly. The "agent-ness" breakdown in chapter 06 updated too: 7 real agents + 6 workers → 8 real agents + 6 workers (Categoriser is a Claude-using agent, joins the real-agents list).
+
+3. **Chapter 06's opening sentence updates from "13 AI agents on a website" to "14 AI agents on a website".** The rhetorical point is the same — "the word agent has had a rough year" — the number is just illustrative. Updating it keeps the chapter in sync with the rest of the book.
+
+4. **Chapter 14's "README says thirteen AI agents" updated to "fourteen".** The quote was descriptive, not load-bearing: the chapter's argument about closing-the-loop doesn't depend on the count. Updating keeps book ↔ README consistent so a reader cross-referencing doesn't see a mismatch.
+
+5. **Cross-chapter references all updated.** `05-ai-models.md` ("system has fourteen roles"), `10-a-day-in-the-life.md` ("Chapter 9 introduced the fourteen roles"), `17-zita-the-deep-agent.md` ("Zita — of all fourteen roles"), `99-glossary.md` (Agent definition + Durable Object definition). `CONTENTS.md` gets the new chapter title. Every link from another chapter to `09-the-thirteen-roles.md` would have been invalid after the file rename — grep confirmed none existed (chapter 9 is only referenced by narrative prose, not `./09-the-thirteen-roles.md` links).
+
+6. **CLAUDE.md's old "Agent count in docs/book" paragraph rewritten.** It previously said "AGENT_COUNT is 14 in code, forward-looking; book + README still say thirteen until Task 10/22 actually add the new agents." That was the correct stance when it was written (only Categoriser didn't exist yet). With 2.2 having shipped Categoriser and 2.6 shipping the cascade, the stance is now "everything is synced." Rewrite reflects that and names the rename explicitly so future maintainers know where the "thirteen roles" file went.
+
+7. **CLAUDE.md's `Database (D1 — 14 tables, 20 migrations)` section updated to `16 tables, 21 migrations`.** The 2.1 schema ship updated the top-level SCHEMA.md but not this CLAUDE.md summary. Caught in this pass; added a `Categoriser:` row listing `categories` + `piece_categories`.
+
+8. **AGENT_COUNT constant unchanged at `14`.** Already the value since the 2026-04-23 evening sweep (commit 6592b6a). Homepage footer + MadeBy drawer + BaseLayout OG description already show 14 — verified in preview during this cascade. No code change needed; just the doc/book cascade.
+
+**Trade-offs:**
+- Rename loses file-path stability — any external link to `09-the-thirteen-roles.md` breaks. Git's rename detection keeps blame/history intact for internal tooling; external links (if any existed) 404. Acceptable because the book isn't deployed as a linked URL surface yet (it lives in the repo only).
+- Keeping historical DECISIONS/FOLLOWUPS narrative at "13" means a new reader sees inconsistency between history and current. Documented in CLAUDE.md's "Agent count" paragraph so the intent is explicit: history is frozen, living docs are current.
+- The book's `06-agents.md` "rated by agent-ness" list got Categoriser appended at the end of the "real agents" group rather than inserted in running order. Accepted — the order inside the list is narrative, not hierarchical, and alphabetical/chronological insertion would have disrupted the rhythm.
+
+**Files:** RENAME `book/09-the-thirteen-roles.md` → `book/09-the-fourteen-roles.md` (title + intro + Categoriser section + numbering + closing). EDIT `book/00-preface.md`, `book/05-ai-models.md`, `book/06-agents.md` (rhetoric + rated-by-agent-ness list), `book/10-a-day-in-the-life.md`, `book/14-closing-the-loop.md`, `book/17-zita-the-deep-agent.md`, `book/99-glossary.md` (2 definitions), `book/CONTENTS.md` (chapter title + link). EDIT `README.md` (opening + "14 agents framing" + AGENTS.md link), `docs/ARCHITECTURE.md` (Stage 4 header), `docs/RUNBOOK.md` (directory listing). EDIT `CLAUDE.md` (intro, current-state, agent-team list with Categoriser at #13 + Observer at #14, database section counts + new Categoriser row, Agent-count-in-docs/book paragraph rewrite, sub-task 2.6 entry added to Area 2 block).
+
+**Verification:**
+- `grep -nE "thirteen|\\b13 agents|\\b13 roles|\\b13 AI"` across living docs returns only historical-narrative hits (verified each manually).
+- Book chapter 09 renders the 14-section enumeration cleanly — Categoriser section in the same voice as neighbouring Learner/Observer sections.
+- Preview at localhost:4321: homepage footer reads "Made by 14 agents."
+- `pnpm build` clean.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.5 — Admin categories page DEFERRED
 
 **Context:** Sub-task 2.5 of the Area 2 plan was an admin UI at `/dashboard/admin/categories/` with rename / merge / delete / lock controls, each action firing an `admin_category_*` observer event. Scoped and ready to build. Zishan called the deferral at the handoff point, before any 2.5 code was written.

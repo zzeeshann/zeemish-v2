@@ -10,7 +10,7 @@
 
 ## What Zeemish v2 is
 
-An autonomous multi-agent publishing system. 13 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
+An autonomous multi-agent publishing system. 14 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, categorise them into the library taxonomy, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces.
 
 ## Current state
 
@@ -23,6 +23,8 @@ Six-sub-task arc adding the 14th agent. Each sub-task ships as one commit with d
 **Sub-task 2.1 — `categories` + `piece_categories` schema.** Migration 0021 creates two additive tables, both empty at migration time. `categories(id, slug UNIQUE, name, description, locked, piece_count, created_at, updated_at)` + `piece_categories(piece_id, category_id, confidence, created_at)` with composite PK. Key shape decisions: `piece_count` is denormalised (library chip-sort read path wins; writer maintains; admin "Recount" is the drift escape hatch in sub-task 2.5). `slug` stored not derived so renames don't silently break library URLs. No CHECK, no REFERENCES FK — consistent with every other join column in this codebase. See DECISIONS 2026-04-23 (late evening) "Area 2 sub-task 2.1 — `categories` + `piece_categories` schema" and [docs/SCHEMA.md](docs/SCHEMA.md) for the full shape. SCHEMA.md header now reads "16 tables across 21 migrations".
 
 **Sub-task 2.2 — CategoriserAgent (14th agent).** New agent at [`agents/src/categoriser.ts`](agents/src/categoriser.ts) + co-located prompt at [`agents/src/categoriser-prompt.ts`](agents/src/categoriser-prompt.ts). One primary method `categorise(pieceId, date, mdx)` — reads piece metadata + full categories list from D1, asks Claude to assign 1–3, writes `piece_categories` and bumps `categories.piece_count` denormalised counters. Director hook: new `categoriseScheduled` alarm fires via `this.schedule(1, …)` right after `publishing done`, same shape as `analyseProducerSignalsScheduled` and `reflectOnPieceScheduled`. DO binding `CATEGORISER` added to wrangler.toml + SQLite migration tag `v12`. Observer gains `logCategoriserMetered` (info, per-run metering) + `logCategoriserFailure` (warn, non-retriable missed-iteration). Idempotent via pre-insert guard (skipped=true when piece already has rows) + composite PK as underneath safety net. New admin-only endpoint `POST /categorise-trigger?piece_id=<uuid>` mirrors `/zita-synthesis-trigger` for manual retag (used by 2.3's seed script and future admin merge/delete flows in 2.5). Strong reuse bias in the prompt — only creates a new category when existing taxonomy genuinely doesn't fit at confidence ≥60 (`CATEGORISER_REUSE_CONFIDENCE_FLOOR`); slug normalisation + collision fallback prevents duplicate slugs even if Claude proposes a collision. Failure posture matches the off-pipeline pattern: non-retriable, logs, piece stays live. See DECISIONS 2026-04-23 (late evening) "Area 2 sub-task 2.2 — CategoriserAgent".
+
+**Sub-task 2.6 — "13 → 14 agents" cascade.** Atomic sweep across every living surface that named the roster count. `AGENT_COUNT = 14` in `src/lib/constants.ts` was already live (footer + MadeBy drawer + BaseLayout OG desc inherited automatically). This sub-task caught every hardcoded "13"/"thirteen" in user-facing docs + the book. Book chapter renamed: `09-the-thirteen-roles.md` → `09-the-fourteen-roles.md` with a new Categoriser section slotted between Learner (#12) and Observer (renumbered to #14). Book's "Plus one more thing" section updated ("not a fifteenth agent" now, not "fourteenth"). 6 other book chapters updated for cross-references (`00-preface`, `05-ai-models`, `06-agents` with its real/worker breakdown, `10-a-day-in-the-life`, `14-closing-the-loop`, `17-zita-the-deep-agent`, `99-glossary`, `CONTENTS`). Living docs: README.md (opening paragraph + "13 agents framing" + AGENTS.md link), docs/ARCHITECTURE.md (Stage 4 header), docs/RUNBOOK.md (directory listing). CLAUDE.md: intro, current-state summary, agent-team list (now enumerates Categoriser at #13, Observer at #14), database section (now "16 tables, 21 migrations" + new Categoriser row), and the stale "AGENT_COUNT is 14, book is not yet synced" paragraph rewritten to reflect the cascade having shipped. Historical narrative left untouched — `docs/handoff/*` (original specs), `docs/DECISIONS.md` (append-only log), `docs/FOLLOWUPS.md` (archived entries), and CLAUDE.md's historical-moment passages ("Homepage: hero + 'made by 13 agents' pipeline strip" was a 2026-04-17 design description; "Twelve of thirteen agents have been running identical prompts since launch" was a pre-P1.1 claim). Live verification in preview: homepage footer reads "Made by 14 agents." See DECISIONS 2026-04-23 (late evening) "Area 2 sub-task 2.6 — cascade".
 
 **Sub-task 2.5 — Admin categories page. DEFERRED.** Originally scoped as `/dashboard/admin/categories/` with rename / merge / delete / lock controls and matching `admin_category_*` observer events. Deferred at Zishan's call during Session 2 (2026-04-23 late evening). Rationale: Categoriser's reuse-bias prevention (strong prompt + slug-collision fallback + ≥60 confidence floor) is the primary strategy for taxonomy health; admin curation is the fallback for when the bias doesn't hold. Building the fallback before observing the system on real pieces contradicts the autonomous ethos. The data layer is complete (migration 0021, CategoriserAgent, `src/lib/categories.ts`, library filter, `/categorise-trigger` endpoint) — only the UI is missing, and when it lands it's purely a UI task. Unblock trigger: drift becomes observable OR catalogue hits ~30 pieces, whichever first. In the meantime `wrangler d1 execute` is the emergency lever (no audit trail). Full rationale and resumption hints in FOLLOWUPS.md `[observing] 2026-04-23: Admin categories page — deferred from Area 2 plan`.
 
@@ -42,7 +44,7 @@ Session focus: dashboard + admin surface quality pass. Five commits between `bc4
 
 **Bug-class callout:** two step-name-as-terminal-marker bugs fixed in the same session (`fc23970` + `dc870a1`). Lesson: when one admin/dashboard surface reads `pipeline_log.step` as terminal signal, audit every other surface for the pattern same-session — they'll share the mistake.
 
-**Agent count in docs/book:** `AGENT_COUNT` is `14` in code, forward-looking. Book chapters + README still say "thirteen" / "13" — forensic narrative describing the system at authoring time, not a place to rewrite history ahead of adding agents. Those sync when Task 10 / Task 22 actually add the new agents.
+**Agent count in docs/book:** `AGENT_COUNT = 14` in code matches docs + book as of Area 2 sub-task 2.6 (2026-04-23). Book chapter 09 renamed from `09-the-thirteen-roles.md` → `09-the-fourteen-roles.md` with Categoriser slotted in between Learner (12) and Observer (now 14). README + ARCHITECTURE + RUNBOOK + glossary + every cross-chapter reference in the book is synced. `docs/handoff/*` is historical-spec and stays untouched; DECISIONS.md entries are append-only historical record.
 
 ## Roman-numeral TTS fix + admin per-beat audio regen (2026-04-23)
 Plan file `~/.claude/plans/what-is-the-current-polymorphic-reef.md`. Trigger: 2026-04-23 cannabis piece ("Trump Administration Reclassifies Cannabis…") was pronouncing "Schedule I / II / III / IV / V" with letter names — ElevenLabs reads single-letter Roman numerals as English letters/pronouns. Issue is TTS-level, will recur for amendments/monarchs/chapters regardless of provider.
@@ -57,7 +59,7 @@ Plan file `~/.claude/plans/what-is-the-current-polymorphic-reef.md`. Trigger: 20
 
 **Live verification + two afternoon cleanups (commit `891c6f2`).** User tested both per-beat regen (1 beat) and Start over (all 5 beats) on the 2026-04-23 cannabis piece. Pipeline healthy end-to-end both times; normaliser fired correctly (totalCharacters 6594 → 6635 from Roman-numeral spell-outs). Two small bugs surfaced during live inspection — **both pre-existing from 2026-04-22, not regressions from today's main commit** (initially misattributed; git log showed the symptom code paths predated today's work): (1) admin retry block displayed a stale `Durable Object reset` failure message from 6 hours earlier during a healthy Start-over because `audioFailureStep = pipeline.find(...)` had no time filter. Fixed by scoping to `created_at >= latestAudioRunStart` (most recent `audio-producing running` row). (2) Publisher made pure-reorder commits on per-beat regen because Director's `SELECT … ORDER BY generated_at ASC` moved the regen'd beat to the bottom of the `audioBeats` map. Fixed by switching to `ORDER BY beat_name ASC` for deterministic serialisation. Readers unaffected (site consumes map by key lookup). See DECISIONS 2026-04-23 (cont.) "Two cleanups surfaced by live verification".
 
-13 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened on the routes that matter. Daily pieces are the only content type.
+14 agents deployed, all wired. Daily news-driven teaching operational, public + admin dashboard, security hardened on the routes that matter. Daily pieces are the only content type.
 
 Each agent does one job and lives in one file. Director is a pure orchestrator — zero LLM calls. Curator picks the story, Drafter writes the MDX, auditors gate quality, Integrator revises, Publisher ships, Audio Producer narrates beat-by-beat via ElevenLabs, Audio Auditor verifies, Publisher second-commits the audio URLs into frontmatter. Audio runs in a ship-and-retry posture: text publishes the moment Integrator approves (a newspaper never skips a day); audio lands as a second commit when it's ready, or surfaces a retry button on the admin dashboard if it fails.
 
@@ -331,7 +333,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 1. **Foundation:** Astro + Tailwind + MDX + TypeScript strict, Cloudflare Workers, GitHub Actions CI/CD
 2. **Reader Surface:** Beat-by-beat navigation Web Components (one beat at a time), content collections
 3. **Accounts & Progress:** Anonymous-first auth, D1, progress tracking, magic link login (Resend)
-4. **Agent Team:** 13 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration
+4. **Agent Team:** 14 agents on Cloudflare Agents SDK, full pipeline with quality gates + audio narration + post-publish categorisation
 5. **Self-Improvement:** Engagement tracking, LearnerAgent, learnings database
 6. **Zita:** Socratic learning guide in every piece
 7. **Daily Pieces:** ScannerAgent, Director daily mode, news-driven teaching on hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day; admin-configurable)
@@ -341,7 +343,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 
 ### Two Workers
 - **zeemish-v2** — Astro site: pages + API routes. `https://zeemish.io` (custom domain; workers.dev URL still active as fallback)
-- **zeemish-agents** — 13 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
+- **zeemish-agents** — 14 agents as Durable Objects. `https://zeemish-agents.zzeeshann.workers.dev`
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
@@ -352,9 +354,9 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 - Email: Resend (magic link from hello@zeemish.io)
 - Deploy: GitHub Actions → Cloudflare (both workers auto-deploy)
 
-### The 13 Agents (one job per agent, one file per agent)
+### The 14 Agents (one job per agent, one file per agent)
 
-Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner runs off-pipeline, watching readers.
+Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integrator → Publisher → Audio Producer → Audio Auditor → Publisher.publishAudio (second commit splices audioBeats into frontmatter). Text ships first — audio is ship-and-retry so the day is never blank. Observer receives events throughout. Learner + Categoriser run off-pipeline post-publish.
 
 1. **ScannerAgent** — reads the news every morning
 2. **DirectorAgent** — pure orchestrator. Routes work between agents. Zero LLM calls. Hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC once per day).
@@ -368,17 +370,19 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 10. **AudioAuditorAgent** — reads `daily_piece_audio` rows, verifies R2 objects exist + file sizes are sane + total chars under cap. Passes/fails without touching git.
 11. **PublisherAgent** — commits to GitHub, piece goes live
 12. **LearnerAgent** — learns from reader behaviour, writes patterns for future pieces
-13. **ObserverAgent** — logs every pipeline event for the admin dashboard
+13. **CategoriserAgent** — assigns 1–3 library categories to each piece post-publish (off-pipeline alarm), strongly biased toward reusing the existing taxonomy
+14. **ObserverAgent** — logs every pipeline event for the admin dashboard
 
 ### Dashboard
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 14 tables, 20 migrations)
+### Database (D1 — 16 tables, 21 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
 - Daily: daily_candidates, daily_pieces (+ `has_audio` col), daily_piece_audio (per-beat MP3 rows)
+- Categoriser: categories, piece_categories (sub-task 2.1, migration 0021)
 
 ### Key directories
 ```
@@ -389,7 +393,7 @@ src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate,
 src/styles/             global.css (Tailwind) + beats.css + zita.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             13 agent files (one per agent) + per-agent prompt files + shared code
+agents/src/             14 agent files (one per agent) + per-agent prompt files + shared code
 migrations/             D1 schema migrations (0001-0006)
 docs/                   Living documentation
 docs/handoff/           Original architecture + specs
@@ -414,7 +418,7 @@ docs/handoff/           Original architecture + specs
 
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
-- `docs/AGENTS.md` — all 13 agents, endpoints, secrets
+- `docs/AGENTS.md` — all 14 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 14 D1 tables, 20 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)

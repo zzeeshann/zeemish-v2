@@ -1,8 +1,8 @@
-# 09 — The thirteen roles
+# 09 — The fourteen roles
 
-Chapter 6 explained what an agent is. Chapter 8 explained what Zeemish does. This chapter explains how the two fit together — the thirteen specific roles that make up Zeemish's daily pipeline.
+Chapter 6 explained what an agent is. Chapter 8 explained what Zeemish does. This chapter explains how the two fit together — the fourteen specific roles that make up Zeemish's daily pipeline.
 
-A quick reminder from chapter 6: seven of these roles use Claude to make decisions. The other six are supporting code. Both kinds matter. Both kinds are called "agents" in the repo because they each have one clear job and live in one file. That's the only thing the word "agent" promises in Zeemish.
+A quick reminder from chapter 6: eight of these roles use Claude to make decisions. The other six are supporting code. Both kinds matter. Both kinds are called "agents" in the repo because they each have one clear job and live in one file. That's the only thing the word "agent" promises in Zeemish.
 
 Here they are, in the order they run.
 
@@ -128,7 +128,21 @@ When Zita conversations accumulate, Learner also reads those and writes `source=
 
 **How this closes the loop:** the `learnings` table gets read by the Drafter on the next piece (chapter 4 of this shift, chapter 14 of this book). So the system's self-knowledge flows back into the next piece's writing prompt. Chapter 14 explains this in full.
 
-## 13. Observer
+## 13. Categoriser
+
+**Job:** Assign each just-published piece to 1–3 categories in the library's taxonomy.
+
+**What it does:** After Publisher ships the piece, reads the final MDX plus the current list of categories from the database. Asks Claude which categories the piece belongs to. Writes the assignments to a `piece_categories` table and keeps a running count of how many pieces are in each category. When nothing in the existing list fits the piece at reasonable confidence, creates exactly one new category — never more than one per run.
+
+**Claude call?** Yes. One per piece, post-publish, off-pipeline.
+
+**Why the reuse bias is the whole point:** A library with a new category for every piece is a list of headlines, not a taxonomy. The prompt tells Claude directly: prefer reuse, and create a new category only when an existing one genuinely doesn't fit. The numeric anchor is a confidence floor of 60 — below that, the piece doesn't truly belong, and a new category is the honest answer. Above that, reuse.
+
+The effect compounds. Early pieces create the taxonomy because the list is short and doesn't cover every subject yet. Later pieces see a richer list and mostly reuse. The first nine pieces produced seven categories; the next thirty will likely add two or three at most. That's the shape a taxonomy takes when it's working.
+
+**Why post-publish and not inline:** Categorisation doesn't gate publishing. A piece going live with no category is still a piece; readers get it on `/daily/<date>/<slug>/` exactly as before. The category is metadata that adds a *browsing* surface — the library's chip bar — not a *correctness* surface. Running it off-pipeline, same shape as Learner and Drafter's self-reflection, keeps the publishing path short and fast.
+
+## 14. Observer
 
 **Job:** Log every pipeline event.
 
@@ -140,12 +154,12 @@ When Zita conversations accumulate, Learner also reads those and writes `source=
 
 ## Plus one more thing
 
-Chapter 14 will explain that Drafter has a second, separate role — reflecting on each piece after publication. This is not a fourteenth agent. It's a second method on the existing Drafter file, called post-publish, writing to `learnings` with `source='self-reflection'`.
+Chapter 14 will explain that Drafter has a second, separate role — reflecting on each piece after publication. This is not a fifteenth agent. It's a second method on the existing Drafter file, called post-publish, writing to `learnings` with `source='self-reflection'`.
 
 The reason Drafter does this rather than a new agent is simple: the thing that wrote the piece is the right thing to reflect on the piece. Reflection is not a new voice; it's the same voice, now looking back. One file, two jobs.
 
 ## If you remember one thing from this chapter
 
-The thirteen roles are the scaffolding. The scaffolding exists so each role can be small, focused, and changeable. The work happens inside the roles. The framing — "13 agents" — is a way of organising code, not a claim about collective intelligence.
+The fourteen roles are the scaffolding. The scaffolding exists so each role can be small, focused, and changeable. The work happens inside the roles. The framing — "14 agents" — is a way of organising code, not a claim about collective intelligence.
 
-The interesting thing isn't that there are thirteen of them. The interesting thing is what comes out the other end every morning.
+The interesting thing isn't that there are fourteen of them. The interesting thing is what comes out the other end every morning.
