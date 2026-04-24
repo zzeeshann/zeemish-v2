@@ -1,6 +1,6 @@
 # 14 — Closing the loop: what "learning" actually means here
 
-The README of the Zeemish repo says, in its opening paragraph, that fourteen AI agents produce the daily piece. Until April 19, 2026, this was honest on one axis — the agents really do produce the piece — and quietly dishonest on another. The system was not learning. It was executing.
+The README of the Zeemish repo says, in its opening paragraph, that sixteen AI agents produce the daily piece. Until April 19, 2026, this was honest on one axis — the agents really do produce the piece — and quietly dishonest on another. The system was not learning. It was executing.
 
 This chapter is about what changed on that date, and what "learning" actually means in the context of a system like Zeemish.
 

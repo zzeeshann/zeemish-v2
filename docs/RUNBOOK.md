@@ -457,7 +457,7 @@ zeemish-v2/
 │   ├── voice-contract.md   Voice rules for agents
 │   └── subject-values.json Subject priorities
 ├── agents/                 Separate Cloudflare Worker
-│   ├── src/                Agent code (14 agents, one file each)
+│   ├── src/                Agent code (16 agents, one file each)
 │   └── wrangler.toml       Agent worker config
 ├── migrations/             D1 schema migrations
 ├── docs/                   Living documentation

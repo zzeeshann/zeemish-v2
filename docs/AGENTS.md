@@ -4,7 +4,7 @@
 The agent team is a separate Cloudflare Worker (`agents/`) using the Cloudflare Agents SDK (v0.11.1). Each agent is a Durable Object with its own SQLite database and isolated state. Agents communicate via sub-agent RPC.
 
 **Worker URL:** `https://zeemish-agents.zzeeshann.workers.dev`
-**14 agents total — all wired.** Audio Producer + Audio Auditor are live as of 2026-04-18, slotted in after Publisher as a ship-and-retry phase. CategoriserAgent is the 14th, live as of 2026-04-23 (Area 2 sub-task 2.2) — runs off-pipeline after `publishing done`, same shape as Learner's post-publish analysis. Hard 20k-char budget cap per piece protects against runaway ElevenLabs spend.
+**16 agents total — all wired.** Audio Producer + Audio Auditor are live as of 2026-04-18, slotted in after Publisher as a ship-and-retry phase. CategoriserAgent is the 13th, live as of 2026-04-23 (Area 2 sub-task 2.2) — runs off-pipeline after `publishing done`, same shape as Learner's post-publish analysis. InteractiveGenerator (15) + InteractiveAuditor (16) are live as of 2026-04-24 (Area 4 sub-tasks 4.4 + 4.5) — both also off-pipeline, producing a standalone quiz per piece. Hard 20k-char budget cap per piece protects against runaway ElevenLabs spend.
 
 ## Design principles (all agents)
 
@@ -34,7 +34,7 @@ Observer: receives events from every agent throughout
 Learner: runs off-pipeline on reader engagement data
 ```
 
-## The 14 agents
+## The 16 agents
 
 ### 1. ScannerAgent
 - **Role:** Fetches news from Google News RSS (6 categories), deduplicates, stores candidates in D1.

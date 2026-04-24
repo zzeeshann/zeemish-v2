@@ -10,13 +10,13 @@ Zita is the small conversational helper at the bottom of every Zeemish piece. Ri
 
 This is Zita as a shallow agent. One Claude call, one prompt, a handful of turns, no memory past the current session. It works. It's also not the Zita Zeemish needs.
 
-The Zita Zeemish needs is a deep agent. This chapter is about what that actually means, and why Zita — of all fourteen roles — is the single highest-leverage piece of work left in this project.
+The Zita Zeemish needs is a deep agent. This chapter is about what that actually means, and why Zita — of all sixteen roles — is the single highest-leverage piece of work left in this project.
 
 ## Deep versus shallow, again
 
 Chapter 6 drew the line. A shallow agent makes one decision, then stops. A deep agent is given a goal and decides what to do next from a menu — call a tool, search for context, follow a thread — and keeps going until the goal is met.
 
-Most of Zeemish's fourteen roles are shallow by design. Curator picks a story and stops. Drafter writes a piece and stops. Stopping is a feature. Stopping is what keeps the system reliable.
+Most of Zeemish's sixteen roles are shallow by design. Curator picks a story and stops. Drafter writes a piece and stops. Stopping is a feature. Stopping is what keeps the system reliable.
 
 But a reader learning something new is not a single decision. A reader learning is a conversation that unfolds. The first question reveals what the reader already knew. The second reveals what they misunderstood. The third reveals what they're actually curious about. A shallow agent cannot follow this arc. A deep agent can.
 
