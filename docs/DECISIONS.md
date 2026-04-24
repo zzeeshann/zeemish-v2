@@ -2,6 +2,53 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.7 — Interactive engagement tracking endpoint
+
+**Context:** Final sub-task of Area 4. Prior sub-tasks left three client call sites POSTing to `/api/interactive/track` and 404-ing silently: `<quiz-card>` on mount (`interactive_started`) and on results render (`interactive_completed` with score + per-question correctness), and `<lesson-shell>` when the last beat with a passing interactive becomes active (`interactive_offered`). 4.7 builds the endpoint and flips those calls from 404-silent to 200-landed.
+
+**Decisions:**
+
+1. **Append-only event log shape, not aggregated per day.** The `interactive_engagement` table (migration 0022) is event-log-shaped — one row per event. Aggregation happens at query time (`SELECT COUNT(*) FROM interactive_engagement WHERE event_type = 'completed' AND interactive_id = ?`). Contrasts with the daily-piece `engagement` table which aggregates views/completions/audio_plays as counters per (piece_id, course_id, date). Reason: per-question correctness is a JSON array that doesn't aggregate cleanly — we care about individual-response distributions, not a running sum. The natural shape is events.
+
+2. **Short-form event types stored, long-form accepted.** Clients send `interactive_offered`, `interactive_started`, `interactive_completed`. Endpoint strips the `interactive_` prefix before write; stored values are `'offered' | 'started' | 'completed' | 'skipped'`. Matches SCHEMA.md 4.1 docs + makes aggregation query-friendly (no redundant prefix, since the table name already says "interactive_"). Clients don't need to change; the normalisation is an endpoint concern.
+
+3. **`skipped` accepted but no current client sends it.** The spec said "interactive_skipped — inferred (offered but no started before Finish) OR explicit." Inference path is query-time SQL — no write happens for a "naturally skipped" reader. Explicit path leaves the endpoint accept the event type, which lets a future explicit-dismiss UI ("Close" button on the last-beat prompt that fires `interactive_skipped`) ship without an endpoint change. Zero code for the inferred case in 4.7 — it's a SELECT pattern, not a write path.
+
+4. **Either `interactive_id` (UUID) or `interactive_slug` (kebab-case) accepted; one is required.** Necessary because 4.3's `<quiz-card>` knows the UUID (passed from the content-collection via `data-interactive-id`) but 4.6's last-beat prompt knows only the slug (passed via the embedded `<script type="application/json" data-page-interactive>`). Could have forced 4.6 to look up the UUID at build time and pass it too, but the slug is the natural public identifier and the extra flexibility costs one server-side D1 lookup per request (`SELECT id FROM interactives WHERE slug = ?`). Acceptable.
+
+5. **Defensive lookup on provided UUID.** When the client sends an `interactive_id`, the endpoint sanity-checks that the row exists before writing (`SELECT 1 FROM interactives WHERE id = ? LIMIT 1`). Guards against stale HTML bundles carrying a removed interactive's id — without the check, FKs-as-convention would silently write orphan engagement rows. A miss returns 200 `skipped-no-interactive` (same as an unknown slug). 400 would be wrong — the client isn't malformed, the content just changed under it.
+
+6. **400 vs 200-skipped distinction.** 400 for genuinely malformed requests (missing event_type, missing both id+slug, invalid event_type value, bad JSON). 200 with a skipped status for "request was valid shape, but the target doesn't exist right now" (unknown slug, removed UUID, DB error). Reason: 4xx tells the client "your code has a bug, fix it"; 2xx-with-status tells the client "fire-and-forget worked its end of the contract, the data layer just doesn't need this row." The client already `.catch`es both; the distinction is for ops introspection (4xxs in logs are actionable; 200-skipped is not).
+
+7. **`score` and `per_question_correctness` silently dropped if invalid on a `completed` event.** The row still writes with those fields null. Reason: losing a minor attribute shouldn't prevent recording the event (the reader *did* complete). Ops can see "completed event but no score" and diagnose from there. Validation rules: score is a non-negative integer; correctness is an array of 0/1 integers length 1–10 (generous upper bound — the content schema caps at 5 questions but an off-by-one client could send more and shouldn't lose the completion).
+
+8. **Never block the reader.** All DB errors wrapped in try/catch and return 200 with `db-error` status. Matches the posture of `/api/engagement/track` exactly. Engagement tracking is advisory — the UI doesn't depend on it, and a transient D1 failure shouldn't surface an error state to the reader.
+
+9. **user_id from `locals.userId`, not from the request body.** Middleware always populates `locals.userId` (anonymous-first — generates a UUID and sets a session cookie on first visit). Clients don't send user_id; the server reads it. Guarantees no client can write engagement rows under another user's id. Defensive: if `locals.userId` is somehow null (shouldn't happen — middleware runs first), endpoint drops the event with 200 `skipped-no-user`.
+
+10. **Slug regex is strict.** `/^[a-z0-9][a-z0-9-]{0,58}[a-z0-9]$/` — lowercase alphanumerics + hyphens, must start and end with alphanumeric, 2–60 chars. Matches the slug validation used elsewhere in the codebase (library category filter `/library/[slug]/`). Anything else → 400 on the "missing id+slug" branch (the validator treats non-matching slugs as absent).
+
+**Trade-offs:**
+- Slug → UUID resolution adds one D1 read per POST. At low volume, negligible. At scale, could cache; for now, trust D1's per-row-id lookup performance.
+- No rate limiting on the endpoint. Engagement tracking is tied to reader actions (clicks, page loads), so the natural ceiling is low. If scripted abuse becomes visible in ops, add KV-based throttling like `/api/zita/chat` has.
+- `per_question_correctness` stored as JSON string. SQLite has no JSON type; stringification is the idiomatic approach, and the aggregation queries we'll want later (percentage correct per question) are cheap with `json_extract`.
+- A reader who reaches the last beat of the same piece twice (hard refresh) generates two `offered` events. `<lesson-shell>` uses `sessionStorage` to dedup within a session, but refresh clears the key. Acceptable — DISTINCT on user_id at aggregation time handles it.
+- Infrastructure observability for the endpoint is weak — errors go to 200-with-status rather than logs. A future observability pass could emit to `observer_events` from the site worker (using the existing `src/lib/observer-events.ts` helper) on 400s or DB errors. Not now.
+
+**Verified in preview (localhost:4321) against local D1 with migration 0022 applied + fixture row seeded:**
+- 7-case test matrix all correct:
+    - Missing event_type → 400 with error message
+    - Missing both id+slug → 400 with error message
+    - Unknown slug → 200 `skipped-no-interactive`
+    - Valid `offered` via slug → 200 `tracked`
+    - Valid `started` via UUID → 200 `tracked`
+    - Valid `completed` with score + correctness → 200 `tracked`
+    - Invalid event_type → 400 with error message
+- D1 inspection post-test: 3 rows landed with correct shape — short-form event_type ('offered'/'started'/'completed'), score=3 and `per_question_correctness` = '[1,0,1,1]' (JSON-stringified) only on the completed row, all three rows share the same session user_id.
+- `pnpm build` passes clean.
+
+**Rollback:** `git revert <commit>`. Endpoint file removal is clean — the client call sites from 4.3 and 4.6 already handle 404 silently (pre-4.7 state), so reverting just the endpoint restores that behaviour without a client change. D1 rows written while the endpoint was live stay; they're harmless append-only events.
+
 ## 2026-04-24: Area 4 sub-task 4.6 — Last-beat prompt
 
 **Context:** With Generator + Auditor in place (4.4 + 4.5), daily pieces can have an associated interactive at a standalone URL. 4.6 adds a small, subtle exit option on the last beat of the piece pointing at that URL — "here's a quick self-check if you want it." The hard constraints: no modal, no routing hijack, Finish button unchanged, prompt only when the piece actually has a passing interactive.
