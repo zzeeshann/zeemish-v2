@@ -16,7 +16,7 @@ An autonomous multi-agent publishing system. 14 AI agents scan the news, decide 
 
 **LAUNCHED 2026-04-18 at https://zeemish.io.** Tag: `v1.0.0`. Old breathing-tools site at zeemish.io retired (custom-domain binding moved from `zeemish-site` worker to `zeemish-v2` worker via Cloudflare dashboard). New site live with daily piece, audio, engagement tracking, public + admin dashboard, security headers on auth-touching surfaces. Workers.dev URL still active as fallback. The exact git commit at launch is what `v1.0.0` points at — use it as the reference if anyone asks "what shipped on day one".
 
-## Area 4 — Interactives (2026-04-24, in progress)
+## Area 4 — Interactives (2026-04-24, complete — tag `area-4-done`)
 
 Seven sub-task arc introducing interactives as a first-class system (not a piece sub-feature). First type is `quiz`; later types can be breathing, game, chart, etc. Each interactive is standalone-addressable with its own URL, useful without reading the source piece ("essence not reference"). 1:1 with pieces (a piece optionally generates one). Two new agents: InteractiveGenerator (15th) + InteractiveAuditor (16th), both running post-publish on alarms with ship-and-retry posture. Each sub-task ships as one commit with docs synced. 4.1 schema; 4.2 content home + route; 4.3 quiz-card Web Component; 4.4 InteractiveGenerator; 4.5 InteractiveAuditor; 4.6 last-beat prompt; 4.7 engagement endpoint. Not updating book/09 for the new agents yet — that's Area 5.
 
@@ -377,7 +377,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
-- Backend: Cloudflare Workers (Astro adapter) + D1 (14 tables) + R2 (audio)
+- Backend: Cloudflare Workers (Astro adapter) + D1 (18 tables) + R2 (audio)
 - Agents: Cloudflare Agents SDK v0.11.1
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
@@ -407,12 +407,13 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 16 tables, 21 migrations)
+### Database (D1 — 18 tables, 22 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
-- Daily: daily_candidates, daily_pieces (+ `has_audio` col), daily_piece_audio (per-beat MP3 rows)
+- Daily: daily_candidates, daily_pieces (+ `has_audio` + `interactive_id` cols), daily_piece_audio (per-beat MP3 rows)
 - Categoriser: categories, piece_categories (sub-task 2.1, migration 0021)
+- Interactives: interactives, interactive_engagement (Area 4 sub-task 4.1, migration 0022)
 
 ### Key directories
 ```
@@ -423,8 +424,9 @@ src/lib/                Auth, DB helpers, rate limiting, formatting (formatDate,
 src/styles/             global.css (Tailwind) + beats.css + zita.css (standalone, not Tailwind-processed)
 src/layouts/            BaseLayout, LessonLayout
 content/daily-pieces/   Daily teaching pieces (YYYY-MM-DD-slug.mdx)
-agents/src/             14 agent files (one per agent) + per-agent prompt files + shared code
-migrations/             D1 schema migrations (0001-0006)
+agents/src/             14 agent files + 2 Area-4 agents awaiting the 15/16 cascade (Area 5) + per-agent prompt files + shared code
+migrations/             D1 schema migrations (0001-0022)
+content/interactives/   Standalone teaching artefacts (Area 4; quizzes as {slug}.json)
 docs/                   Living documentation
 docs/handoff/           Original architecture + specs
 ```
@@ -449,7 +451,7 @@ docs/handoff/           Original architecture + specs
 ## Documentation index
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 14 agents, endpoints, secrets
-- `docs/SCHEMA.md` — all 14 D1 tables, 20 migrations
+- `docs/SCHEMA.md` — all 18 D1 tables, 22 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)

@@ -42,8 +42,9 @@ Honest software: the README tells you what it is, the dashboard shows you how it
 agents/src/             13 agent files (one per agent)
 content/daily-pieces/   Published daily pieces (YYYY-MM-DD-slug.mdx)
 src/pages/              Site routes (Astro)
-src/interactive/        Web Components (lesson-shell, audio-player, zita-chat)
-migrations/             D1 schema (20 migrations, 14 tables)
+src/interactive/        Web Components (lesson-shell, audio-player, zita-chat, quiz-card)
+content/interactives/   Standalone interactive content (quizzes; Area 4)
+migrations/             D1 schema (22 migrations, 18 tables)
 scripts/                Build, deploy, and ops scripts
 docs/                   Living documentation
 docs/handoff/           Original architecture briefs (frozen)

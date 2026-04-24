@@ -30,7 +30,7 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 
 ### Stage 3 — Reader Accounts & Progress (complete)
 - [x] Astro Cloudflare adapter (static pages + server-rendered API routes)
-- [x] D1 database: 14 tables, 20 migrations (see `docs/SCHEMA.md`)
+- [x] D1 database: 18 tables, 22 migrations (see `docs/SCHEMA.md`)
 - [x] Anonymous-first auth middleware (cookie on first API call)
 - [x] Progress API: save beat, mark complete, fetch progress
 - [x] Auth API: email upgrade, login, logout
