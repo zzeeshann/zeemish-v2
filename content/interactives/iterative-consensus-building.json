@@ -1,0 +1,71 @@
+{
+  "slug": "iterative-consensus-building",
+  "type": "quiz",
+  "title": "Iterative Consensus Building",
+  "concept": "How failed votes convert opposition into diagnostic data that maps exactly what changes are needed to reach agreement in multi-stakeholder decisions.",
+  "interactiveId": "afb5cb25-2cc2-4d1a-8491-2a82cbabd647",
+  "sourcePieceId": "71e2f879-0578-4618-8766-33c6f3ce19a8",
+  "publishedAt": 1777055957734,
+  "voiceScore": 88,
+  "qualityFlag": "low",
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "When a proposal fails in a transparent vote among stakeholders with different priorities, what information does that failure produce?",
+        "options": [
+          "Proof that the underlying proposal is fundamentally unworkable and should be abandoned",
+          "A precise map showing where opposition exists and what constraints drive each objection",
+          "Evidence that the proposer needs to verify their initial support count was accurate",
+          "Momentum for opponents making subsequent passage attempts progressively harder"
+        ],
+        "correctIndex": 1,
+        "explanation": "A failed vote is a diagnostic scan. It shows exactly where resistance sits and what drives it. People mistake failure for proof the idea is bad when it's information about what needs to change."
+      },
+      {
+        "question": "Why do multi-stakeholder decisions typically require three attempts rather than passing after initial adjustments?",
+        "options": [
+          "Participants grow fatigued and eventually accept any resolution to end the process",
+          "The first attempt reveals gaps, the second tests fixes, the third refines based on both",
+          "Opposition deliberately extends the process to extract maximum concessions",
+          "Early attempts are symbolic while only later rounds carry binding commitment"
+        ],
+        "correctIndex": 1,
+        "explanation": "Each cycle builds on accumulated knowledge. The first reveals gaps. The second tests whether fixes work. The third refines based on both. Each round reveals what the previous couldn't."
+      },
+      {
+        "question": "When stakeholders want contradictory changes to a proposal, what structural move enables forward progress?",
+        "options": [
+          "Finding a compromise position midway between extremes that all groups can tolerate",
+          "Breaking the proposal into separable dimensions so different concerns get addressed independently",
+          "Waiting until group composition shifts and one perspective gains numerical advantage",
+          "Persuading one group their concern is less urgent than the other's priority"
+        ],
+        "correctIndex": 1,
+        "explanation": "The breakthrough is disaggregation—splitting one yes/no choice into addressable dimensions. Different groups get what they need on different aspects. People think compromise means finding a middle position that satisfies no one."
+      },
+      {
+        "question": "What distinguishes productive cycling from permanent stalemate when groups negotiate repeatedly?",
+        "options": [
+          "A hard deadline forcing participants to choose the least objectionable available option",
+          "Transparency making each participant's constraints and reasoning visible to all others",
+          "An authority figure with power to impose a solution if the group cannot converge",
+          "Progressive reduction of participants until the remaining group reaches unanimity"
+        ],
+        "correctIndex": 1,
+        "explanation": "Transparency drives convergence. When constraints are visible, negotiators craft solutions addressing real needs instead of guessing. Deadlines and imposed outcomes force closure without building agreement. Visibility converts guessing into problem-solving."
+      },
+      {
+        "question": "Why does trading support across unrelated dimensions increase efficiency in multi-stakeholder negotiation?",
+        "options": [
+          "It builds personal relationships that reduce hostility in future disagreements",
+          "It ensures every participant receives something concrete from the process",
+          "Stakeholders with low stake in one dimension can support those with high stake in exchange for reciprocal support elsewhere",
+          "It distributes influence evenly preventing any single participant from dominating"
+        ],
+        "correctIndex": 2,
+        "explanation": "Preference intensity varies asymmetrically across dimensions. I care intensely about A but little about B. You care intensely about B but little about A. Trading support lets each of us win on what matters most by conceding on what matters least. It exploits asymmetric priorities."
+      }
+    ]
+  }
+}
