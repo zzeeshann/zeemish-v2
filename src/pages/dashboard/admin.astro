@@ -259,6 +259,32 @@ function shortDate(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
+
+// Group All Pieces by month ("April 2026" buckets) for the collapsible
+// admin list (Area 3 sub-task 3.4). Preserves the incoming sort order
+// (date DESC, published_at DESC) inside each bucket. At current volume
+// this is cosmetic; at 365+ pieces it stops the list being a 500-row
+// scroll wall. Library does flat month-grouping (no collapse); admin
+// collapses to keep the rest of the control-room scannable. Kept
+// inline rather than extracted — library's item shape and collapse
+// behaviour differ enough that a shared component would need
+// render-prop gymnastics for no meaningful reuse.
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+type AdminPiece = typeof allPieces[number];
+const pieceMonthGroups: { label: string; pieces: AdminPiece[] }[] = [];
+for (const piece of allPieces) {
+  const [year, monthStr] = piece.date.split('-');
+  const label = `${MONTH_NAMES[parseInt(monthStr, 10) - 1]} ${year}`;
+  const last = pieceMonthGroups[pieceMonthGroups.length - 1];
+  if (last && last.label === label) {
+    last.pieces.push(piece);
+  } else {
+    pieceMonthGroups.push({ label, pieces: [piece] });
+  }
+}
 ---
 
 <BaseLayout title="Admin — Zeemish">
@@ -466,54 +492,67 @@ function shortDate(iso: string): string {
     {allPieces.length === 0 ? (
       <p class="text-sm text-zee-muted italic py-4">No pieces published yet.</p>
     ) : (
-      <ul class="divide-y divide-zee-border/60" data-piece-list>
-        {allPieces.map((p) => {
-          const tier = auditTier(p.voice_score, p.quality_flag);
-          const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
-          return (
-            <li data-piece-row data-piece-search={`${p.date} ${p.headline}`.toLowerCase()}>
-              <a href={adminPieceHref(p.date)} class="flex items-start gap-4 py-3 group">
-                <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
-                <div class="flex-1 min-w-0">
-                  <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
-                    <span class="text-zee-text font-medium">{shortDate(p.date)}</span>
-                    <span class="opacity-40" aria-hidden="true">·</span>
-                    <span>{auditTierLabel(tier)}</span>
-                    {p.voice_score != null && (
-                      <>
-                        <span class="opacity-40" aria-hidden="true">·</span>
-                        <span>{p.voice_score}/100</span>
-                      </>
-                    )}
-                    {p.rounds > 0 && (
-                      <>
-                        <span class="opacity-40" aria-hidden="true">·</span>
-                        <span>{p.rounds}r</span>
-                      </>
-                    )}
-                    {p.candidates > 0 && (
-                      <>
-                        <span class="opacity-40" aria-hidden="true">·</span>
-                        <span>{p.candidates}c</span>
-                      </>
-                    )}
-                    {p.quality_flag === 'low' && (
-                      <>
-                        <span class="opacity-40" aria-hidden="true">·</span>
-                        <span class="text-zee-gold">flagged low</span>
-                      </>
-                    )}
-                  </div>
-                  <p class="mt-1 text-sm font-medium leading-snug group-hover:text-zee-primary transition-colors">
-                    {p.headline}
-                  </p>
-                </div>
-                <span class="text-zee-muted/60 group-hover:text-zee-primary transition-colors shrink-0" aria-hidden="true">→</span>
-              </a>
-            </li>
-          );
-        })}
-      </ul>
+      <div class="space-y-3" data-piece-list>
+        {pieceMonthGroups.map((group, i) => (
+          <details class="group month-group" open={i === 0} data-month-group>
+            <summary class="flex items-baseline justify-between gap-4 cursor-pointer list-none py-2 border-b border-zee-border/60">
+              <span class="text-xs font-semibold uppercase tracking-widest text-zee-muted">{group.label}</span>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span data-month-count>{group.pieces.length} piece{group.pieces.length === 1 ? '' : 's'}</span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <ul class="divide-y divide-zee-border/60">
+              {group.pieces.map((p) => {
+                const tier = auditTier(p.voice_score, p.quality_flag);
+                const tierCls = tier === 'polished' ? 'bg-zee-primary' : tier === 'solid' ? 'bg-zee-text' : 'bg-zee-muted';
+                return (
+                  <li data-piece-row data-piece-search={`${p.date} ${p.headline}`.toLowerCase()}>
+                    <a href={adminPieceHref(p.date)} class="flex items-start gap-4 py-3 group/row">
+                      <span class={`w-2 h-2 rounded-full ${tierCls} mt-2 shrink-0`} aria-hidden="true"></span>
+                      <div class="flex-1 min-w-0">
+                        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-zee-muted tabular-nums">
+                          <span class="text-zee-text font-medium">{shortDate(p.date)}</span>
+                          <span class="opacity-40" aria-hidden="true">·</span>
+                          <span>{auditTierLabel(tier)}</span>
+                          {p.voice_score != null && (
+                            <>
+                              <span class="opacity-40" aria-hidden="true">·</span>
+                              <span>{p.voice_score}/100</span>
+                            </>
+                          )}
+                          {p.rounds > 0 && (
+                            <>
+                              <span class="opacity-40" aria-hidden="true">·</span>
+                              <span>{p.rounds}r</span>
+                            </>
+                          )}
+                          {p.candidates > 0 && (
+                            <>
+                              <span class="opacity-40" aria-hidden="true">·</span>
+                              <span>{p.candidates}c</span>
+                            </>
+                          )}
+                          {p.quality_flag === 'low' && (
+                            <>
+                              <span class="opacity-40" aria-hidden="true">·</span>
+                              <span class="text-zee-gold">flagged low</span>
+                            </>
+                          )}
+                        </div>
+                        <p class="mt-1 text-sm font-medium leading-snug group-hover/row:text-zee-primary transition-colors">
+                          {p.headline}
+                        </p>
+                      </div>
+                      <span class="text-zee-muted/60 group-hover/row:text-zee-primary transition-colors shrink-0" aria-hidden="true">→</span>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        ))}
+      </div>
     )}
     <p class="text-sm text-zee-muted hidden pt-4" data-empty-match>No pieces match that filter.</p>
   </section>
@@ -840,9 +879,15 @@ function shortDate(iso: string): string {
     chip.addEventListener('click', () => applySeverityFilter(chip.dataset.severityChip ?? 'all'));
   }
 
-  // Filter the All Pieces list (vanilla JS, same pattern as library).
+  // Filter the All Pieces list. Month groups auto-expand when any of
+  // their pieces match the filter; groups with zero matches hide
+  // entirely (not just collapse — matches library's hide-empty-groups
+  // pattern). When the filter is cleared, user-expanded groups stay
+  // expanded — we don't reset to default open state because fighting
+  // the user's explicit expand is annoying.
   const filterInput = document.querySelector<HTMLInputElement>('[data-piece-filter]');
   const pieceRows = Array.from(document.querySelectorAll<HTMLElement>('[data-piece-row]'));
+  const monthGroups = Array.from(document.querySelectorAll<HTMLDetailsElement>('[data-month-group]'));
   const emptyNote = document.querySelector<HTMLElement>('[data-empty-match]');
   filterInput?.addEventListener('input', () => {
     const q = filterInput.value.trim().toLowerCase();
@@ -852,6 +897,14 @@ function shortDate(iso: string): string {
       const match = !q || haystack.includes(q);
       row.style.display = match ? '' : 'none';
       if (match) anyVisible = true;
+    }
+    for (const group of monthGroups) {
+      const rowsInGroup = group.querySelectorAll<HTMLElement>('[data-piece-row]');
+      const visibleInGroup = Array.from(rowsInGroup).some((r) => r.style.display !== 'none');
+      group.style.display = visibleInGroup ? '' : 'none';
+      // Auto-expand a group with a match; leave groups without matches
+      // in their prior open state (they'll be hidden anyway).
+      if (q && visibleInGroup) group.open = true;
     }
     if (emptyNote) emptyNote.style.display = anyVisible ? 'none' : 'block';
   });

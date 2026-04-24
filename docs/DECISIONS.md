@@ -2,6 +2,38 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 3 sub-task 3.4 — Admin "All pieces" month-grouped + collapsible
+
+**Context:** Admin home's All Pieces list is a flat scroll. At 9 pieces today it's fine; at 50 it's long; at 365 it's unusable. Library already month-groups (flat, no collapse) — admin should too, but collapsed by default to keep the rest of the control-room scannable.
+
+**Decisions:**
+
+1. **Month-grouped `<details>`, current month open by default.** Each month becomes a `<details>` with `<summary>` = `{Month Year} · N pieces · ▸`. Pieces sort newest-first, so the first group is always the current (or most recent) month — that one gets `open`. Older months collapsed. Triangle indicator mirrors the 3.1 pattern in the same codebase (`▸` with `group-open:rotate-90`).
+
+2. **Filter auto-expands groups with matches; doesn't force-close.** When the filter input has text, any month containing a matching piece opens automatically. Groups with zero matches hide entirely (not just collapse — same as library's `group.style.display = visible ? '' : 'none'` pattern). When the filter clears, user-expanded groups stay expanded — we don't reset to "first open, rest closed". Fighting the user's explicit expand is annoying, and the default-on-load state is already correct for a fresh visit.
+
+3. **Not extracting a shared component with library.** Library and admin diverge on three axes: tag (`<section>` vs `<details>`), item content (library shows full piece cards with description + subject pill; admin shows compact stat rows with date · tier · voice · rounds · candidates · flagged), and collapse behaviour (library is always flat; admin collapses). A shared component would need slots + render props for near-zero reuse — the only truly-shared bit is the `MONTH_NAMES` array (4 lines). Keep parallel implementations. If a third consumer emerges, extract then.
+
+4. **Month-label computation stays inline in admin.astro.** Already inline in `src/pages/library/index.astro`. Duplicating the 12-element month-names array is cheaper than the import + test + maintenance cost of a `src/lib/format-month.ts`. The format is culturally stable (months don't rename); if we ever localise, both call sites switch together in one grep.
+
+5. **Tailwind `group-hover` rename: `group/row` in scoped rows.** Each piece row previously used `group-hover:text-zee-primary`. With the `<details class="group">` wrapper around the month container, Tailwind's default `group` selector would match the nearest ancestor — now the details, not the row. Renamed the row-level modifier to `group/row` (Tailwind's named-group syntax) so hover colour still applies to the anchor being hovered, not every anchor in an open month. Verified visually: opening a month doesn't light up every headline.
+
+**Trade-offs:**
+- A user who opens every month then types a filter won't see their old expand state restored when they clear the filter. Accepted — the alternative (remembering pre-filter open state) needs state tracking and isn't intuitive. Typing a filter is already explicit; clearing it restoring nothing is fine.
+- Month groups don't show per-month stats in the summary (e.g., how many rough / how many flagged). Could be added; not in 3.4 scope. The per-row tier pill still surfaces that inside an open group.
+- `data-month-count` attribute added on the count span but not yet consumed. Reserved for a future tweak (e.g., "N pieces · K flagged" in summary) — minor forward surface. Cheap to leave; trivially deletable if unused in 6 months.
+
+**Files:** EDIT [`src/pages/dashboard/admin.astro`](../src/pages/dashboard/admin.astro) — frontmatter month-group computation block (19 lines), template swap from flat `<ul>` to grouped `<details>` blocks, filter JS extended to hide/open month groups. EDIT [CLAUDE.md](../CLAUDE.md) (sub-task 3.4 entry under Area 3).
+
+**Verification:**
+- `pnpm build` clean.
+- Seeded 4 extra pieces across April / March / February locally. Curl'd admin page: 3 month-groups rendered — `April 2026 (5 pieces, open)`, `March 2026 (1 piece, closed)`, `February 2026 (1 piece, closed)`. Count strings singular/plural-aware.
+- Filter logic simulated against the 7 seeded pieces: `"qvc"` → 1 piece in April, April auto-opens, others hide; `"march"` → 1 in March, March auto-opens; `"2026-02"` → 1 in Feb, Feb auto-opens; `"nothingmatches"` → zero visible, all groups hidden, empty-state shows; empty filter (clear) → everything visible, user-expand state preserved.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-24: Area 3 sub-task 3.3 — Admin observer feed severity chips
 
 **Context:** Admin home shows 100 latest observer events chronologically. When something breaks at 2am UTC, the operator wants "what broke" first — scrolling past info-level metering and skipped-run chatter to find the one warn or escalation is the wrong shape. Add a filter at the top.
