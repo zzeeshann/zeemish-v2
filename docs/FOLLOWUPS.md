@@ -13,6 +13,61 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-24: reset-today.sh doesn't recount categories.piece_count after piece-id delete
+
+**Surfaced:** 2026-04-24 during operator-led cleanup of the duplicate 2026-04-24 piece (pieceId 159a972a). After wiping the piece's `piece_categories` row via `scripts/reset-today.sh --piece-id` pattern, the `information-asymmetry-markets` category chip on /library/ still showed "2" while only 1 piece remained. `categories.piece_count` is denormalised (per sub-task 2.1 — writer maintains, admin "Recount" button is the drift escape hatch) but 2.5's admin Recount UI is deferred. The script has no inline recount step, so every operator delete drifts the library chip count.
+
+**Hypothesis:** Add a recount step to `scripts/reset-today.sh` in BOTH modes (full-day reset and --piece-id reset) after the D1 DELETEs:
+
+```sql
+UPDATE categories
+SET piece_count = (SELECT COUNT(*) FROM piece_categories WHERE category_id = categories.id),
+    updated_at  = strftime('%s','now') * 1000;
+```
+
+Idempotent + reconciles historical drift. Also add an explicit `DELETE FROM piece_categories WHERE piece_id = ?` line to the script (currently handled at the DB layer, but naming it in the script makes intent clear).
+
+**Investigation hints when resumed:**
+- In-session manual fix for the 2026-04-24 drift was the exact UPDATE above, run via `wrangler d1 execute --remote`. 8 categories reconciled successfully.
+- `scripts/reset-today.sh` lines 171-180 (piece-id mode D1 wipe) and 235-240 (full-day mode) are the insertion points.
+- Update the header comment's "Tables touched" block to name piece_categories + the recount.
+- Docs: brief mention in RUNBOOK under "Reset today" + a DECISIONS entry (or closure of this FOLLOWUPS entry via an append to DECISIONS 2026-04-24 "Curator prompt enriched with recent-piece semantic context").
+
+**Priority:** low. Drift is cosmetic (library chip counter vs actual piece count); doesn't affect rendering or SQL joins. Risk scales with operator-led delete frequency — if deletes become routine, bump priority.
+
+---
+
+## [open] 2026-04-24: agents-worker server.ts SDK-typing baseline (25 errors)
+
+**Surfaced:** 2026-04-24 session noted the persistent "typecheck clean — 25 errors all in server.ts (pre-existing baseline)" shorthand I use on every agent-worker commit. Operator asked directly whether to fix; agreed to leave for now and log here.
+
+**Hypothesis:** The 25 errors in `agents/src/server.ts` are Cloudflare Agents SDK typing gaps — the SDK's exported types don't describe the `DurableObjectNamespace<T>` / `DurableObjectStub<T>` shape well enough for TypeScript to verify method calls like `.triggerDailyPiece()`, `.retryAudio()`, `.analyseZitaPatternsScheduled()`, etc. Code works at runtime; TypeScript just can't see the methods.
+
+Fix (when triggered):
+- Create `agents/src/types/agents-sdk.d.ts` with module augmentation declaring the agent methods on the DO stubs. Shape approximately:
+  ```ts
+  declare module 'agents' {
+    // augment DurableObjectNamespace<T> so .get().<method>() typechecks
+    // cleanest is per-agent interface for each agent class
+  }
+  ```
+- No runtime change, no `as any` casts, no 25 `@ts-expect-error` comments. Just declaring what the SDK didn't export.
+- One file, one commit. Expected ~30-60 min.
+
+**When to trigger:**
+- Before wiring a CI typecheck gate (currently ungated, so 25 errors are tolerated)
+- Next time server.ts is touched for substantive work (piggyback on real work)
+- If the noise ever obscures a real regression while investigating a bug
+
+**Investigation hints when resumed:**
+- Read `agents/node_modules/agents/dist/index.d.ts` to see the SDK's type exports.
+- The 25 errors cluster around two patterns: (a) `env.DIRECTOR.get(id)` returns `DurableObjectStub<undefined>`, not `DurableObjectStub<DirectorAgent>`; (b) calling `.triggerDailyPiece()` etc. on that stub triggers "property does not exist". Fix either upgrades the SDK's type annotations or augments them locally.
+- Historical mentions in DECISIONS / CLAUDE.md: "25 errors, all pre-existing server.ts SDK-typing" — these are the ones.
+
+**Priority:** low. Developer experience only; zero user-visible impact; no blocking effect on deploys.
+
+---
+
 ## [open] 2026-04-24: Per-round audit notes for interactives
 
 **Surfaced:** 2026-04-24 during Area 4 sub-task 4.1 schema design. InteractiveAuditor (sub-task 4.5) runs up to 3 revision rounds, same pattern as Integrator on daily pieces. Daily pieces persist per-round audit detail in `audit_results` (auditor / passed / score / notes / draft_id / piece_id / created_at) — operators can see the full revision history on the admin piece-detail page. Interactives currently persist only `revision_count` on the `interactives` row itself. Round-level notes (what the auditor flagged, what changed between rounds) are not captured.
