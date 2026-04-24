@@ -471,12 +471,14 @@ docs/handoff/           Original architecture + specs
 **Daily · Library · Dashboard · Account**
 
 ## Documentation index
+- `docs/PROJECT-BRIEF.md` — current-state project brief; paste-able into Claude project-level descriptions
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 16 agents, endpoints, secrets
 - `docs/SCHEMA.md` — all 18 D1 tables, 22 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
-- `docs/handoff/` — original specs (architecture, daily pieces, dashboard, project brief, instructions)
+- `docs/FOLLOWUPS.md` — known bugs and queued work (append-only)
+- `docs/handoff/` — frozen original specs from pre-launch (architecture, daily pieces, dashboard, instructions, founding doc)
 
 ## Remaining minor items
 - Voice contract .ts has belief line synced, but may drift — .md is canonical
