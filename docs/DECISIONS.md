@@ -2,6 +2,31 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-23 (late evening): Area 2 sub-task 2.5 — Admin categories page DEFERRED
+
+**Context:** Sub-task 2.5 of the Area 2 plan was an admin UI at `/dashboard/admin/categories/` with rename / merge / delete / lock controls, each action firing an `admin_category_*` observer event. Scoped and ready to build. Zishan called the deferral at the handoff point, before any 2.5 code was written.
+
+**Decision:** Defer. Do not drop.
+
+**Why:** The autonomous ethos runs this project. Categoriser's reuse-bias prevention (strong prompt + slug-collision fallback + ≥60 confidence floor) is the primary strategy for taxonomy health. Admin curation is the fallback for when the primary strategy doesn't hold. Shipping the fallback before observing the primary on real pieces would be (a) premature optimisation of a problem we haven't seen, (b) a subtle contradiction of "autonomous publisher" — the first admin UI for a brand-new agent says we expect to distrust it, and (c) a distraction from watching the system live its first real week. The system's bias is correct: watch, then intervene.
+
+**What's live and what's not:**
+- Live: `categories` + `piece_categories` tables (migration 0021), CategoriserAgent end-to-end, `src/lib/categories.ts` helpers, library filter at `/library/` and `/library/<slug>/`, `/categorise-trigger` admin endpoint for manual retag.
+- Not live: any UI for mutating category rows. In an emergency `wrangler d1 execute` is the lever (no audit trail, no reassign-across-piece-categories rewrite — operator hand-writes the SQL).
+
+**Unblock criteria:** (a) drift observed in production — Categoriser creates a category an operator wants renamed, or produces a second category that should have reused an existing one. (b) Catalogue reaches ~30 pieces (point at which the v0 taxonomy will likely need a pruning pass regardless of drift). Either triggers 2.5; whichever comes first.
+
+**Trade-offs accepted:**
+- No audit trail on `wrangler d1 execute` interventions between now and 2.5 landing. Acceptable because those interventions should be rare; if they become frequent, that's the unblock signal.
+- A bad category name set by Categoriser v1 persists forever in the URL (`/library/<slug>/`) until renamed. Acceptable for the same reason — if we need rename frequently, that's signal that the agent needs prompt tuning OR that 2.5 should land. We won't fix one-off ugliness with a deferred UI.
+- Reader-facing library URLs bake in today's taxonomy. If we later rename a category via the admin UI (when it lands), old bookmarks may 404 unless the UI preserves slug history. Flag for 2.5's design when it resumes.
+
+**Files:** EDIT [CLAUDE.md](../CLAUDE.md) (2.5 marked deferred with rationale), EDIT [docs/FOLLOWUPS.md](./FOLLOWUPS.md) (new `[observing]` entry with resumption hints).
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.4 — Library category filter
 
 **Context:** Data is in place (2.1 schema, 2.2 agent, 2.3 backfill — 7 categories across 9 pieces). 2.4 surfaces it. Readers get a chip bar on `/library/` to browse by category.

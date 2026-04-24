@@ -13,6 +13,33 @@ Format per entry:
 
 ---
 
+## [observing] 2026-04-23: Admin categories page — deferred from Area 2 plan
+
+**Surfaced:** 2026-04-23 late evening during Area 2 execution. Original sub-task 2.5 scope: `/dashboard/admin/categories/` with name · slug · piece count · lock toggle · [Rename] [Merge] [Delete] per row, each action firing an `admin_category_*` observer event. Deliberately deferred — not dropped.
+
+**Why deferred:** Categoriser's reuse-bias prevention (strong prompt discipline + slug-collision fallback + ≥60 confidence floor) is the primary strategy for keeping the taxonomy clean. Admin curation tools are the fallback for when the bias doesn't hold. Building the fallback before observing the system on real pieces contradicts the autonomous ethos — we'd be answering "how do I fix bad categorisation?" before knowing whether it happens.
+
+**Current state — data layer is complete, UI is not:**
+- `categories` + `piece_categories` tables (migration 0021) shipped ✓
+- CategoriserAgent writes through them ✓
+- `src/lib/categories.ts` read helpers (`getCategories`, `getCategoryBySlug`, `getPieceIdsInCategory`) shipped ✓
+- Reader-facing library filter (`/library/<slug>/`) shipped ✓
+- `/categorise-trigger` admin endpoint exists for manual retag ✓
+- Admin UI (merge / rename / delete / lock) **not built**
+
+**Unblock when:** (a) drift becomes observable — Categoriser creates a category that an operator wants to rename or merge, OR (b) the catalogue reaches ~30 pieces (point at which the 7-category v0 taxonomy will likely need a pruning pass regardless), whichever comes first. In the interim, `wrangler d1 execute` is the emergency lever — `UPDATE categories SET name = …` or `DELETE FROM piece_categories WHERE category_id = …` work but don't audit-log.
+
+**Investigation hints when resumed:**
+- Reference pattern: `src/pages/dashboard/admin/settings.astro` (admin-gated SSR page) + `src/pages/api/dashboard/admin/settings.ts` (admin-gated REST endpoint that fires `admin_settings_changed` observer event).
+- Merge semantics: SQL transaction that rewrites `piece_categories.category_id` from source → target, then DELETEs source row, then adjusts `piece_count` on target (or recomputes). Guard against merging a category into itself.
+- Delete semantics: gate on `piece_count = 0`. Don't offer DELETE on a populated category — force a merge first.
+- Lock semantic is currently inert for CategoriserAgent (it only INSERTs, never DELETEs or re-tags). Admin sets `locked = 1`; agent respects it only if a future code path tries to reassign (not shipped). Documented in `agents/src/categoriser.ts` header.
+- Observer events to fire: `admin_category_renamed`, `admin_category_merged`, `admin_category_deleted`, `admin_category_locked`, `admin_category_unlocked`. Mirror the shape of `admin_settings_changed`.
+
+**Priority:** low until drift is observed, then medium.
+
+---
+
 ## [open] 2026-04-23: CDN cache invalidation on per-beat audio regen
 
 **Surfaced:** 2026-04-23 during live verification of the admin per-beat Regenerate button (shipped in commit `ce3de81`, DECISIONS 2026-04-23 "Provider-agnostic TTS normaliser + admin per-beat audio regen").
