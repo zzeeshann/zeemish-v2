@@ -2,6 +2,52 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.3 — `<quiz-card>` Web Component
+
+**Context:** Sub-task 4.2 set up the route to emit `<quiz-card data-interactive-id="…">` with a JSON payload child script + `<noscript>` Q&A fallback. 4.3 defines the custom element that upgrades the inert markup into an interactive quiz with a results screen.
+
+**Decisions:**
+
+1. **Progressive-enhancement contract: `<noscript>` fallback is the baseline, JS upgrade adds interactivity.** When JS is off (or the script fails to load), the element stays inert and the browser surfaces the `<noscript>` content — a readable `<ol>` with questions, options, and "Answer: …" explanations. When JS runs, `connectedCallback` appends a new `.quiz` container as a sibling of the `<script>` + `<noscript>` children; the browser naturally hides `<noscript>` content when JS is on, so no imperative hide. The server-rendered payload is the single source of truth that both states read.
+
+2. **Custom element registration over Shadow DOM.** Matches the existing pattern (`<lesson-shell>`, `<audio-player>`, `<zita-chat>`, `<made-drawer>` all use light DOM + `customElements.define`). Shadow DOM would isolate styles but the site has no style leakage problem and the existing `quiz.css` selectors are scoped enough (`.quiz`, `.quiz-option`, `.quiz-review-item`). Light DOM also keeps the `<script>` JSON payload query trivially addressable.
+
+3. **Direct import, not `register.ts`.** `register.ts` bundles the five components daily-piece pages need. Interactive pages don't need any of them — so `src/pages/interactives/[slug].astro` imports `quiz-card` directly via `<script>`. Keeps the interactive-page bundle minimal.
+
+4. **JSON payload via `<script type="application/json">` child, not a `data-*` attribute.** Attributes work for small payloads but stringifying 3–5 questions × 4 options × ~200-char explanations overflows the attribute ergonomics (escaping, line breaks, readability on View Source). `<script type="application/json">` is the standard pattern for server-to-client JSON handoff — browsers don't execute it, the payload preserves formatting, and it reads cleanly in DevTools.
+
+5. **Per-question local state; no server round-trips between questions.** User clicks an option → `selections[currentIndex] = optionIndex` → re-render the current question with the new selected state. Next button advances `currentIndex` + re-renders. The only network calls are the `started` POST on mount and the `completed` POST on results render. Zero latency between question interactions. A wrong answer doesn't penalise the user mid-quiz — correctness is revealed only on the results screen, so the flow feels low-stakes.
+
+6. **Results screen is the only reveal of correctness.** Per-question borders colour-code (green left-border for correct, red-ish for wrong); each item shows the user's answer and — only when wrong — the correct answer plus the explanation. Correct answers get the explanation too (reinforces the reasoning, not just the mark). No "try again" button — if the user wants to retry, they reload. Spec called out "no auto-routing — reader chooses"; the "Back to library" link in the outer route layout is the only exit affordance.
+
+7. **Mount POST fires once per mount (idempotent-adjacent).** Guarded by a `startedFired` boolean so a dev-HMR remount doesn't double-POST in the same connectedCallback pass. Not strictly idempotent across navigations (a user who leaves and comes back generates two `interactive_started` rows) — the 4.7 endpoint aggregates at query time, so this is fine.
+
+8. **Completion POST fires on results render with `score` + `per_question_correctness` array.** Shape matches the 4.1 schema for `interactive_engagement`: `{interactive_id, event_type, score, per_question_correctness: [1,0,1,1]}`. Correctness is an array of 0/1 ints in question order — not option indices, not "correct"/"wrong" strings — so aggregation queries can SUM across runs to see which questions are hardest without re-parsing each row. `keepalive: true` on the fetch so it survives a page-unload race if the user navigates away immediately after results render.
+
+9. **404 is the happy path for 4.3 only.** The endpoint lands in 4.7. Until then, the POSTs return 404 Not Found, which the component swallows via `.catch(() => {})`. The UI doesn't need to know whether tracking succeeded — the reader's experience is identical. Once 4.7 builds the endpoint, the calls start landing without a client change. No feature flag, no conditional — the simplest thing that works both before and after 4.7.
+
+10. **Accessibility: radiogroup pattern on the option list.** Options are `<button>` elements (keyboard + screen-reader friendly by default) inside a container with `role="radiogroup"` and `aria-label` = question text. Each option is `role="radio"` + `aria-checked="true"|"false"` to match native radio semantics even though the elements are buttons — `<input type="radio">` would pass semantically but would fight the styling. Focus-visible outlines inherit the primary green. 44px min tap targets on buttons and options.
+
+11. **Styling mirrors the existing palette.** `#1A6B62` primary, `#E8E4DE` border, `#F5F2ED` summary surface, `#B54747` for the wrong-answer accent (same family as existing error reds elsewhere). No new colour tokens. Rounded corners match `.beat-nav-btn`. Typography scale follows existing `.beats.css` h2 / p rules.
+
+**Trade-offs:**
+- Re-rendering the whole container on every state change is wasteful for a 4-question quiz but below any perceptible latency. At 12+ questions it would want a more granular update — not now.
+- No retry button means a user who wants to try again must reload. Simpler code, slightly worse UX. Revisit if readers complain.
+- `keepalive: true` on fetch has a 64KB payload limit — fine here (our payloads are ~200 bytes).
+- `startedFired` is a per-element boolean, not per-session. A reader who reloads mid-quiz generates two `started` rows. Acceptable — aggregation via DISTINCT user_id handles it.
+- Under JS-enabled but with the Web Component script failing to load (404 on quiz-card.ts chunk), the user sees the eyebrow + title + concept + back link and NOTHING else — `<noscript>` doesn't surface because JS is on. Mitigation would be a small "Interactive unavailable — refresh to try again" message that's hidden when the element upgrades. Not adding in v1 — script-load failures are rare on Astro-bundled assets, and the page still has a visible way forward via the back link.
+
+**Verified in preview (localhost:4321):**
+- Custom element registers: `customElements.get('quiz-card')` defined; container renders with `.quiz-counter`, `.quiz-question`, 4 `.quiz-option` buttons.
+- Selection works: clicking option 2 sets `data-selected`, enables `.quiz-next` (was disabled with no selection).
+- Navigation works: Q1 → Q2 → Q3 → Q4 → Results, counter increments correctly, "Next question" becomes "See results" on the last question.
+- Results render: "3 of 4 correct" with the deliberate 3/4 pattern; per-question review cards show ✓ on correct rows, ✗ on the wrong row, "Correct answer" label only on the wrong row, explanations on all rows.
+- POST shapes captured via fetch spy: `interactive_started` POSTs on mount with `{interactive_id, event_type}`; `interactive_completed` POSTs on results with `{interactive_id, event_type, score: 3, per_question_correctness: [1,0,1,1]}`. Both return 404 — expected, swallowed silently. Payload shape matches the 4.1 schema exactly.
+- Screenshot verified: question state + results state render cleanly, colour coding on review cards (green/red left-border), primary green button, 44px tap targets.
+- `pnpm build` passes.
+
+**Rollback:** `git revert <commit>`. Removing `src/interactive/quiz-card.ts` + `src/styles/quiz.css` + the import line in the route file is a clean undo — the rest of the interactive page (title / concept / `<noscript>` fallback) keeps working.
+
 ## 2026-04-24: Area 4 sub-task 4.2 — content collection + route
 
 **Context:** Area 4 interactives are 1:1 with pieces but meant to work standalone. Sub-task 4.1 set up the DB surface; 4.2 picks where the actual content lives and renders it at a URL. The choice: git-versioned content collection (Option A) vs D1 `interactives.content_json` (Option B). Both paths are viable. The question is which better fits "useful standalone, independent, fixable on their own" and the established publishing architecture.

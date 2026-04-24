@@ -1,6 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import BaseLayout from '../../layouts/BaseLayout.astro';
+import '../../styles/quiz.css';
 
 export async function getStaticPaths() {
   const all = await getCollection('interactives');
@@ -65,4 +66,8 @@ const contentJson = JSON.stringify(data.content);
       <a href="/library/" class="hover:text-zee-primary transition-colors">← Back to library</a>
     </p>
   </article>
+
+  <script>
+    import '../../interactive/quiz-card';
+  </script>
 </BaseLayout>
