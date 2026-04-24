@@ -2,6 +2,51 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 3 sub-task 3.1 — Compress admin piece-detail page
+
+**Context:** `/dashboard/admin/piece/<date>/<slug>/` is dense — timeline, every audit round expanded, up to 50 scanner candidates, all observer events, audio rows, the raw-JSON dumps, and (on traffic-heavy pieces) 40+ Zita messages. At ~9 pieces today the wall is tolerable; at 50 it's painful; at 365 it's unusable. First sub-task of the Area 3 arc.
+
+**Decisions:**
+
+1. **Compact summary card at top; forensic sections collapsed by default.** Single flex-wrap stat row now carries: Voice · words · beats · rounds · Facts · Audio status · event count · Zita message count · candidate count · Published · quality flag. Everything the operator previously had to scroll to pick up is now a glance at the top. The forensic sections (pipeline timeline, audit rounds, audio, scanner candidates, Zita, observer events) each wrap in a native `<details>` with the section heading as its `<summary>`, plus a status badge carrying per-section counts. Raw data dumps were already `<details>` — left untouched.
+
+2. **Audio section smart-opens when `!audioComplete`.** Everywhere-fine is the scannable default; broken is where we save the click. An operator landing on a page because "something's wrong with audio" should not have to click into the Audio section to reach the Continue / Start over / per-beat Regenerate affordances. When `has_audio = 1`, the section collapses with a "published ✓" status badge. Every other state (partial rows, failed step, pending, zero rows) opens by default. Implementation: `<details open={!audioComplete}>`.
+
+3. **Status badges in every `<summary>` — honest at a glance.** Each section header carries enough information to decide whether to expand:
+   - Pipeline timeline — `N steps`
+   - Audit rounds — `N rounds · final voice X/100`
+   - Audio — `complete` / `partial (N/M beats)` / `failed` / `pending`
+   - Scanner candidates — `N candidates · picked: "headline"`
+   - Questions from readers — `N convos · M messages`
+   - Observer events — `N events · K warn · L escalation` (severities coloured — escalation in gold, warn in text, info-only in muted)
+
+4. **Native `<details>` over any JS accordion.** Zero runtime cost, keyboard-navigable for free, matches the existing "How this was made" drawer pattern on reader daily-piece pages. Session-local expand state is the native behaviour — no persistence needed per the sub-task spec. Triangle indicator (`▸` with `group-open:rotate-90`) mirrors the existing per-step timeline details pattern already in the same file.
+
+5. **Zita action row (Run synthesis button, All Zita activity link) moves inside the details body.** Previously a right-justified action row lived in the section header. Putting interactive elements inside `<summary>` fights the click-to-toggle interaction. Moved into the first line of the collapsed body — one click to open the section already surfaces the row, and the expand itself is now the first-step of running synthesis.
+
+6. **Retry button IDs and JS logic untouched.** `audio-retry-btn`, `audio-retry-fresh-btn`, `zita-synth-btn`, `.audio-regen-beat-btn` — all still present, all still in the DOM regardless of `<details>` open state, so the `addEventListener` wires at page load work unchanged. Clicking them still requires the section to be open, which is why Audio smart-opens when broken.
+
+**Trade-offs:**
+- The eyebrow (tier label above the headline) and the stat row both carry "Audio {status}" adjacent to each other — mild redundancy. Accepted: the eyebrow carries editorial tier (Polished / Solid / Rough / LOW), the stat chip carries operational audio state. Different axes, both scannable.
+- Summary badge counts don't reflect filter state — at 50+ candidates or 40+ Zita messages, clicking in still requires reading the full expanded list. Text filter for these is out of scope for 3.1; it belongs in a later sub-task if it becomes painful.
+- Previously-visible "Observer events this day" detail is one click away now. Justified: at multi-per-day cadence the events list is already scoped by piece_id (migration 0020, 2026-04-22) so scrolling through legacy day-window clutter was itself a partial UX regression; 3.2 tightens the scope further.
+- Stat row wraps on mobile — verified via flex-wrap gap-y; slightly taller hero block, no horizontal overflow.
+
+**Files:** EDIT [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/[date]/[slug].astro) (stat-row extension + 6 section wraps + summary derivations). EDIT [CLAUDE.md](../CLAUDE.md) (new Area 3 section).
+
+**Verification:**
+- `pnpm build` clean.
+- Curl-based render check against seeded local D1 (admin session cookie, 2026-04-17 QVC piece with 5 pipeline steps / 3 audits / 3 candidates / 3 zita rows / 3 observer events spread across severities):
+  - 6 top-level section `<details>` present + 3 raw-data `<details>` = 9 total.
+  - Status badges render correctly on every section.
+  - Audio OPEN when `has_audio=0`, CLOSED when `has_audio=1` — verified by flipping the column and re-curling.
+  - Stats row reads: `Voice 88/100 · 1400 words · 6 beats · 1 round · Facts passed · Audio pending · 3 events · 3 Zita msgs · 3 candidates · Published …`.
+- Retry button JS untouched; IDs still wire.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-23 (late evening): Area 2 sub-task 2.6 — "13 → 14 agents" cascade
 
 **Context:** Categoriser shipped in 2.2, seeded in 2.3, surfaced in 2.4. Every living doc that named the roster count is now wrong. One atomic sweep to catch all of them.

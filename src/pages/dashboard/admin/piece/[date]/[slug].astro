@@ -395,6 +395,23 @@ const audioComplete = piece?.has_audio === 1;
 // pieces from before beat_count was populated).
 const expectedBeats = piece?.beat_count ?? audioRows.length;
 
+// Compact summary values — computed once, consumed in the top stat row
+// and in each collapsible section's <summary> so the operator can scan
+// everything worth knowing before expanding any forensic block.
+const audioStatusLabel: string = audioComplete
+  ? 'complete'
+  : audioRows.length > 0
+    ? `partial (${audioRows.length}/${expectedBeats})`
+    : audioFailureStep
+      ? 'failed'
+      : 'pending';
+const eventsWarn = observerEvents.filter((e) => e.severity === 'warn').length;
+const eventsEscalation = observerEvents.filter((e) => e.severity === 'escalation').length;
+const zitaTotalMsgs = zitaMessages.length;
+const finalRound = rounds[rounds.length - 1];
+const finalVoice: number | null | undefined = finalRound?.voice?.score;
+const pickedHeadline: string | null = pickedCandidate?.headline ?? null;
+
 function publishedDisplay(): string {
   if (!piece?.published_at) return '';
   const d = new Date(piece.published_at);
@@ -435,7 +452,16 @@ function publishedDisplay(): string {
           {piece.voice_score != null && <><span>Voice {piece.voice_score}/100</span><span class="opacity-40">·</span></>}
           {piece.word_count != null && <><span>{piece.word_count} words</span><span class="opacity-40">·</span></>}
           {piece.beat_count != null && <><span>{piece.beat_count} beats</span><span class="opacity-40">·</span></>}
+          {rounds.length > 0 && <><span>{rounds.length} round{rounds.length === 1 ? '' : 's'}</span><span class="opacity-40">·</span></>}
           {piece.fact_check_passed != null && <><span>Facts {piece.fact_check_passed ? 'passed' : 'failed'}</span><span class="opacity-40">·</span></>}
+          <span>Audio {audioStatusLabel}</span>
+          <span class="opacity-40">·</span>
+          <span>{observerEvents.length} event{observerEvents.length === 1 ? '' : 's'}</span>
+          <span class="opacity-40">·</span>
+          <span>{zitaTotalMsgs} Zita msg{zitaTotalMsgs === 1 ? '' : 's'}</span>
+          <span class="opacity-40">·</span>
+          <span>{candidates.length} candidate{candidates.length === 1 ? '' : 's'}</span>
+          <span class="opacity-40">·</span>
           <span>Published {publishedDisplay()}</span>
           {piece.quality_flag === 'low' && <><span class="opacity-40">·</span><span class="text-zee-gold font-medium">FLAGGED LOW</span></>}
         </p>
@@ -453,8 +479,15 @@ function publishedDisplay(): string {
       <!-- Pipeline timeline -->
       {timeline.length > 0 && (
         <section class="mb-10">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Pipeline timeline</h2>
-          <ol class="space-y-1.5">
+          <details class="group">
+            <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Pipeline timeline</h2>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span>{timeline.length} step{timeline.length === 1 ? '' : 's'}</span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <ol class="space-y-1.5">
             {timeline.map((s) => {
               const ok = s.status === 'done';
               const failed = s.status === 'failed' || s.status === 'error';
@@ -495,17 +528,23 @@ function publishedDisplay(): string {
                 </li>
               );
             })}
-          </ol>
+            </ol>
+          </details>
         </section>
       )}
 
       <!-- Audit rounds -->
       {rounds.length > 0 && (
         <section class="mb-10">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
-            Audit rounds <span class="text-zee-muted normal-case tracking-normal ml-1">({rounds.length})</span>
-          </h2>
-          <div class="space-y-4">
+          <details class="group">
+            <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Audit rounds</h2>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span>{rounds.length} round{rounds.length === 1 ? '' : 's'}{finalVoice != null && <> · final voice {finalVoice}/100</>}</span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <div class="space-y-4">
             {rounds.map((r, i) => {
               const isFinal = i === rounds.length - 1;
               const voiceVio = parseStringArray(r.voice?.notes ?? null);
@@ -586,28 +625,36 @@ function publishedDisplay(): string {
                 </div>
               );
             })}
-          </div>
+            </div>
+          </details>
         </section>
       )}
 
       <!-- Audio -->
+      {/* Smart-open when !audioComplete so retry affordance is one click away
+          on the broken path. Collapsed when audio is complete — the stat row
+          at the top already surfaces "Audio complete". */}
       <section class="mb-10">
-        <div class="flex items-baseline justify-between gap-4 mb-4">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Audio</h2>
-          {audioComplete ? (
-            <span class="text-xs text-zee-muted tabular-nums">
-              {audioRows.length} beat{audioRows.length === 1 ? '' : 's'} · {totalAudioChars.toLocaleString()} chars · <span class="text-zee-primary">published ✓</span>
+        <details class="group" open={!audioComplete}>
+          <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Audio</h2>
+            <span class="flex items-center gap-2 text-xs tabular-nums">
+              {audioComplete ? (
+                <span class="text-zee-muted">
+                  {audioRows.length} beat{audioRows.length === 1 ? '' : 's'} · {totalAudioChars.toLocaleString()} chars · <span class="text-zee-primary">published ✓</span>
+                </span>
+              ) : audioRows.length > 0 ? (
+                <span class="text-zee-gold">
+                  {audioRows.length}/{expectedBeats} beats · partial
+                </span>
+              ) : (
+                <span class="text-zee-muted">
+                  {audioFailureStep ? 'failed' : 'pending'}
+                </span>
+              )}
+              <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
             </span>
-          ) : audioRows.length > 0 ? (
-            <span class="text-xs text-zee-gold tabular-nums">
-              {audioRows.length}/{expectedBeats} beats · partial
-            </span>
-          ) : (
-            <span class="text-xs text-zee-muted">
-              {audioFailureStep ? 'failed' : 'pending'}
-            </span>
-          )}
-        </div>
+          </summary>
 
         {/* Row listing — shown whenever any rows exist. Each row has a
             per-beat "Regenerate" button that deletes one R2 object + one
@@ -711,17 +758,26 @@ function publishedDisplay(): string {
               <strong class="text-zee-text">Start over</strong> wipes all existing clips + D1 rows and regenerates every beat from scratch.{audioComplete && ' Readers will briefly have no audio until the pipeline completes.'}
             </p>
           )}
-        </div>
+          </div>
+        </details>
       </section>
 
       <!-- Scanner candidates -->
       {candidates.length > 0 && (
         <section class="mb-10">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">
-            Scanner candidates <span class="text-zee-muted normal-case tracking-normal ml-1">({candidates.length})</span>
-          </h2>
-          <p class="text-sm text-zee-muted mb-4">Sorted by teachability score. Picked candidate marked with a teal dot.</p>
-          <ul class="divide-y divide-zee-border/60">
+          <details class="group">
+            <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Scanner candidates</h2>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span>
+                  {candidates.length} candidate{candidates.length === 1 ? '' : 's'}
+                  {pickedHeadline && <> · picked: "{pickedHeadline.length > 60 ? pickedHeadline.slice(0, 60) + '…' : pickedHeadline}"</>}
+                </span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <p class="text-sm text-zee-muted mb-4">Sorted by teachability score. Picked candidate marked with a teal dot.</p>
+            <ul class="divide-y divide-zee-border/60">
             {[pickedCandidate, ...otherCandidates].filter((c): c is CandidateRow => !!c).map((c) => {
               const isPicked = c.selected === 1;
               return (
@@ -747,16 +803,23 @@ function publishedDisplay(): string {
                 </li>
               );
             })}
-          </ul>
+            </ul>
+          </details>
         </section>
       )}
 
       <!-- Zita conversations for this piece -->
       {zitaConvos.length > 0 && (
         <section class="mb-10">
-          <div class="flex items-baseline justify-between gap-4 mb-4">
-            <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Questions from readers</h2>
-            <div class="flex items-center gap-4 text-xs">
+          <details class="group">
+            <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Questions from readers</h2>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span>{zitaConvos.length} convo{zitaConvos.length === 1 ? '' : 's'} · {zitaTotalMsgs} message{zitaTotalMsgs === 1 ? '' : 's'}</span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <div class="flex items-center gap-4 text-xs mb-4">
               <button
                 id="zita-synth-btn"
                 data-date={date}
@@ -765,8 +828,7 @@ function publishedDisplay(): string {
               <span id="zita-synth-status" class="text-zee-muted"></span>
               <a href="/dashboard/admin/zita/" class="text-zee-primary hover:underline">All Zita activity →</a>
             </div>
-          </div>
-          <div class="space-y-3">
+            <div class="space-y-3">
             {zitaConvos.map((c) => (
               <details class="p-4 rounded-xl border border-zee-border group">
                 <summary class="cursor-pointer list-none">
@@ -791,15 +853,27 @@ function publishedDisplay(): string {
                 </div>
               </details>
             ))}
-          </div>
+            </div>
+          </details>
         </section>
       )}
 
       <!-- Observer events -->
       {observerEvents.length > 0 && (
         <section class="mb-10">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted mb-4">Observer events this day</h2>
-          <div class="space-y-3">
+          <details class="group">
+            <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Observer events this day</h2>
+              <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+                <span>
+                  {observerEvents.length} event{observerEvents.length === 1 ? '' : 's'}
+                  {eventsWarn > 0 && <> · <span class="text-zee-text">{eventsWarn} warn</span></>}
+                  {eventsEscalation > 0 && <> · <span class="text-zee-gold">{eventsEscalation} escalation</span></>}
+                </span>
+                <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+              </span>
+            </summary>
+            <div class="space-y-3">
             {observerEvents.map((e) => (
               <div class={`p-4 rounded-xl border ${
                 !e.acknowledged_at
@@ -831,7 +905,8 @@ function publishedDisplay(): string {
                 )}
               </div>
             ))}
-          </div>
+            </div>
+          </details>
         </section>
       )}
 
