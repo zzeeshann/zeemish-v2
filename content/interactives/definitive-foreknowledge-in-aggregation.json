@@ -1,0 +1,70 @@
+{
+  "slug": "definitive-foreknowledge-in-aggregation",
+  "type": "quiz",
+  "title": "Definitive Foreknowledge in Aggregation",
+  "concept": "How consensus mechanisms that synthesize distributed uncertainty break when one participant possesses predetermined outcomes rather than probabilistic beliefs.",
+  "interactiveId": "a52c3855-7b34-4137-8327-6c2d57ecd0fe",
+  "sourcePieceId": "d047cd76-6e35-42ec-b8ed-35d675c42339",
+  "publishedAt": 1777057066997,
+  "voiceScore": 90,
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "What structural property distinguishes foreknowledge from superior analysis?",
+        "options": [
+          "Foreknowledge comes from accessing restricted sources while analysis uses public data",
+          "Foreknowledge reflects certainty about a state that already exists but hasn't been revealed; analysis reflects refined probability estimates about uncertain futures",
+          "Foreknowledge requires insider status while analysis requires only expertise",
+          "Foreknowledge produces higher accuracy rates than analysis over repeated trials"
+        ],
+        "correctIndex": 1,
+        "explanation": "Foreknowledge means the outcome is already determined—a decision has been made, a plan exists, a state is fixed—but not yet observable to others. Analysis operates on genuine uncertainty. The difference isn't access or skill; it's whether the future state is already settled."
+      },
+      {
+        "question": "A committee votes on budget allocations by having members privately estimate project success rates, then averages those estimates. One member has already decided which projects she will veto regardless of the vote. What happens to the averaged estimate?",
+        "options": [
+          "The estimate becomes more accurate because her certainty pulls the average toward the true outcome",
+          "The estimate reflects aggregated belief about uncertain futures, but one input is certainty about a fixed decision, so the output is neither pure consensus nor pure foreknowledge—it is uninterpretable",
+          "Other members detect her certainty through confident language and adjust their estimates to match",
+          "The estimate becomes less accurate because her bias skews the average away from the true probabilities"
+        ],
+        "correctIndex": 1,
+        "explanation": "The output loses its meaning. The committee thinks it has synthesized distributed uncertainty into collective wisdom. Actually, it has blended probability estimates with a known fact. The number produced cannot be read as 'what the group expects' because one input was not an expectation."
+      },
+      {
+        "question": "Why do mechanisms that reward accuracy fail to distinguish foresight from foreknowledge until after many rounds?",
+        "options": [
+          "Both produce identical behavior in single instances—confident commitment—and only repeated perfection across improbable outcomes reveals the pattern",
+          "Participants with foreknowledge deliberately mimic the behavior of skilled forecasters to avoid detection",
+          "The mechanisms lack sufficient data collection infrastructure to track individual accuracy patterns",
+          "Legal restrictions prevent investigating whether participants had access to non-public information"
+        ],
+        "correctIndex": 0,
+        "explanation": "One correct bold prediction looks like skilled analysis. Five in a row on low-probability outcomes looks like access. Before the pattern emerges, confidence appears the same whether it comes from reasoning or certainty. The system cannot tell them apart until the statistical impossibility becomes visible."
+      },
+      {
+        "question": "A reputation system ranks contributors by how often their stated confidence levels match actual outcome frequencies. A participant knows in advance which regulatory approvals will be granted because they draft the approval memos. How does this break the system's function?",
+        "options": [
+          "The system rewards them for calibration, but calibration measures whether stated confidence matches true probability—their confidence does not match probability because they face no probability",
+          "Other users copy their confidence levels, creating a feedback loop that distorts the entire ranking",
+          "The system detects their perfect calibration as statistically anomalous and flags their account",
+          "Their high rank discourages new participants who assume they cannot compete with such accuracy"
+        ],
+        "correctIndex": 0,
+        "explanation": "Calibration systems assume participants estimate likelihoods and test whether those estimates align with frequencies. Someone with foreknowledge is not estimating; they are reporting. The system certifies their reporting as excellent estimation, rendering the credential meaningless as a signal of forecasting skill."
+      },
+      {
+        "question": "Three analysts assess whether a merger will receive antitrust clearance. Two use public filings, legal precedent, and agency staffing patterns. One knows the lead regulator's preliminary decision from a leaked memo. What happens to the value of their collective assessment?",
+        "options": [
+          "The collective assessment becomes more valuable because it incorporates information the public lacks",
+          "The assessment loses value as a forecast because it no longer represents what informed observers expect given available evidence—it represents what one person knows from unavailable evidence",
+          "The two analysts without the memo improve their models by observing the third analyst's confidence",
+          "The assessment's value remains unchanged because the market will eventually learn the regulator's decision anyway"
+        ],
+        "correctIndex": 1,
+        "explanation": "The output's value came from synthesizing what multiple informed people infer from shared evidence. When one input is leaked certainty, the collective assessment no longer means 'what the evidence suggests.' A user consulting it thinks they are seeing inference; they are seeing a fact disguised as inference."
+      }
+    ]
+  }
+}
