@@ -1,0 +1,70 @@
+{
+  "slug": "amplification-at-bottlenecks",
+  "type": "quiz",
+  "title": "Amplification at Bottlenecks",
+  "concept": "How structural constraints in production chains can magnify small upstream shocks into disproportionate downstream impacts.",
+  "interactiveId": "dd72534c-dd0d-4e49-bfb8-5c0c18e5320e",
+  "sourcePieceId": "b6f857ea-f75a-474d-a933-a029238c05e5",
+  "publishedAt": 1777063640416,
+  "voiceScore": 88,
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "A raw material's price increases by 15%, but the finished product's cost rises by 40%. What structural feature most likely caused this amplification?",
+        "options": [
+          "The raw material represents a large share of the finished product's cost",
+          "A processing step with fixed capacity ratios sits between raw material and finished product",
+          "Consumer demand for the finished product is highly elastic",
+          "Multiple suppliers compete in the raw material market"
+        ],
+        "correctIndex": 1,
+        "explanation": "When a processing step has fixed capacity ratios—unable to flexibly adjust what it produces—it creates a bottleneck. Price signals get amplified because the constraint can't absorb the shock by shifting output. The first option would actually dampen amplification: if the raw material is 80% of cost, a 15% material rise would translate nearly linearly, not amplify."
+      },
+      {
+        "question": "Two companies depend equally on the same input that suddenly doubles in price. One company raises prices and continues operating; the other cuts output by 30%. What underlying difference best explains the divergence?",
+        "options": [
+          "The surviving company hedged its input costs with futures contracts",
+          "The surviving company's customers have fewer alternatives and lower price sensitivity",
+          "The struggling company has older, less efficient equipment",
+          "The struggling company has higher labor costs"
+        ],
+        "correctIndex": 1,
+        "explanation": "When customers lack alternatives and are less price-sensitive, a company can pass cost shocks through without losing volume. The struggling company likely serves price-sensitive customers who defect when prices rise, forcing output cuts. Hedging (option A) only delays the problem unless renewed at old prices. Equipment efficiency affects baseline costs but not the ability to pass through a shock."
+      },
+      {
+        "question": "A producer locks in input prices six months ahead using financial contracts. Why might this strategy backfire during a price spike?",
+        "options": [
+          "Competitors without contracts can undercut on price if the spike reverses quickly",
+          "The contracts become worthless if the supplier goes bankrupt",
+          "Locked prices prevent the company from benefiting when input costs fall",
+          "Financial contracts require posting collateral that ties up working capital"
+        ],
+        "correctIndex": 0,
+        "explanation": "If the price spike is short-lived and competitors buy at spot prices, the company with locked-in high prices becomes uncompetitive when the market normalizes. They're paying above-market rates while others aren't. Option C describes opportunity cost, not backfire—you're protected from rises even if you miss falls. Option D is real but secondary; the strategic risk is being locked into high prices in a falling market."
+      },
+      {
+        "question": "A system depends on an input that represents 25% of total operating cost. That input's price rises 20%. Under what condition does the system face collapse rather than mere margin compression?",
+        "options": [
+          "The system's customers are individuals rather than businesses",
+          "The system was already operating near breakeven before the shock",
+          "The input has no substitutes and the system cannot raise prices enough to offset the increase",
+          "The system's competitors face the same input price increase"
+        ],
+        "correctIndex": 2,
+        "explanation": "Collapse requires both inability to substitute AND inability to pass through costs. If an input is irreplaceable and customers won't pay enough to cover the new cost structure, the system cannot sustain operations. Option B (near breakeven) makes collapse more likely but isn't sufficient alone—if you can raise prices or switch inputs, you survive. Option D actually helps: if everyone's costs rise equally, pricing power improves because no competitor can undercut."
+      },
+      {
+        "question": "Why do multi-stage production chains often amplify price volatility from raw material to finished good, even when each stage adds only modest markup?",
+        "options": [
+          "Each stage applies its percentage markup to an increasingly large base price",
+          "Each stage faces its own capacity constraints that prevent flexible adjustment to input shocks",
+          "Transportation costs compound at each stage, multiplying the initial shock",
+          "Finished goods have higher profit margins than raw materials, so percentage changes feel larger"
+        ],
+        "correctIndex": 1,
+        "explanation": "Amplification comes from each stage's inability to absorb shocks smoothly. When Stage 2 can't easily increase output of the specific refined product Stage 3 needs, a small raw material shortage creates a bidding war at Stage 2, spiking prices. Stage 3 then faces its own constraints. Sequential bottlenecks multiply rather than dampen volatility. Option A describes compounding markups, which would only grow the shock linearly, not amplify it disproportionately."
+      }
+    ]
+  }
+}
