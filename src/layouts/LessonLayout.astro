@@ -21,9 +21,18 @@ interface Props {
   qualityFlag?: 'low';
   /** Optional one-line description for social-share meta. */
   description?: string;
+  /** Optional interactive metadata for the last-beat prompt (sub-task 4.6).
+   *  When present, <lesson-shell> reads it from the embedded JSON
+   *  script tag and surfaces a link to /interactives/<slug>/ on the
+   *  last beat, above the Finish button. */
+  interactive?: {
+    slug: string;
+    title: string;
+    questionCount: number | null;
+  } | null;
 }
 
-const { title, estimatedTime, audioBeats, beatCount, subject, date, pieceId, voiceScore, qualityFlag, description } = Astro.props;
+const { title, estimatedTime, audioBeats, beatCount, subject, date, pieceId, voiceScore, qualityFlag, description, interactive } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
 // Tier is a quiet, consistent signal shown in the metadata line — same
 // visual weight as the date. Every piece shows its tier (not just rough
@@ -75,6 +84,14 @@ if (date) {
   <article class="prose">
     <slot />
   </article>
+
+  {interactive && (
+    <script
+      type="application/json"
+      data-page-interactive
+      set:html={JSON.stringify(interactive)}
+    />
+  )}
 
   <zita-chat
     course="daily"

@@ -12,6 +12,12 @@
  * Progressive enhancement: without JS, all beats render as a
  * long scroll. This component adds the beat-switching behaviour.
  */
+interface InteractivePagePayload {
+  slug: string;
+  title: string;
+  questionCount: number | null;
+}
+
 class LessonShell extends HTMLElement {
   private beats: HTMLElement[] = [];
   private currentIndex = 0;
@@ -19,6 +25,8 @@ class LessonShell extends HTMLElement {
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
   private audioEndedHandler: EventListener | null = null;
   private audioFirstPlayHandler: EventListener | null = null;
+  private interactive: InteractivePagePayload | null = null;
+  private interactiveOfferedFired = false;
 
   private get storageKey(): string {
     return `zeemish-beat:${window.location.pathname}`;
@@ -50,6 +58,22 @@ class LessonShell extends HTMLElement {
   connectedCallback() {
     this.beats = Array.from(this.querySelectorAll('lesson-beat'));
     if (this.beats.length === 0) return;
+
+    // Read the interactive payload embedded in the page (sub-task 4.6).
+    // Present only when the piece has a passing interactive generated
+    // by the post-publish agent chain. Absent pieces simply don't get
+    // the last-beat prompt.
+    const dataEl = document.querySelector('script[data-page-interactive]');
+    if (dataEl && dataEl.textContent) {
+      try {
+        const parsed = JSON.parse(dataEl.textContent) as InteractivePagePayload;
+        if (parsed && typeof parsed.slug === 'string' && parsed.slug.length > 0) {
+          this.interactive = parsed;
+        }
+      } catch {
+        // Malformed payload — degrade silently, no prompt.
+      }
+    }
 
     // Restore position from sessionStorage
     const saved = sessionStorage.getItem(this.storageKey);
@@ -149,7 +173,30 @@ class LessonShell extends HTMLElement {
     const isFirst = this.currentIndex === 0;
     const isLast = this.currentIndex === this.beats.length - 1;
 
+    // Interactive prompt — small, subtle link above the Prev/Finish
+    // row when this piece has a passing interactive AND the reader is
+    // on the last beat. Not a required step; Finish button unchanged.
+    const interactivePrompt = isLast && this.interactive
+      ? `
+        <div class="beat-nav-interactive">
+          <a
+            class="beat-nav-interactive-link"
+            href="/interactives/${escapeHtml(this.interactive.slug)}/"
+            aria-label="Open the interactive quiz: ${escapeHtml(this.interactive.title)}${
+              this.interactive.questionCount
+                ? ` (${this.interactive.questionCount} questions)`
+                : ''
+            }"
+          >
+            <span class="beat-nav-interactive-label">See if it landed</span>
+            <span class="beat-nav-interactive-arrow" aria-hidden="true">→</span>
+          </a>
+        </div>
+      `
+      : '';
+
     this.nav.innerHTML = `
+      ${interactivePrompt}
       <div class="beat-nav-inner">
         <button class="beat-nav-btn beat-nav-prev" ${isFirst ? 'disabled' : ''} aria-label="Previous beat">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -171,6 +218,27 @@ class LessonShell extends HTMLElement {
         <div class="beat-nav-fill" style="width: ${((this.currentIndex + 1) / this.beats.length) * 100}%"></div>
       </div>
     `;
+
+    // Fire `interactive_offered` once per session per piece on reach.
+    if (isLast && this.interactive && !this.interactiveOfferedFired) {
+      const storageKey = `zeemish-interactive-offered:${this.interactive.slug}`;
+      if (!sessionStorage.getItem(storageKey)) {
+        sessionStorage.setItem(storageKey, '1');
+        fetch('/api/interactive/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            interactive_id: null, // resolved server-side from slug in 4.7
+            interactive_slug: this.interactive.slug,
+            event_type: 'interactive_offered',
+          }),
+          keepalive: true,
+        }).catch(() => {
+          // Endpoint lands in 4.7. Until then, 404 silently.
+        });
+      }
+      this.interactiveOfferedFired = true;
+    }
 
     // Attach listeners
     const prevBtn = this.nav.querySelector('.beat-nav-prev');
@@ -246,6 +314,19 @@ class LessonShell extends HTMLElement {
       }),
     }).catch(() => {});
   }
+}
+
+/** Defensive HTML escaping for attributes and text inserted into
+ *  the nav template. Slug and title come from content collection
+ *  (validated Zod shape) so the risk is low, but escaping keeps
+ *  the innerHTML injection safe regardless. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 customElements.define('lesson-shell', LessonShell);

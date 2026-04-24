@@ -165,3 +165,51 @@ lesson-shell[data-active] lesson-beat > h2:first-child + p {
   outline: 2px solid #1A6B62;
   outline-offset: 2px;
 }
+
+/* --- Interactive prompt (sub-task 4.6) --------------------------- */
+/* Small, subtle link rendered above the Prev/Finish row on the last
+   beat when the piece has a passing interactive. Deliberately
+   understated — it's an exit option, not a forced step. */
+
+.beat-nav-interactive {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px dashed rgba(232, 228, 222, 0.8);
+}
+
+.beat-nav-interactive-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: #1A6B62;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 0.25rem 0;
+  transition: color 0.15s ease, gap 0.2s ease;
+}
+
+.beat-nav-interactive-link:hover {
+  color: #155951;
+  gap: 0.6rem;
+}
+
+.beat-nav-interactive-link:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 3px;
+  border-radius: 0.25rem;
+}
+
+.beat-nav-interactive-label {
+  letter-spacing: -0.005em;
+}
+
+.beat-nav-interactive-arrow {
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+
+.beat-nav-interactive-link:hover .beat-nav-interactive-arrow {
+  transform: translateX(2px);
+}

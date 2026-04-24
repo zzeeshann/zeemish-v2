@@ -2,6 +2,51 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.6 — Last-beat prompt
+
+**Context:** With Generator + Auditor in place (4.4 + 4.5), daily pieces can have an associated interactive at a standalone URL. 4.6 adds a small, subtle exit option on the last beat of the piece pointing at that URL — "here's a quick self-check if you want it." The hard constraints: no modal, no routing hijack, Finish button unchanged, prompt only when the piece actually has a passing interactive.
+
+**Decisions:**
+
+1. **Build-time content-collection self-join, not runtime D1 / client fetch / 3rd commit.** Four paths considered:
+    - *Runtime D1 query in the daily-piece route*: would flip `prerender = false` on daily pages. Every daily page becomes SSR. Every request hits D1. Performance + caching regression for an ambient feature.
+    - *Client-side fetch from lesson-shell*: extra round-trip per page load (or lazy per last-beat reach). Fine, but avoidable.
+    - *Generator 3rd commit splicing `interactiveSlug` into MDX frontmatter*: matches `audioBeats` pattern, works permanently. But adds a third Publisher commit per piece (1: text, 2: audio, 3: interactive) — more Publisher surface, more commits to reason about.
+    - *Build-time content-collection self-join*: both `dailyPieces` and `interactives` are loaded during `getStaticPaths()`. Building a `Map<pieceId, interactive>` is O(n) at build time, zero runtime cost, zero new commits. Chose this. Clean dependency direction — the interactive points at its source piece via `sourcePieceId` (committed by Generator in 4.4); the daily page reverses the lookup at build.
+
+2. **Data passes via an embedded `<script type="application/json" data-page-interactive>` in LessonLayout.** Considered: passing as `data-interactive-slug` on `<lesson-shell>` via rehype-beats (which already injects `data-piece-id` from frontmatter). Rejected because rehype-beats runs as an MDX transform; it can't easily access Astro's content-collection API during the transform. The embedded JSON script is the cleanest alternative — one element in LessonLayout's output, parsed on mount. Precedent: same pattern 4.3's `<quiz-card>` uses for its quiz payload.
+
+3. **Copy: "See if it landed →"** over spec's starting suggestion "There's a quiz on this →". "See if it landed" frames the quiz as a reader's own self-check — "did the teaching land?" — rather than positioning it as an authored test the reader has to pass. Matches Zeemish's voice (conversational, understated, reader-centric) better than "There's a quiz…" which mentions the thing itself rather than why you'd click. The label is intentionally slightly cryptic out of context; the aria-label carries the full context for screen readers ("Open the interactive quiz: {title} ({N} questions)").
+
+4. **Positioned above `.beat-nav-inner`, separated by a dashed hairline.** Dashed border-bottom signals "related to what's below but distinct." Sits in the same `<nav class="beat-nav">` block so it doesn't compete with the piece body, but doesn't share the Prev/Finish row so the Finish button stays the primary action. Visually: small teal link, no button styling, minimal weight. Hover slightly extends the gap between label + arrow (micro-animation, ~2px).
+
+5. **`interactive_offered` fires exactly once per session per interactive.** Keyed by `sessionStorage[zeemish-interactive-offered:<slug>]`. Firing per-beat-render would double-count if a reader navigates backward then forward. Firing per-session-per-slug matches the analytics semantic "did the reader see the prompt this session?" and preserves a retry's offer signal if the reader visits again tomorrow. Not gated on viewport intersection — the offered event fires when the last beat becomes the active beat (via `render()`), which happens when the reader navigates there via Next button or keyboard ArrowRight. That's the same moment they could click the prompt, so it's the right timestamp for "offered."
+
+6. **POST body includes `interactive_slug`, not just `interactive_id`.** The page-embedded payload has the slug (cheap to build at build time) but not the UUID (would require the interactives row to be loaded; at build time we have the content-collection file which does carry `interactiveId`, but for the POST we pass slug for stable resolution — the UUID can be looked up server-side in 4.7's endpoint by joining `interactives.slug`). Slug is the user-facing identity; the UUID is an internal implementation detail.
+
+7. **`qualityFlag !== 'low'` defensive filter in the lookup Map.** Currently vestigial — after 4.5's abandon-on-max-fail, no committed interactive has `quality_flag='low'`. But the filter costs nothing, and if a future "ship-as-low" mode or manual quality-flag override ever lands, the prompt will naturally hide on those interactives. Belt on top of braces.
+
+8. **No prompt for pieces without an interactive.** Negative case is pure absence of DOM — the script payload isn't rendered, `<lesson-shell>` doesn't find it, no interactive block is ever added to the nav. Zero code paths touched when there's no match. This is why the absence case is robust without special handling.
+
+9. **Test fixture updated to tie `chokepoints-and-cascades.json` to the Hormuz piece's pieceId.** Hand-authored file was `sourcePieceId: null` before (since the fixture is a manual one, not Generator output). For 4.6 to demonstrate anything visibly, it needs to match SOME piece. The Hormuz piece is about a chokepoint — naturally fits the fixture's concept. Updated the JSON file to point at `9ded9bec-1616-4552-b8a5-e69f1e446466`. This change is display-only + test-fixture-only; doesn't affect any real publishing flow.
+
+10. **HTML escaping on slug + title in the injected innerHTML.** Defensive — both come from the content collection (Zod-validated) so the risk of XSS via slug is effectively zero, but the innerHTML injection path (we regenerate the nav's innerHTML on every beat change) warrants escaping regardless. New helper `escapeHtml` added at the bottom of lesson-shell.ts.
+
+**Trade-offs:**
+- Build-time join means adding/removing an interactive requires a rebuild. Fine — daily pieces require a rebuild anyway (CI triggers on any MDX/json change in `content/`).
+- If a reader navigates to a non-last beat after reaching the last beat, the prompt disappears. Intended — it's beat-local, not persistent.
+- `sessionStorage` session-level dedup means a hard refresh re-fires `interactive_offered`. Acceptable — the 4.7 aggregator dedups by DISTINCT user_id anyway.
+- No visible indicator on non-last beats that "there's a quiz at the end" — the prompt exists only at the moment you could act on it. Deliberate: surfacing it earlier would compete with the teaching. If reader engagement data shows high finish + low offer → take rates, revisit.
+- The `interactive_offered` POST currently 404s (4.7 builds the endpoint). Caught silently. When 4.7 lands, events start landing without a client change.
+
+**Verified in preview (localhost:4321):**
+- **Positive case** — Hormuz piece (`/daily/2026-04-18/oil-prices-plunge-as-iran-says-strait-of-hormuz-open-during-/`). Payload `{slug: "chokepoints-and-cascades", title: "Chokepoints and Cascades", questionCount: 4}` present in DOM. On last beat (6 of 6): prompt rendered with label "See if it landed", href `/interactives/chokepoints-and-cascades/`, aria-label "Open the interactive quiz: Chokepoints and Cascades (4 questions)". Single `interactive_offered` POST captured via fetch spy with correct shape `{event_type: "interactive_offered", interactive_slug: "chokepoints-and-cascades", interactive_id: null}`.
+- **Negative case** — QVC piece (no matching interactive fixture). Payload absent (`hasPayload: false`). On last beat (8 of 8): prompt not rendered. Zero `interactive_offered` POSTs.
+- Screenshot confirmed visual: teal link, dashed separator, doesn't compete with Finish.
+- `pnpm build` passes clean; zero console errors on either page.
+
+**Rollback:** `git revert <commit>`. Safe — the changes are additive (content.config.ts already had the `interactives` collection from 4.2; the route + layout + web component gain new behaviour when payload present; pure absence of payload = pre-4.6 behaviour). The test fixture `sourcePieceId` edit is data-only and independently reversible.
+
 ## 2026-04-24: Area 4 sub-task 4.5 — InteractiveAuditorAgent + abandon-on-max-fail
 
 **Context:** 4.4 shipped the Generator with structural validation only. 4.5 adds the real audit gate — four dimensions (voice, structure, essence, factual), up to 3 revision rounds, ship-or-abandon on max-fail. Generator is refactored to own the produce → audit → revise loop; Auditor becomes an internal sub-agent. The key design decision: what happens when 3 rounds exhaust without passing.
