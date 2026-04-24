@@ -346,10 +346,14 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
     });
   }
 
-  /** InteractiveGenerator ran — success, skipped (piece already has
-   *  an interactive), or declined (Claude chose not to generate due
-   *  to concept redundancy). Info severity either way — operators
-   *  want visibility, not alarm. Mirrors logCategoriserMetered. */
+  /** InteractiveGenerator ran — five terminal states:
+   *  - skipped:           piece already has interactive_id (idempotent re-run)
+   *  - declined:          Claude returned empty shape (concept redundant)
+   *  - committed:         a round passed the full audit; file + D1 written
+   *  - auditorMaxFailed:  3 rounds exhausted without passing; NO commit
+   *  Info severity on skipped / declined / committed; warn on auditor-
+   *  max-fail (operator may want to retry). Mirrors logCategoriserMetered
+   *  extended for the audit loop. */
   async logInteractiveGeneratorMetered(
     date: string,
     title: string,
@@ -357,11 +361,23 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       skipped: boolean;
       declined: boolean;
       committed: boolean;
+      auditorMaxFailed: boolean;
       interactiveId: string | null;
       slug: string | null;
       quizTitle: string | null;
       concept: string | null;
       questionCount: number;
+      revisionCount: number;
+      roundsUsed: number;
+      voiceScore: number | null;
+      finalAudit: {
+        voicePassed: boolean;
+        voiceScore: number;
+        structurePassed: boolean;
+        essencePassed: boolean;
+        factualPassed: boolean;
+        topIssues: string[];
+      } | null;
       tokensIn: number;
       tokensOut: number;
       durationMs: number;
@@ -382,16 +398,42 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       await this.writeEvent({
         severity: 'info',
         title: `Interactive declined: ${title}`,
-        body: `Generator declined to produce a quiz for "${title}" (${date}) — concept likely too redundant with recent interactives. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+        body: `Generator declined to produce a quiz for "${title}" (${date}) — concept likely too redundant with recent interactives. Rounds used: ${metrics.roundsUsed}. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
         context: { date, ...metrics },
         piece_id: pieceId,
       });
       return;
     }
+    if (metrics.auditorMaxFailed) {
+      const gates = metrics.finalAudit
+        ? [
+            metrics.finalAudit.voicePassed ? null : `voice (${metrics.finalAudit.voiceScore}/100)`,
+            metrics.finalAudit.structurePassed ? null : 'structure',
+            metrics.finalAudit.essencePassed ? null : 'essence',
+            metrics.finalAudit.factualPassed ? null : 'factual',
+          ]
+            .filter((x): x is string => x !== null)
+            .join(', ')
+        : 'unknown';
+      const issuesLine = metrics.finalAudit?.topIssues.length
+        ? ` Top issues: ${metrics.finalAudit.topIssues.map((i) => `"${i}"`).join('; ')}.`
+        : '';
+      await this.writeEvent({
+        severity: 'warn',
+        title: `Interactive auditor max-fail: ${title}`,
+        body: `Generator for "${title}" (${date}) exhausted ${metrics.roundsUsed} rounds without passing audit. Failed gates (final round): ${gates}.${issuesLine} No commit, no D1 row — piece stays live without an interactive. Retry via /interactive-generate-trigger or the admin Retry button. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+        context: { date, ...metrics },
+        piece_id: pieceId,
+      });
+      return;
+    }
+    // Committed path.
+    const voiceNote = metrics.voiceScore !== null ? ` Voice ${metrics.voiceScore}/100.` : '';
+    const revisionNote = metrics.revisionCount > 0 ? ` (${metrics.revisionCount} revision${metrics.revisionCount === 1 ? '' : 's'})` : '';
     await this.writeEvent({
       severity: 'info',
       title: `Interactive generated: ${title}`,
-      body: `"${title}" (${date}) → "${metrics.quizTitle}" (${metrics.questionCount} questions, /interactives/${metrics.slug}/). Concept: ${metrics.concept}. Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
+      body: `"${title}" (${date}) → "${metrics.quizTitle}" (${metrics.questionCount} questions, /interactives/${metrics.slug}/).${revisionNote} Concept: ${metrics.concept}.${voiceNote} Tokens: in=${metrics.tokensIn} out=${metrics.tokensOut}. Latency: ${metrics.durationMs}ms.`,
       context: { date, ...metrics },
       piece_id: pieceId,
     });

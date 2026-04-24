@@ -3,30 +3,31 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { Env } from './types';
 import { extractJson } from './shared/parse-json';
 import { PublisherAgent } from './publisher';
+import { InteractiveAuditorAgent, type InteractiveAuditResult } from './interactive-auditor';
 import {
   INTERACTIVE_GENERATOR_PROMPT,
   GENERATOR_BODY_EXCERPT_MAX_CHARS,
   QUIZ_MIN_QUESTIONS,
   QUIZ_MAX_QUESTIONS,
   buildInteractivePrompt,
+  buildRevisionPrompt,
   type PieceContextForQuiz,
   type RecentInteractive,
   type CategoryRow,
+  type RevisionFeedback,
 } from './interactive-generator-prompt';
 
 /** Number of recently-published interactives to show Claude for the
- *  diversity nudge. Small — the prompt just needs to know "have I
- *  recently taught this?", not a full catalogue. */
+ *  diversity nudge. */
 const RECENT_INTERACTIVES_FOR_DIVERSITY = 10;
 
-/** Max attempts at suffixing a colliding slug (`-2`, `-3`, …) before
- *  giving up. Five is generous; in practice Claude's slug is derived
- *  from concept, and two different pieces producing the same concept
- *  slug is already the signal to decline or diverge. */
+/** Max attempts at suffixing a colliding slug (`-2`, `-3`, …). */
 const SLUG_COLLISION_MAX_ATTEMPTS = 5;
 
-/** Strip YAML frontmatter + MDX component tags so the generator sees
- *  teaching prose, not markup. Mirrors the Categoriser helper. */
+/** Max revision rounds before ship-or-abandon. Matches the daily-piece
+ *  auditor loop's MAX_REVISIONS. 3 rounds = 1 initial + 2 revisions. */
+const INTERACTIVE_MAX_ROUNDS = 3;
+
 function stripForExcerpt(mdx: string): string {
   let body = mdx.replace(/^---\n[\s\S]*?\n---\n?/, '');
   body = body.replace(/<[^>]+>/g, '');
@@ -34,9 +35,6 @@ function stripForExcerpt(mdx: string): string {
   return body.slice(0, GENERATOR_BODY_EXCERPT_MAX_CHARS);
 }
 
-/** Normalise a slug to kebab-case. Defensive — Claude is asked to
- *  return kebab-case, but a malformed response can't poison the URL
- *  space. */
 function normaliseSlug(raw: string): string {
   return raw
     .toLowerCase()
@@ -47,7 +45,6 @@ function normaliseSlug(raw: string): string {
     .slice(0, 60);
 }
 
-/** Shape Claude returns. Validated structurally before anything writes. */
 interface RawQuestion {
   question?: unknown;
   options?: unknown;
@@ -61,7 +58,6 @@ interface RawQuiz {
   questions?: unknown;
 }
 
-/** Validated quiz ready to write. */
 interface ValidatedQuiz {
   slug: string;
   title: string;
@@ -74,18 +70,34 @@ interface ValidatedQuiz {
   }>;
 }
 
+/** Brief audit summary suitable for observer logging (plain Claude-free
+ *  strings). */
+export interface FinalAuditSummary {
+  voicePassed: boolean;
+  voiceScore: number;
+  structurePassed: boolean;
+  essencePassed: boolean;
+  factualPassed: boolean;
+  topIssues: string[]; // first ~5 issues across dimensions for the feed
+}
+
 /** Result surfaced back to Director. */
 export interface InteractiveGeneratorResult {
   pieceId: string;
   date: string;
   skipped: boolean;            // true when piece already has interactive_id
   declined: boolean;           // true when Claude returned the empty shape
-  committed: boolean;          // true when file + D1 writes landed
+  committed: boolean;          // true when file + D1 writes landed (passed audit)
+  auditorMaxFailed: boolean;   // true when ALL rounds failed — no commit
   interactiveId: string | null;
   slug: string | null;
   title: string | null;
   concept: string | null;
   questionCount: number;
+  revisionCount: number;       // 0 = passed first round, 1 = passed round 2, …
+  roundsUsed: number;          // total rounds executed (1, 2, or 3)
+  voiceScore: number | null;   // final round's voice score when audit ran
+  finalAudit: FinalAuditSummary | null; // only set when audit ran
   tokensIn: number;
   tokensOut: number;
   durationMs: number;
@@ -94,6 +106,7 @@ export interface InteractiveGeneratorResult {
 interface InteractiveGeneratorState {
   interactivesGenerated: number;
   interactivesDeclined: number;
+  interactivesAuditorMaxFailed: number;
 }
 
 /**
@@ -104,51 +117,52 @@ interface InteractiveGeneratorState {
  * it does not reference the piece. A stranger landing on the quiz's
  * URL should find it useful without having read the piece.
  *
- * Does NOT touch the published piece's content. Does NOT orchestrate —
- * Director schedules it via alarm right after `publishing done`, same
- * shape as Categoriser and Drafter.reflect (off-pipeline, non-
- * blocking, non-retriable).
+ * Generator owns the produce → audit → revise loop (4.5). Up to 3
+ * rounds, matching the daily-piece auditor pattern. Auditor is an
+ * internal sub-agent — Director's alarm just calls `generate()` and
+ * gets back a terminal result.
  *
- * Write path: commits a JSON file to `content/interactives/<slug>.json`
- * via Publisher's `publishToPath`, then INSERTs an `interactives` row
- * in D1 and UPDATEs `daily_pieces.interactive_id`. The file is the
- * source of truth for rendering (sub-task 4.2 decision); the D1 row
- * holds queryable metadata.
+ * Loop:
+ *   round 1: produce initial quiz → structural validate → audit
+ *   round 2..3 (only if prior round failed): revise with audit feedback
+ *   → structural validate → audit
  *
- * 4.4 ships STRUCTURAL validation only — JSON shape + counts + index
- * bounds + non-empty strings. The real voice / essence / fact audit
- * lives in InteractiveAuditor (sub-task 4.5), which will wrap this
- * agent's output with up to 3 revision rounds before the commit. For
- * now the prompt's "essence not reference" rule is the quality bar;
- * a structurally-valid but off-concept quiz would still commit.
+ * Terminal states:
+ *   - `skipped`       daily_pieces.interactive_id already set
+ *   - `declined`      Claude returned the empty shape (first round or
+ *                     any revision round — concept-too-redundant)
+ *   - `committed`     a round passed all four audit dimensions; file
+ *                     + D1 rows written
+ *   - `auditorMaxFailed`  3 rounds exhausted without passing; NO
+ *                     commit, NO D1 row. Retry via admin button or
+ *                     /interactive-generate-trigger. See DECISIONS
+ *                     2026-04-24 "Area 4 sub-task 4.5 — Auditor + the
+ *                     abandon-on-max-fail decision".
  *
- * Idempotence:
- *  - Pre-flight check: `daily_pieces.interactive_id` IS NOT NULL →
- *    short-circuit with `skipped: true`, no Claude call.
- *  - Claude's `decline` path (`questions: []`) → no commit, no D1
- *    write, returns `declined: true`. Observer sees it.
- *  - Slug collision: append `-2`, `-3`, … up to 5 attempts. If Claude
- *    keeps proposing an existing slug, that's a signal the concept is
- *    duplicated; fail rather than pollute.
+ * Why abandon on max-fail instead of shipping with quality_flag='low':
+ *   1. Interactives are structural (3–5 Qs, fixed shape) — unlike prose,
+ *      there's no "mostly-fine salvage" from a max-failed round.
+ *   2. The permanence rule stays clean: no low-quality content lands
+ *      permanently in git.
+ *   3. Retry is trivially supported: interactive_id IS NULL → Generator
+ *      runs fresh on next trigger.
+ *   4. No quality_flag='low' state to filter from readers or the
+ *      sub-task 4.6 last-beat prompt.
  *
- * Fail-silent posture: throws on failure. Director's alarm catches +
- * routes to `observer.logInteractiveGeneratorFailure`. Piece is live
- * regardless; no interactive is the degraded-but-fine state.
+ * Does NOT touch the published piece's content. Does NOT orchestrate.
+ * Fail-silent posture: throws on infrastructure failure (Claude down,
+ * DB error, GitHub 5xx). Director's alarm catches + routes to
+ * observer.logInteractiveGeneratorFailure. Auditor rejection is NOT
+ * an infrastructure failure — it's an expected path that returns a
+ * structured result with `auditorMaxFailed: true`.
  */
 export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorState> {
   initialState: InteractiveGeneratorState = {
     interactivesGenerated: 0,
     interactivesDeclined: 0,
+    interactivesAuditorMaxFailed: 0,
   };
 
-  /**
-   * Generate an interactive for a just-published piece.
-   *
-   * @param pieceId  daily_pieces.id (UUID)
-   * @param date     YYYY-MM-DD — for logging + file path context
-   * @param mdx      final published MDX. Caller reads from GitHub so
-   *                 the agent stays ignorant of file paths.
-   */
   async generate(
     pieceId: string,
     date: string,
@@ -180,18 +194,23 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         skipped: true,
         declined: false,
         committed: false,
+        auditorMaxFailed: false,
         interactiveId: piece.interactive_id,
         slug: null,
         title: null,
         concept: null,
         questionCount: 0,
+        revisionCount: 0,
+        roundsUsed: 0,
+        voiceScore: null,
+        finalAudit: null,
         tokensIn: 0,
         tokensOut: 0,
         durationMs: Date.now() - started,
       };
     }
 
-    // ── 2. Gather context: categories + recent interactives ──────
+    // ── 2. Gather context ────────────────────────────────────────
     const catsRes = await this.env.DB
       .prepare(
         `SELECT c.name, c.slug
@@ -229,35 +248,91 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       categories,
     };
 
-    // ── 3. Ask Claude ────────────────────────────────────────────
-    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 3000,
-      system: INTERACTIVE_GENERATOR_PROMPT,
-      messages: [
-        { role: 'user', content: buildInteractivePrompt(pieceContext, recent) },
-      ],
-    });
+    // ── 3. Produce → audit → revise loop ─────────────────────────
+    const auditor = await this.subAgent(
+      InteractiveAuditorAgent,
+      `interactive-auditor-${pieceId}`,
+    );
 
-    const rawText = response.content[0].type === 'text' ? response.content[0].text : '{}';
-    const tokensIn = response.usage?.input_tokens ?? 0;
-    const tokensOut = response.usage?.output_tokens ?? 0;
+    let cumulativeTokensIn = 0;
+    let cumulativeTokensOut = 0;
+    let lastQuiz: ValidatedQuiz | null = null;
+    let lastAudit: InteractiveAuditResult | null = null;
+    let passed = false;
+    let declinedInLoop = false;
+    let roundsUsed = 0;
 
-    let parsed: RawQuiz;
-    try {
-      parsed = extractJson<RawQuiz>(rawText);
-    } catch {
-      throw new Error('generate: Claude returned non-JSON output');
+    for (let round = 1; round <= INTERACTIVE_MAX_ROUNDS; round += 1) {
+      roundsUsed = round;
+
+      // Produce (round 1) or revise (round 2+).
+      let produced: ValidatedQuiz | null;
+      let tokensIn = 0;
+      let tokensOut = 0;
+
+      if (round === 1) {
+        const res = await this.produceQuiz(pieceContext, recent);
+        produced = res.quiz;
+        tokensIn = res.tokensIn;
+        tokensOut = res.tokensOut;
+      } else {
+        if (!lastQuiz || !lastAudit) {
+          // Invariant — rounds 2+ require both. Bail loudly.
+          throw new Error(
+            `generate: round ${round} has no previous quiz or audit to revise from`,
+          );
+        }
+        const res = await this.reviseQuiz(
+          lastQuiz,
+          lastAudit,
+          pieceContext,
+          recent,
+          round,
+        );
+        produced = res.quiz;
+        tokensIn = res.tokensIn;
+        tokensOut = res.tokensOut;
+      }
+
+      cumulativeTokensIn += tokensIn;
+      cumulativeTokensOut += tokensOut;
+
+      if (!produced) {
+        // Decline — Claude returned the empty shape. Treat as terminal.
+        declinedInLoop = true;
+        break;
+      }
+
+      lastQuiz = produced;
+
+      // Audit what was produced.
+      const audit = await auditor.audit(
+        {
+          slug: produced.slug,
+          title: produced.title,
+          concept: produced.concept,
+          questions: produced.questions,
+        },
+        {
+          headline: piece.headline,
+          underlyingSubject: piece.underlying_subject,
+          bodyExcerpt: pieceContext.bodyExcerpt,
+        },
+      );
+      lastAudit = audit;
+      cumulativeTokensIn += audit.tokensIn;
+      cumulativeTokensOut += audit.tokensOut;
+
+      if (audit.passed) {
+        passed = true;
+        break;
+      }
+      // Failed — if more rounds remain, loop back; otherwise fall
+      // through to the max-fail terminal.
     }
 
-    // ── 4. Decline path: empty shape signals intentional skip ────
-    const questionsRaw = Array.isArray(parsed.questions) ? parsed.questions : [];
-    const slugRaw = typeof parsed.slug === 'string' ? parsed.slug.trim() : '';
-    const titleRaw = typeof parsed.title === 'string' ? parsed.title.trim() : '';
-    const conceptRaw = typeof parsed.concept === 'string' ? parsed.concept.trim() : '';
-
-    if (questionsRaw.length === 0 && slugRaw === '' && titleRaw === '') {
+    // ── 4. Terminal state handling ───────────────────────────────
+    if (declinedInLoop) {
       this.setState({
         ...this.state,
         interactivesDeclined: this.state.interactivesDeclined + 1,
@@ -268,79 +343,107 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
         skipped: false,
         declined: true,
         committed: false,
+        auditorMaxFailed: false,
         interactiveId: null,
         slug: null,
         title: null,
         concept: null,
         questionCount: 0,
-        tokensIn,
-        tokensOut,
+        revisionCount: Math.max(0, roundsUsed - 1),
+        roundsUsed,
+        voiceScore: lastAudit?.voice.score ?? null,
+        finalAudit: lastAudit ? summariseAudit(lastAudit) : null,
+        tokensIn: cumulativeTokensIn,
+        tokensOut: cumulativeTokensOut,
         durationMs: Date.now() - started,
       };
     }
 
-    // ── 5. Structural validation ─────────────────────────────────
-    const quiz = validateQuiz(parsed);
-    // validateQuiz throws on failure — caught by Director's alarm
-    // handler and routed to observer.logInteractiveGeneratorFailure.
+    if (!passed) {
+      // Auditor max-fail: abandon. No commit, no D1 row.
+      this.setState({
+        ...this.state,
+        interactivesAuditorMaxFailed: this.state.interactivesAuditorMaxFailed + 1,
+      });
+      return {
+        pieceId,
+        date,
+        skipped: false,
+        declined: false,
+        committed: false,
+        auditorMaxFailed: true,
+        interactiveId: null,
+        slug: lastQuiz?.slug ?? null,
+        title: lastQuiz?.title ?? null,
+        concept: lastQuiz?.concept ?? null,
+        questionCount: lastQuiz?.questions.length ?? 0,
+        revisionCount: Math.max(0, roundsUsed - 1),
+        roundsUsed,
+        voiceScore: lastAudit?.voice.score ?? null,
+        finalAudit: lastAudit ? summariseAudit(lastAudit) : null,
+        tokensIn: cumulativeTokensIn,
+        tokensOut: cumulativeTokensOut,
+        durationMs: Date.now() - started,
+      };
+    }
 
-    // ── 6. Slug collision resolution ─────────────────────────────
-    const finalSlug = await this.resolveFreeSlug(quiz.slug);
-    quiz.slug = finalSlug;
+    // ── 5. Passed path: commit + D1 writes ───────────────────────
+    if (!lastQuiz) {
+      throw new Error('generate: passed path reached without a lastQuiz');
+    }
 
-    // ── 7. Build the content-collection JSON file ────────────────
+    const finalSlug = await this.resolveFreeSlug(lastQuiz.slug);
+    lastQuiz.slug = finalSlug;
+
     const interactiveId = crypto.randomUUID();
     const publishedAt = Date.now();
     const fileContent = JSON.stringify(
       {
-        slug: quiz.slug,
+        slug: lastQuiz.slug,
         type: 'quiz',
-        title: quiz.title,
-        concept: quiz.concept,
+        title: lastQuiz.title,
+        concept: lastQuiz.concept,
         interactiveId,
         sourcePieceId: pieceId,
         publishedAt,
+        voiceScore: lastAudit?.voice.score ?? undefined,
         content: {
           type: 'quiz',
-          questions: quiz.questions,
+          questions: lastQuiz.questions,
         },
       },
       null,
       2,
     ) + '\n';
 
-    const filePath = `content/interactives/${quiz.slug}.json`;
+    const filePath = `content/interactives/${lastQuiz.slug}.json`;
 
-    // ── 8. Commit via Publisher (refuses overwrite, good) ────────
-    // Per-interactive publisher stub: keeps SDK state scoped so a
-    // failed commit on one interactive can't bleed into another.
-    // Matches Director's per-piece scoping pattern.
     const publisher = await this.subAgent(
       PublisherAgent,
-      `interactive-publisher-${quiz.slug}`,
+      `interactive-publisher-${lastQuiz.slug}`,
     );
-    const commitMsg = `feat(interactives): ${quiz.title} (${quiz.slug})`;
+    const commitMsg = `feat(interactives): ${lastQuiz.title} (${lastQuiz.slug})`;
     await publisher.publishToPath(filePath, fileContent, commitMsg);
 
-    // ── 9. D1 writes (file is source of truth; row is metadata) ─
-    // content_json stays NULL per the 4.2 decision — file is
-    // authoritative. voice_score + quality_flag stay NULL until 4.5's
-    // auditor populates them. revision_count stays 0 for a fresh
-    // generation.
+    const voiceScore = lastAudit?.voice.score ?? null;
+    const revisionCount = roundsUsed - 1;
+
     await this.env.DB
       .prepare(
         `INSERT INTO interactives
          (id, slug, type, title, concept, source_piece_id, content_json,
           voice_score, quality_flag, revision_count, published_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)`,
       )
       .bind(
         interactiveId,
-        quiz.slug,
+        lastQuiz.slug,
         'quiz',
-        quiz.title,
-        quiz.concept,
+        lastQuiz.title,
+        lastQuiz.concept,
         pieceId,
+        voiceScore,
+        revisionCount,
         publishedAt,
         publishedAt,
       )
@@ -362,23 +465,115 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       skipped: false,
       declined: false,
       committed: true,
+      auditorMaxFailed: false,
       interactiveId,
-      slug: quiz.slug,
-      title: quiz.title,
-      concept: quiz.concept,
-      questionCount: quiz.questions.length,
-      tokensIn,
-      tokensOut,
+      slug: lastQuiz.slug,
+      title: lastQuiz.title,
+      concept: lastQuiz.concept,
+      questionCount: lastQuiz.questions.length,
+      revisionCount,
+      roundsUsed,
+      voiceScore,
+      finalAudit: lastAudit ? summariseAudit(lastAudit) : null,
+      tokensIn: cumulativeTokensIn,
+      tokensOut: cumulativeTokensOut,
       durationMs: Date.now() - started,
     };
   }
 
   /**
-   * Find a non-colliding slug. If the base collides, suffix `-2`,
-   * `-3`, … up to SLUG_COLLISION_MAX_ATTEMPTS. Throws on exhaustion —
-   * that many collisions means the concept itself is over-represented
-   * and the generator should have declined; failing loudly surfaces
-   * the pattern to ops.
+   * Round 1 — initial produce. Returns null quiz if Claude declined
+   * (empty shape). Throws on infrastructure failure or structural
+   * validation failure.
+   */
+  private async produceQuiz(
+    pieceContext: PieceContextForQuiz,
+    recent: RecentInteractive[],
+  ): Promise<{ quiz: ValidatedQuiz | null; tokensIn: number; tokensOut: number }> {
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 3000,
+      system: INTERACTIVE_GENERATOR_PROMPT,
+      messages: [
+        { role: 'user', content: buildInteractivePrompt(pieceContext, recent) },
+      ],
+    });
+
+    const rawText = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    const tokensIn = response.usage?.input_tokens ?? 0;
+    const tokensOut = response.usage?.output_tokens ?? 0;
+
+    return {
+      quiz: parseAndValidate(rawText),
+      tokensIn,
+      tokensOut,
+    };
+  }
+
+  /**
+   * Rounds 2+ — revise the previous attempt with auditor feedback.
+   * Same system prompt (essence-not-reference rule doesn't relax on
+   * retry); the user message carries the prior quiz + the audit
+   * violations. Returns null quiz if Claude declines mid-revision.
+   */
+  private async reviseQuiz(
+    previous: ValidatedQuiz,
+    audit: InteractiveAuditResult,
+    pieceContext: PieceContextForQuiz,
+    recent: RecentInteractive[],
+    round: number,
+  ): Promise<{ quiz: ValidatedQuiz | null; tokensIn: number; tokensOut: number }> {
+    const client = new Anthropic({ apiKey: this.env.ANTHROPIC_API_KEY });
+    const feedback: RevisionFeedback = {
+      voice: {
+        passed: audit.voice.passed,
+        score: audit.voice.score,
+        issues: audit.voice.violations,
+        suggestions: audit.voice.suggestions,
+      },
+      structure: {
+        passed: audit.structure.passed,
+        issues: audit.structure.issues,
+        suggestions: audit.structure.suggestions,
+      },
+      essence: {
+        passed: audit.essence.passed,
+        issues: audit.essence.violations,
+        suggestions: audit.essence.suggestions,
+      },
+      factual: {
+        passed: audit.factual.passed,
+        issues: audit.factual.issues,
+        suggestions: audit.factual.suggestions,
+      },
+    };
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 3000,
+      system: INTERACTIVE_GENERATOR_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: buildRevisionPrompt(previous, feedback, pieceContext, recent, round),
+        },
+      ],
+    });
+
+    const rawText = response.content[0].type === 'text' ? response.content[0].text : '{}';
+    const tokensIn = response.usage?.input_tokens ?? 0;
+    const tokensOut = response.usage?.output_tokens ?? 0;
+
+    return {
+      quiz: parseAndValidate(rawText),
+      tokensIn,
+      tokensOut,
+    };
+  }
+
+  /**
+   * Find a non-colliding slug. Only called on the passed path; a
+   * max-failed or declined attempt never reserves a slug.
    */
   private async resolveFreeSlug(base: string): Promise<string> {
     const normalised = normaliseSlug(base);
@@ -406,11 +601,34 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
 }
 
 /**
- * Structural validation of Claude's output. Lives outside the class
- * so it's trivially unit-testable and so the agent method stays
- * readable. Throws with a specific message on first failure — the
- * Director's alarm handler logs the message verbatim to
- * observer_events, so the message IS the ops signal.
+ * Shared parse + validate. Returns null on the decline shape; throws
+ * with a specific error message on structural validation failure or
+ * non-JSON output.
+ */
+function parseAndValidate(rawText: string): ValidatedQuiz | null {
+  let parsed: RawQuiz;
+  try {
+    parsed = extractJson<RawQuiz>(rawText);
+  } catch {
+    throw new Error('parseAndValidate: Claude returned non-JSON output');
+  }
+
+  const questionsRaw = Array.isArray(parsed.questions) ? parsed.questions : [];
+  const slugRaw = typeof parsed.slug === 'string' ? parsed.slug.trim() : '';
+  const titleRaw = typeof parsed.title === 'string' ? parsed.title.trim() : '';
+
+  // Decline shape: all-empty.
+  if (questionsRaw.length === 0 && slugRaw === '' && titleRaw === '') {
+    return null;
+  }
+
+  return validateQuiz(parsed);
+}
+
+/**
+ * Structural validation of Claude's output. Throws with a specific
+ * message on first failure — Director's alarm handler logs verbatim
+ * to observer_events, so the message IS the ops signal.
  */
 function validateQuiz(raw: RawQuiz): ValidatedQuiz {
   const slug = typeof raw.slug === 'string' ? raw.slug.trim() : '';
@@ -462,4 +680,27 @@ function validateQuiz(raw: RawQuiz): ValidatedQuiz {
   }
 
   return { slug, title, concept, questions };
+}
+
+/**
+ * Compress a full InteractiveAuditResult into a flat summary suitable
+ * for observer events. Keeps the top few cross-dimension issues so
+ * the admin feed has concrete context without pulling the full JSON.
+ */
+function summariseAudit(audit: InteractiveAuditResult): FinalAuditSummary {
+  const issues: string[] = [
+    ...audit.voice.violations.map((v) => `voice: ${v}`),
+    ...audit.structure.issues.map((i) => `structure: ${i}`),
+    ...audit.essence.violations.map((v) => `essence: ${v}`),
+    ...audit.factual.issues.map((i) => `factual: ${i}`),
+  ].slice(0, 5);
+
+  return {
+    voicePassed: audit.voice.passed,
+    voiceScore: audit.voice.score,
+    structurePassed: audit.structure.passed,
+    essencePassed: audit.essence.passed,
+    factualPassed: audit.factual.passed,
+    topIssues: issues,
+  };
 }

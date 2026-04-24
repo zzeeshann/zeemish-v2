@@ -22,6 +22,7 @@ export { CuratorAgent } from './curator';
 export { DrafterAgent } from './drafter';
 export { CategoriserAgent } from './categoriser';
 export { InteractiveGeneratorAgent } from './interactive-generator';
+export { InteractiveAuditorAgent } from './interactive-auditor';
 // Course workflow removed — daily pieces only
 
 /** Check admin auth — bearer token only (no query params — they leak in logs) */

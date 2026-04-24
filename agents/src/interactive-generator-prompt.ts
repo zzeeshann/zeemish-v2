@@ -184,3 +184,118 @@ ${recent
 
   return `${pieceBlock}\n\n${recentBlock}`;
 }
+
+/** Shape of one audit-dimension's feedback fed into the revise
+ *  prompt. Issues/violations are what the Auditor flagged; suggestions
+ *  are (optional) specific fixes. */
+export interface RevisionDimensionFeedback {
+  passed: boolean;
+  issues: string[];     // voice violations / structure issues / essence violations / factual issues
+  suggestions: string[];
+  score?: number;       // voice only
+}
+
+/** Full audit feedback shape passed to the revise prompt. */
+export interface RevisionFeedback {
+  voice: RevisionDimensionFeedback & { score: number };
+  structure: RevisionDimensionFeedback;
+  essence: RevisionDimensionFeedback;
+  factual: RevisionDimensionFeedback;
+}
+
+/** Shape of the previous quiz fed into the revise prompt (same as
+ *  ValidatedQuiz but duplicated locally to avoid cross-module
+ *  imports in a prompt file). */
+export interface RevisionPreviousQuiz {
+  slug: string;
+  title: string;
+  concept: string;
+  questions: Array<{
+    question: string;
+    options: string[];
+    correctIndex: number;
+    explanation: string;
+  }>;
+}
+
+/**
+ * Build the user-message for a revision round. Takes the previous
+ * attempt + auditor feedback + original piece context and asks
+ * Claude to produce a fresh quiz that addresses each failed
+ * dimension. The system prompt is the same `INTERACTIVE_GENERATOR_PROMPT`
+ * — revision doesn't relax the essence-not-reference rule; if anything
+ * it's tighter because the prior attempt already failed once.
+ */
+export function buildRevisionPrompt(
+  previous: RevisionPreviousQuiz,
+  feedback: RevisionFeedback,
+  piece: PieceContextForQuiz,
+  recent: RecentInteractive[],
+  round: number,
+): string {
+  const previousBlock = `## Previous attempt (round ${round - 1}) — DID NOT pass audit
+
+Title: ${previous.title}
+Slug: ${previous.slug}
+Concept: ${previous.concept}
+
+${previous.questions
+    .map((q, i) => {
+      const optionLines = q.options
+        .map((opt, j) => `  ${String.fromCharCode(65 + j)}. ${opt}${j === q.correctIndex ? ' (correct)' : ''}`)
+        .join('\n');
+      return `### Question ${i + 1}
+${q.question}
+
+${optionLines}
+
+Explanation: ${q.explanation}`;
+    })
+    .join('\n\n')}`;
+
+  const dimensionBlock = (
+    label: string,
+    dim: RevisionDimensionFeedback,
+  ): string => {
+    if (dim.passed) return `- ${label}: PASSED`;
+    const lines: string[] = [];
+    lines.push(`- ${label}: FAILED${dim.score !== undefined ? ` (score ${dim.score})` : ''}`);
+    for (const issue of dim.issues) lines.push(`  - ${issue}`);
+    for (const suggestion of dim.suggestions) lines.push(`  - SUGGESTION: ${suggestion}`);
+    return lines.join('\n');
+  };
+
+  const feedbackBlock = `## Auditor feedback
+
+${dimensionBlock('Voice', feedback.voice)}
+${dimensionBlock('Structure', feedback.structure)}
+${dimensionBlock('Essence (the primary bar)', feedback.essence)}
+${dimensionBlock('Factual', feedback.factual)}`;
+
+  const instruction = `## What to do
+
+Produce a fresh quiz that addresses every failed dimension above. Do NOT incrementally edit the previous attempt — write new questions that teach the same underlying concept but resolve the issues. Same JSON shape as the initial generation. If the essence dimension failed, you likely need to re-derive the concept from the piece's underlying pattern rather than its surface details.
+
+If the feedback makes it clear the piece's concept cannot be taught cleanly in a standalone quiz, decline — return the empty shape {"slug":"","title":"","concept":"","questions":[]}.`;
+
+  const pieceBlock = `## The piece (source — STILL DO NOT reference directly)
+- Headline: "${piece.headline}"
+- Underlying subject: ${piece.underlyingSubject ?? 'unknown'}
+- Categories: ${
+    piece.categories.length > 0
+      ? piece.categories.map((c) => c.name).join(', ')
+      : '(none assigned yet)'
+  }
+
+### Body excerpt
+${piece.bodyExcerpt}`;
+
+  const recentBlock = recent.length === 0
+    ? ''
+    : `\n\n## Recently-published interactives (${recent.length} — still avoid duplicating)
+${recent
+        .map((r) => `- ${r.title}: ${r.concept ?? '(no concept recorded)'}`)
+        .join('\n')}`;
+
+  return `${previousBlock}\n\n${feedbackBlock}\n\n${instruction}\n\n${pieceBlock}${recentBlock}`;
+}

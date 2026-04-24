@@ -2,6 +2,55 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 4 sub-task 4.5 — InteractiveAuditorAgent + abandon-on-max-fail
+
+**Context:** 4.4 shipped the Generator with structural validation only. 4.5 adds the real audit gate — four dimensions (voice, structure, essence, factual), up to 3 revision rounds, ship-or-abandon on max-fail. Generator is refactored to own the produce → audit → revise loop; Auditor becomes an internal sub-agent. The key design decision: what happens when 3 rounds exhaust without passing.
+
+**Decisions:**
+
+1. **Single-call Auditor, not four specialised auditors.** Daily pieces have three separate agents (VoiceAuditor, StructureEditor, FactChecker) because each has specialised tooling and a ~7000-word scope-of-audit. For interactives (3–5 questions, ~500 words of text max), one comprehensive Claude call that evaluates all four dimensions against the same input is both cheaper (~4× fewer API calls per round) and more coherent (cross-dimension conflicts — e.g. "this option is factually wrong AND references the piece" — surface as a single response rather than across independent reports). The prompt (`INTERACTIVE_AUDITOR_PROMPT`) embeds `VOICE_CONTRACT` directly for the voice dimension and defines per-dimension pass criteria explicitly. Response is structured JSON with per-dimension passed/violations/suggestions + an aggregate `passed`.
+
+2. **Abandon on auditor max-fail (NOT ship-as-quality_flag='low').** This is the load-bearing decision for the sub-task. When all 3 rounds fail, Generator returns `auditorMaxFailed: true`, makes no commit, writes no D1 row, and `daily_pieces.interactive_id` stays NULL. Alternatives considered:
+    - *Ship-as-low*: matches daily-piece pattern (quality_flag='low' + banner), but interactives are structural — there's no "mostly-fine salvage" from a max-failed quiz the way there is from a low-voice piece that still teaches useful prose. A quiz that references the piece wholesale, or has wrong correctIndex on multiple questions, or has all-identical options, isn't partially fine.
+    - *Abandon*: no commit, no D1 row. Retry is `interactive_id IS NULL` → Generator runs fresh → produces a new attempt with a new slug. No quality_flag='low' state to filter from readers or the 4.6 last-beat prompt.
+    - Chose abandon. Rationale: (a) structural content demands binary shipping; (b) permanence rule stays clean (no low-quality content lands permanently in git); (c) retry ergonomics are trivial (fresh generation, not replacement of existing content); (d) no downstream filter logic needed in 4.6 — the last-beat prompt just shows up when `interactive_id IS NOT NULL`.
+
+3. **Generator owns the loop; Auditor is an internal sub-agent.** Considered: Director orchestrates the produce/audit/revise loop directly (matches daily-piece pattern where Director owns the auditor-revision dance). Chose: loop lives in `Generator.generate()`, calls `this.subAgent(InteractiveAuditorAgent, ...)` internally. Rationale: (a) audit rounds are entirely tied to interactive generation — no reuse scenario where Auditor runs outside a Generator round; (b) Director's alarm stays a single call, terminal-state-aware via the extended `InteractiveGeneratorResult` shape; (c) the `revisionCount` + `roundsUsed` state is internally coherent inside the agent that produced it. Director pattern is preserved elsewhere (Categoriser, Drafter.reflect, audio pipeline) where it fits better; interactives just happen to naturally encapsulate the loop.
+
+4. **Revise via a new prompt message, not a prompt-swap.** Both rounds 1 and 2+ use the same system prompt (`INTERACTIVE_GENERATOR_PROMPT` — the essence-not-reference rule doesn't relax on retry, it tightens). Round 1's user message is `buildInteractivePrompt`; rounds 2+ use a new `buildRevisionPrompt` that carries the prior attempt + dimension-by-dimension audit feedback + the original piece context. Asks Claude to rewrite, not incrementally edit ("write new questions that teach the same underlying concept but resolve the issues"). If the feedback makes the concept untenable, Claude can decline mid-revision by returning the empty shape — treated as a terminal decline (same as a round-1 decline).
+
+5. **Defensive pass-gate on Claude's own `passed` booleans.** The Auditor parses Claude's response, trusts the per-dimension `passed` fields, but clamps to threshold logic:
+    - `voicePassed = claimedPass && score >= 85`
+    - `structurePassed = claimedPass && issues.length === 0`
+    - `essencePassed = claimedPass && violations.length === 0`
+    - `factualPassed = claimedPass && issues.length === 0`
+   A self-contradictory response ("passed: true, score: 60") becomes a fail. Cheap insurance — Claude is usually consistent, but model drift or prompt misalignment can produce internally-inconsistent responses, and the cost of an incorrect pass (low-quality quiz in git) is much higher than the cost of an incorrect fail (extra revision round).
+
+6. **Voice-dimension threshold: 85/100.** Mirrors VoiceAuditor's gate on daily pieces. Exposed as `INTERACTIVE_VOICE_MIN_SCORE` constant in the prompt module so a future tuning pass has a single knob. Score written to `interactives.voice_score` on commit — populates the display-layer `voice_score` column that was provisioned in the 4.1 schema but NULL through 4.4.
+
+7. **`revision_count` is the number of revisions, not the number of rounds.** Committed with `revision_count = roundsUsed - 1`: 0 for first-round pass, 1 for second-round pass, 2 for third-round pass. Matches the user-facing framing ("how many revisions did this take?"). Not populated on max-fail (no row written).
+
+8. **Admin retry is one button regardless of prior state.** The piece-detail page shows "Retry interactive" when `daily_pieces.interactive_id IS NULL` — whether that's because (a) the piece predates Area 4, (b) the natural post-publish alarm hasn't fired yet, or (c) a prior run hit `auditorMaxFailed`. All three states look identical at the DB level, and the recovery action is identical: run Generator fresh. No "retry from round 2" or "replace low-quality version" — the Generator always starts from scratch.
+
+9. **Retry proxy endpoint is a separate file, not merged with audio-retry.** New `src/pages/api/agents/interactive-retry.ts` — ADMIN_EMAIL gated, forwards to `/interactive-generate-trigger`. Considered: extending `audio-retry.ts` with a `type=interactive` query param to unify. Rejected: different agents, different payloads, different retry semantics (audio has continue/fresh/beat modes; interactive has just one action). One-purpose-per-endpoint is the established codebase pattern.
+
+10. **Not cascading "16 agents" user-facing yet.** Same policy as 4.4 — Area 5's explicit remit. AGENTS.md gets a `### 16.` entry for Auditor + updated `### 15.` entry for Generator's loop-owning behaviour. Top-line count stays 14; `AGENT_COUNT = 14`; book / README / homepage footer all untouched until Area 5.
+
+**Trade-offs:**
+- Single-call Auditor might mis-weight dimensions under pressure (e.g. a voice-heavy quiz could cause Claude to under-check essence). Mitigation: prompt explicitly flags essence as "THE PRIMARY BAR"; defensive pass-gate catches claimed-pass-with-violations inconsistency. If we observe real-world drift, splitting into voice + essence + structure-factual (3 calls) is the easiest next step.
+- 3 rounds × 2 Claude calls per round (produce + audit) = up to 6 Claude calls for one interactive. At Sonnet 4.5 latency (~3–5s per call) that's 20–30s of wall time, well inside the alarm's 15-min budget but a non-trivial cost per interactive. Abandon-on-max-fail means that cost can be fully sunk (no output committed). Mitigation: Generator's decline path during a revision round short-circuits the remaining rounds.
+- Admin "Retry" button doesn't distinguish first-time-run from post-max-fail retry. An operator who wants to know "did this piece's Generator run and fail?" reads the observer feed. Acceptable — the indistinguishability at the retry-action level is the whole point.
+- Auditor's factual dimension uses Claude's general knowledge, no web search. A claim that's true-in-general but false-in-specific-2026-context (e.g. a stat that was true 10 years ago) could pass. Acceptable for general-concept quizzes (the essence rule already keeps specific-to-the-piece claims out).
+- Test fixture `content/interactives/chokepoints-and-cascades.json` from 4.2 is hand-authored and was not audited — if it violates any dimension, it would pass the rendering path but not the (prospective) Generator+Auditor flow. Fixture is a test file, not a production interactive; operator judgement applies.
+
+**Verified:**
+- TypeScript compiles. Agents worker: 25 errors, same as after 4.4 — all in server.ts (pre-existing SDK-typing on trigger endpoints). Zero new errors outside server.ts from the refactor or new agent.
+- Site `pnpm build` passes clean. New API route `src/pages/api/agents/interactive-retry.ts` + admin section + retry button JS all included.
+- `wrangler deploy --dry-run` (agents worker) succeeds. Both `INTERACTIVE_GENERATOR` and `INTERACTIVE_AUDITOR` bindings registered; SQLite migration tag `v14` queued.
+- Not auto-run against a real piece (would burn Claude tokens on the live pipeline). Live verification requires hitting the manual retry endpoint or waiting for tomorrow's 02:00 UTC cron.
+
+**Rollback:** `git revert <commit>` reverses the site-side + agents-side code. Agents-worker rollback also needs a `wrangler rollback` for the new DO binding + migration tag `v14`. Generator from 4.4 (sans audit loop) would still work if only the agents side reverted — but the site-side AGENTS.md / CLAUDE.md / DECISIONS.md edits would contradict the deployed code until both sides roll back. Cleanest: revert both together.
+
 ## 2026-04-24: Area 4 sub-task 4.4 — InteractiveGeneratorAgent (15th agent)
 
 **Context:** 4.1 set up the schema; 4.2 set up the content home + route; 4.3 built the Web Component for readers. 4.4 adds the producer side — a new agent that generates a quiz for each just-published daily piece, strongly biased toward teaching the UNDERLYING CONCEPT (never the piece's specifics). Mirrors Categoriser's post-publish alarm pattern.

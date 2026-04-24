@@ -132,6 +132,14 @@ class_name = "InteractiveGeneratorAgent"
 tag = "v13"
 new_sqlite_classes = ["InteractiveGeneratorAgent"]
 
+[[durable_objects.bindings]]
+name = "INTERACTIVE_AUDITOR"
+class_name = "InteractiveAuditorAgent"
+
+[[migrations]]
+tag = "v14"
+new_sqlite_classes = ["InteractiveAuditorAgent"]
+
 # R2 bucket for audio storage
 [[r2_buckets]]
 binding = "AUDIO_BUCKET"

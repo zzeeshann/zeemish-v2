@@ -21,6 +21,7 @@ export interface Env {
   DRAFTER: DurableObjectNamespace;
   CATEGORISER: DurableObjectNamespace;
   INTERACTIVE_GENERATOR: DurableObjectNamespace;
+  INTERACTIVE_AUDITOR: DurableObjectNamespace;
   AUDIO_BUCKET: R2Bucket;
   GITHUB_TOKEN: string;
   ADMIN_SECRET: string;

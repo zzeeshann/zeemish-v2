@@ -242,6 +242,34 @@ if (pieceId) {
   } catch { /* leave empty */ }
 }
 
+// Interactive metadata — loaded only when the piece has one. NULL
+// interactive_id means "not yet generated OR prior auditor max-fail"
+// — indistinguishable at the DB level, same retry action.
+type InteractiveRow = {
+  id: string;
+  slug: string;
+  title: string;
+  concept: string | null;
+  voice_score: number | null;
+  quality_flag: 'low' | null;
+  revision_count: number | null;
+  published_at: number | null;
+};
+let interactiveRow: InteractiveRow | null = null;
+if (piece?.interactive_id) {
+  try {
+    const res = await db
+      .prepare(
+        `SELECT id, slug, title, concept, voice_score, quality_flag,
+                revision_count, published_at
+         FROM interactives WHERE id = ? LIMIT 1`,
+      )
+      .bind(piece.interactive_id)
+      .first<InteractiveRow>();
+    interactiveRow = res ?? null;
+  } catch { /* leave null */ }
+}
+
 type ZitaConversation = { user_id: string; msgs: ZitaMessage[] };
 const zitaConvos: ZitaConversation[] = (() => {
   const byUser = new Map<string, ZitaMessage[]>();
@@ -754,6 +782,70 @@ function publishedDisplay(): string {
         </details>
       </section>
 
+      <!-- Interactive (Area 4) -->
+      <section class="mb-10">
+        <details class="group" open={!interactiveRow}>
+          <summary class="flex items-baseline justify-between gap-4 mb-4 cursor-pointer list-none py-1">
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-zee-muted">Interactive</h2>
+            <span class="flex items-center gap-2 text-xs text-zee-muted tabular-nums">
+              {interactiveRow ? (
+                <span>
+                  <span class="text-zee-primary">published ✓</span>
+                  {interactiveRow.voice_score != null && <> · voice {interactiveRow.voice_score}/100</>}
+                  {interactiveRow.revision_count != null && interactiveRow.revision_count > 0 && (
+                    <> · {interactiveRow.revision_count} revision{interactiveRow.revision_count === 1 ? '' : 's'}</>
+                  )}
+                </span>
+              ) : (
+                <span class="text-zee-gold">not generated</span>
+              )}
+              <span class="text-zee-muted/60 group-open:rotate-90 transition-transform" aria-hidden="true">▸</span>
+            </span>
+          </summary>
+
+          {interactiveRow ? (
+            <div class="border border-zee-border rounded-xl p-4 md:p-5">
+              <p class="text-base font-medium mb-1">{interactiveRow.title}</p>
+              {interactiveRow.concept && (
+                <p class="text-sm text-zee-muted mb-3 leading-relaxed">{interactiveRow.concept}</p>
+              )}
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-zee-muted tabular-nums mb-3">
+                <span>slug: <code class="text-zee-text bg-zee-border/40 px-1 rounded">{interactiveRow.slug}</code></span>
+                {interactiveRow.voice_score != null && <span>voice {interactiveRow.voice_score}/100</span>}
+                <span>revisions: {interactiveRow.revision_count ?? 0}</span>
+                {interactiveRow.quality_flag === 'low' && <span class="text-zee-gold">⚠ low quality</span>}
+              </div>
+              <a
+                href={`/interactives/${interactiveRow.slug}/`}
+                class="inline-flex items-center text-sm text-zee-primary hover:underline"
+              >
+                View at /interactives/{interactiveRow.slug}/ →
+              </a>
+            </div>
+          ) : (
+            <div class="border border-zee-border rounded-xl p-4 md:p-5">
+              <p class="text-sm text-zee-muted mb-4 italic">
+                No interactive for this piece yet. Either the Generator hasn't run (pre-Area-4 piece, or natural alarm hasn't fired) or a prior run failed (auditor max-fail, parse error). Same retry action either way.
+              </p>
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  id="interactive-retry-btn"
+                  data-piece-id={pieceId}
+                  class="px-4 py-2 bg-zee-primary text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity"
+                  disabled={!pieceId}
+                >
+                  Retry interactive
+                </button>
+                <span id="interactive-retry-status" class="text-xs text-zee-muted"></span>
+              </div>
+              <p class="text-xs text-zee-muted mt-3 leading-relaxed">
+                Fires InteractiveGenerator + Auditor against this piece. Up to 3 audit rounds; on max-fail the piece simply has no interactive (same as now). Check the observer events below for the outcome.
+              </p>
+            </div>
+          )}
+        </details>
+      </section>
+
       <!-- Scanner candidates -->
       {candidates.length > 0 && (
         <section class="mb-10">
@@ -1040,6 +1132,44 @@ function publishedDisplay(): string {
       }
     });
   }
+
+  // Interactive retry — fires InteractiveGenerator (+ internal Auditor
+  // loop) against this piece. Shown when daily_pieces.interactive_id
+  // IS NULL. Idempotent: if a prior run succeeded between page load
+  // and click, the agent short-circuits with skipped=true.
+  const interactiveBtn = document.getElementById('interactive-retry-btn') as HTMLButtonElement | null;
+  const interactiveStatus = document.getElementById('interactive-retry-status');
+
+  interactiveBtn?.addEventListener('click', async () => {
+    if (!interactiveStatus) return;
+    const pid = interactiveBtn.dataset.pieceId ?? '';
+    if (!pid) {
+      interactiveStatus.textContent = 'Missing piece_id — button is misconfigured.';
+      return;
+    }
+    interactiveBtn.disabled = true;
+    interactiveStatus.textContent = 'Starting Generator + Auditor loop…';
+    try {
+      const qs = new URLSearchParams({ piece_id: pid });
+      const res = await fetch(`/api/agents/interactive-retry?${qs.toString()}`, { method: 'POST' });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const body = await res.json() as { error?: string };
+          if (body.error) detail = body.error;
+        } catch { /* not JSON */ }
+        interactiveStatus.textContent = `Failed: ${res.status} ${detail}`;
+        interactiveBtn.disabled = false;
+        return;
+      }
+      interactiveStatus.textContent = 'Started — Generator runs up to 3 audit rounds. Refresh in ~90 seconds.';
+      setTimeout(() => window.location.reload(), 90_000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Network error';
+      interactiveStatus.textContent = `Failed: ${msg}`;
+      interactiveBtn.disabled = false;
+    }
+  });
 
   // Zita-synthesis manual trigger — fires Learner.analyseZitaPatternsDaily
   // for this piece without waiting for the 01:45 UTC day+1 alarm. The
