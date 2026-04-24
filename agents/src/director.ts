@@ -1291,16 +1291,26 @@ export class DirectorAgent extends Agent<Env, DirectorState> {
     this.setState({ ...this.state, status: 'idle', currentPhase: null, currentTask: null });
   }
 
-  /** Get recent daily piece headlines to avoid repetition */
-  private async getRecentDailyPieces(days: number): Promise<string[]> {
+  /** Recent daily pieces surfaced to Curator to avoid repetition. Includes
+   *  `underlying_subject` alongside `headline` so Claude can detect conceptual
+   *  overlap across different-source / different-headline same-story picks
+   *  (the 2026-04-24 twin-pieces incident — both taught information asymmetry
+   *  via prediction markets from the same news event). Headlines alone lexically
+   *  look different; subjects make the semantic cluster legible. */
+  private async getRecentDailyPieces(
+    days: number,
+  ): Promise<Array<{ headline: string; underlyingSubject: string }>> {
     try {
       const since = new Date();
       since.setDate(since.getDate() - days);
       const result = await this.env.DB
-        .prepare('SELECT headline FROM daily_pieces WHERE date >= ? ORDER BY date DESC')
+        .prepare('SELECT headline, underlying_subject FROM daily_pieces WHERE date >= ? ORDER BY date DESC')
         .bind(since.toISOString().slice(0, 10))
-        .all<{ headline: string }>();
-      return result.results.map((r) => r.headline);
+        .all<{ headline: string; underlying_subject: string }>();
+      return result.results.map((r) => ({
+        headline: r.headline,
+        underlyingSubject: r.underlying_subject,
+      }));
     } catch { return []; }
   }
 

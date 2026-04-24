@@ -41,13 +41,20 @@ If NO candidate is teachable enough (all score below 60), return:
 
 export function buildCuratorPrompt(
   candidates: DailyCandidate[],
-  recentPieces: string[],
+  recentPieces: Array<{ headline: string; underlyingSubject: string }>,
 ): string {
+  const recentBlock = recentPieces.length > 0
+    ? recentPieces
+        .map((p) => `- "${p.headline}"\n  Underlying subject: ${p.underlyingSubject}`)
+        .join('\n\n')
+    : 'None yet.';
   return `## Today's news candidates:
 ${candidates.map((c, i) => `${i + 1}. id: ${c.id}\n   [${c.category}] "${c.headline}" (${c.source})\n   ${c.summary}`).join('\n\n')}
 
-## Already published recently — includes today's earlier picks if any (avoid repetition):
-${recentPieces.length > 0 ? recentPieces.join('\n') : 'None yet.'}
+## Already published recently — avoid repetition of UNDERLYING SUBJECT, not just headline wording. Includes today's earlier picks if any:
+${recentBlock}
 
-Pick the most teachable story and create a brief. Return JSON only. The "selectedCandidateId" field MUST be the exact id string shown next to the chosen candidate above — do not invent, truncate, or guess.`;
+Pick the most teachable story and create a brief. If a candidate's underlying concept is the same as one already published (even if the headline is worded differently, even from a different news source, even about a different country or company), PREFER a different candidate — unless the news is genuinely developing in a way that warrants follow-up teaching. Two pieces teaching the same concept on the same day is a failure state.
+
+Return JSON only. The "selectedCandidateId" field MUST be the exact id string shown next to the chosen candidate above — do not invent, truncate, or guess.`;
 }

@@ -2,6 +2,28 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Curator prompt enriched with recent-piece semantic context (duplicate-pick fix)
+
+**Context / trigger:** At `interval_hours=12` the 2026-04-24 02:00 UTC and 14:00 UTC cron slots both produced pieces about the same news event — a US soldier charged with using classified intelligence to bet $400K on Maduro's ouster via a prediction market. Both pieces taught the same underlying subject (information asymmetry / prediction markets). Drafter, reading the learnings feed, produced twin titles ("When Someone Knows the Future" / "When One Person Knows the Future") — smoking gun that Curator handed it the same subject twice. The 14:01 UTC piece was deleted under operator-led cleanup; this entry covers the prevention commit.
+
+**Root cause:** Curator's "Already published recently" prompt block at [agents/src/curator-prompt.ts](../agents/src/curator-prompt.ts) passed only `headline` strings. `getRecentDailyPieces(30)` at [agents/src/director.ts](../agents/src/director.ts) SELECTed `headline` only. At 14:00 UTC, Claude DID see "When Someone Knows the Future" in the recent list — but the 14:00 candidate from AP News was "US soldier charged with using classified intel to win $400K…", lexically different enough to pick. Headlines alone don't convey "same underlying concept"; two wire services covering the same event produce different headline shapes. Scanner doesn't cross-run de-dup on concept (by design — the `seenHeadlines` Set only applies within a single scan).
+
+**Decisions:**
+
+1. **Use existing `underlying_subject` column, not a new `underlying_concept` one.** FOLLOWUPS `[observing] 2026-04-19: Curator conceptual diversity (P1.2)` proposed a new column with Claude-derived concept tags + concept-distance scoring. That's the full path. This commit takes the smaller one: `daily_pieces.underlying_subject` is already populated on every row (Drafter writes it on publish; Drafter just wrote it as `"Information asymmetry, prediction markets, and market integrity"` on the 02:01 piece and `"Information asymmetry and prediction markets"` on the 14:01 piece — those strings alone would have been enough semantic context for Claude to spot the overlap). Zero migration, zero backfill, zero new Claude call. If the smaller fix doesn't hold after a week, escalate to the full P1.2 path.
+
+2. **Subject rendered as a 2-line mini-card per recent piece, not a separate block.** Format: `- "{headline}"\n  Underlying subject: {underlying_subject}`. Co-locating the headline + subject makes the semantic overlap legible at a glance; separating them into two lists would invite Claude to scan one and not the other. 30-day lookback unchanged — the same window was already working for genuinely-different stories; only the signal quality needed widening.
+
+3. **Prompt instruction strengthened to name the failure.** Added: "Two pieces teaching the same concept on the same day is a failure state" + "even if the headline is worded differently, even from a different news source, even about a different country or company." Explicit about the fact-pattern the 2026-04-24 incident exhibited — same concept, different wire service, different lexical framing. Also reframed the section header from "avoid repetition" to "avoid repetition of UNDERLYING SUBJECT, not just headline wording" so the signal is named at the top of the block, not buried in the instruction.
+
+4. **Kept `description` field out of the mini-card.** `daily_pieces` has no `description` column — the Drafter-written description lives in MDX frontmatter only. Could have joined against the content collection from the site side, but Curator runs in the agents worker without filesystem access to `content/daily-pieces/`. Adding a `description` column to `daily_pieces` would be a migration + backfill + writer thread for a marginal signal on top of `underlying_subject`. Skipped.
+
+5. **No Scanner change.** Scanner's `seenHeadlines` de-dup is within-scan only, which is correct — cross-run de-dup by headline prefix would miss different-source same-event pairs (the exact 2026-04-24 case). Cross-run de-dup by concept requires the P1.2 column work. In the meantime, Curator is the right layer to catch this: Scanner surfaces candidates honestly, Curator picks with semantic context. Keeping the concerns separate.
+
+6. **Fail-open on DB read error preserved.** The wider SELECT (`headline, underlying_subject`) stays inside the same try/catch that returns `[]` on failure. An empty recent list is better than a blocked pipeline — the pre-publish audit gates will still catch a bad pick, and cross-day repetition is lower blast-radius than a missed day.
+
+**Verification trigger:** 2026-04-25 02:00 UTC cron run. If that run picks a story whose subject is distinct from the 2026-04-24 02:01 piece (which stays live as the 2026-04-24 canonical), the enrichment is working. P1.2 FOLLOWUPS entry stays `[observing]` — one run is not a trend; keep watching for the next week before deciding whether to layer the full `underlying_concept` + distance-scoring path on top.
+
 ## 2026-04-24: Area 4 sub-task 4.7 — Interactive engagement tracking endpoint
 
 **Context:** Final sub-task of Area 4. Prior sub-tasks left three client call sites POSTing to `/api/interactive/track` and 404-ing silently: `<quiz-card>` on mount (`interactive_started`) and on results render (`interactive_completed` with score + per-question correctness), and `<lesson-shell>` when the last beat with a passing interactive becomes active (`interactive_offered`). 4.7 builds the endpoint and flips those calls from 404-silent to 200-landed.

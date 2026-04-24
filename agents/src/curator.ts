@@ -30,7 +30,7 @@ export class CuratorAgent extends Agent<Env, CuratorState> {
 
   async curate(
     candidates: DailyCandidate[],
-    recentPieces: string[],
+    recentPieces: Array<{ headline: string; underlyingSubject: string }>,
   ): Promise<CuratorResult> {
     this.setState({ ...this.state, status: 'curating', error: null });
 

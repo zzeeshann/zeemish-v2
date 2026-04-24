@@ -667,6 +667,8 @@ Option 1 is what the external plan recommends. Not a hard constraint — Curator
 
 **Unblock after:** one week of pieces (by 2026-04-26) — check if the closed loop has shifted Curator's clustering on its own, or if hard-coded concept-distance is still needed. If clustering has organically diversified, close as `[resolved]` with a DECISIONS entry naming the organic resolution. If clustering persists, promote to `[open]` and ship option 1.
 
+**Update 2026-04-24 — smaller-scope fix shipped; entry stays `[observing]`:** 2026-04-24 hit a worse-than-anticipated version of the clustering: at `interval_hours=12`, the 02:00 UTC and 14:00 UTC slots both produced pieces teaching information asymmetry / prediction markets from the same news event (soldier bets on Maduro ouster). The observation arrived two days before the planned 2026-04-26 unblock date, and same-day-not-week-over-week. Shipped the smaller option — enriched Curator's "Already published recently" prompt with each recent piece's `underlying_subject` alongside its headline (zero schema change, zero backfill; `underlying_subject` already written by Drafter on every row). The 14:01 UTC duplicate was operator-deleted. Full P1.2 path (new `underlying_concept` column + concept-distance scoring per option 1 above) deliberately NOT shipped — the smaller fix uses an already-populated column and covers the observed failure mode (different wire services, different lexical framing, same concept). Re-evaluate in a week: if another same-concept pair lands post-fix, escalate to the full P1.2 path. Full rationale in DECISIONS 2026-04-24 "Curator prompt enriched with recent-piece semantic context".
+
 ---
 
 ## [resolved] 2026-04-20: Audit sibling dashboard API endpoints for the same dead-code pattern
