@@ -12,13 +12,18 @@ interface Props {
   beatCount?: number;
   subject?: string;
   date?: string;
+  /** daily_pieces.id (UUID) — optional. When present, scopes Zita
+   *  observer events (truncation, Claude errors, handler errors) to the
+   *  piece via piece_id. Migration 0020 added the column (2026-04-22);
+   *  site-worker threading completes the loop in sub-task 3.2. */
+  pieceId?: string;
   voiceScore?: number;
   qualityFlag?: 'low';
   /** Optional one-line description for social-share meta. */
   description?: string;
 }
 
-const { title, estimatedTime, audioBeats, beatCount, subject, date, voiceScore, qualityFlag, description } = Astro.props;
+const { title, estimatedTime, audioBeats, beatCount, subject, date, pieceId, voiceScore, qualityFlag, description } = Astro.props;
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
 // Tier is a quiet, consistent signal shown in the metadata line — same
 // visual weight as the date. Every piece shows its tier (not just rough
@@ -75,6 +80,7 @@ if (date) {
     course="daily"
     lesson="0"
     piece-date={date}
+    piece-id={pieceId}
     title={title}
   />
 </BaseLayout>

@@ -2,6 +2,38 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-24: Area 3 sub-task 3.2 — Piece page observer events strictly scoped by piece_id
+
+**Context:** The admin piece-detail page's observer section was pooling both same-day pieces' events at 12h cadence, plus system events (admin_settings_changed, zita_rate_limited) that aren't about any piece. Migration 0020 added `observer_events.piece_id` on 2026-04-22, but the query on the piece page still OR'd with a 36h day-window fallback for legacy null-piece_id rows — and four site-worker Zita writers never had their piece_id threading completed (the "bigger cross-cutting refactor deferred" in CLAUDE.md from 2026-04-22). This sub-task closes that gap and drops the fallback.
+
+**Decisions:**
+
+1. **Drop the 36h day-window fallback on the piece page.** The query is now strict: `SELECT * FROM observer_events WHERE piece_id = ? ORDER BY created_at ASC`. Legacy null-piece_id rows (pre-migration-0020 historical + rate-limit events by design) become invisible on per-piece pages. They stay visible on the global admin feed — that surface keeps a time-window query because it's the right level for cross-piece operational triage. No data is lost; the visibility classification is corrected.
+
+2. **Thread piece-id client → API for Zita.** The path: [content frontmatter `pieceId`] → [`daily/[date]/[slug].astro`](../src/pages/daily/[date]/[slug].astro) passes `pieceId` prop → [`LessonLayout.astro`](../src/layouts/LessonLayout.astro) emits `piece-id` attribute on `<zita-chat>` → [`zita-chat.ts`](../src/interactive/zita-chat.ts) reads attribute and includes `piece_id` in POST body → [`/api/zita/chat`](../src/pages/api/zita/chat.ts) validates UUID shape and threads into `logObserverEvent` `pieceId` parameter for three writes (truncated / claude_failed / handler_threw).
+
+3. **Rate-limit observer event stays null-piece_id.** The rate-limit check at [chat.ts:60](../src/pages/api/zita/chat.ts:60) fires BEFORE `request.json()` so we don't yet have `piece_date` or `piece_id` when logging the event. Moving rate-limiting post-parse would let attackers trigger JSON-parse work at unlimited RPS. Rate-limit events stay system-level (null piece_id) — admin sees them on the global feed alongside `admin_settings_changed`, never on a piece page. Correct classification, not a gap.
+
+4. **UUID validation on `piece_id` input.** Server-side regex `/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i`. Malformed input is treated as absent (falls back to null piece_id) rather than rejected with 400. Reason: legacy cached reader bundles that predate this sub-task will send `piece_id: null` or `undefined`; both normalise to null cleanly. A strict 400 would break every cached client until they reload. Defensive: a malformed UUID also can't be bound into the schema column (we've chosen not to add a CHECK constraint, consistent with every other join column in this codebase — a bad value there would be invisible clutter rather than a sev-0 corruption). Falling back to null keeps the bad value out of `piece_id` entirely.
+
+5. **Keep `piece_date` required for `course_slug='daily'`; `piece_id` stays optional.** The existing `piece_date` required-validation at [chat.ts:83](../src/pages/api/zita/chat.ts:83) is the primary scope signal for `zita_messages` (piece_date column has been populated since migration 0012). `piece_id` layers on top for observer-event routing only. Making `piece_id` required now would 400 every legacy cached client; making it required later (after cache turns over ~7d) is cheaper if it turns out to matter. Observer events still route correctly when present and fall back cleanly when absent.
+
+**Trade-offs:**
+- Pre-migration-0020 observer events (written before 2026-04-22) remain null-piece_id and are now invisible on per-piece admin pages. Acceptable — they're historical clutter that was never really "about" a specific piece in a reliable way, and the day-window query that surfaced them was already wrong at multi-per-day.
+- Observer events for Zita chats initiated by a legacy cached client (pre-this-commit bundle) land with null piece_id. Self-healing once browsers reload the new bundle. Window of exposure = browser cache turnover ≤ ~7d.
+- No backfill of null-piece_id observer_events rows attempted. Reason: most existing null rows are legitimately non-piece (rate-limit, admin settings, server errors); guessing piece_id for the rest from (created_at, date-window) intersection would be noisy and the result low-value (historical forensics the ops team doesn't actually reach for). If we ever need to close this, a migration can backfill by matching `created_at` against `daily_pieces.published_at` windows — cheaper after the fact than preemptively.
+
+**Files:** EDIT [`src/pages/daily/[date]/[slug].astro`](../src/pages/daily/[date]/[slug].astro), [`src/layouts/LessonLayout.astro`](../src/layouts/LessonLayout.astro), [`src/interactive/zita-chat.ts`](../src/interactive/zita-chat.ts), [`src/pages/api/zita/chat.ts`](../src/pages/api/zita/chat.ts), [`src/pages/dashboard/admin/piece/[date]/[slug].astro`](../src/pages/dashboard/admin/piece/[date]/[slug].astro). EDIT [CLAUDE.md](../CLAUDE.md) (sub-task 3.2 entry under Area 3).
+
+**Verification:**
+- `pnpm build` clean.
+- Preview `localhost:4321/daily/2026-04-17/...`: `<zita-chat>` has `piece-id="59a7f53b-9a32-443e-bfa3-27af4471bbff"` attribute; submitting a message captures POST body with `piece_id` field populated.
+- Seeded 3 observer_events locally (one with matching piece_id, one null piece_id, one other piece's piece_id). Curled admin piece page: only the matching piece_id event rendered; stats row shows "1 event"; null-piece_id system event and other-piece event correctly absent.
+
+**Commit:** next.
+
+---
+
 ## 2026-04-24: Area 3 sub-task 3.1 — Compress admin piece-detail page
 
 **Context:** `/dashboard/admin/piece/<date>/<slug>/` is dense — timeline, every audit round expanded, up to 50 scanner candidates, all observer events, audio rows, the raw-JSON dumps, and (on traffic-heavy pieces) 40+ Zita messages. At ~9 pieces today the wall is tolerable; at 50 it's painful; at 365 it's unusable. First sub-task of the Area 3 arc.

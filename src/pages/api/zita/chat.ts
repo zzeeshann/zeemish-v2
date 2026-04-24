@@ -72,7 +72,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
   try { body = await request.json(); }
   catch { return new Response(JSON.stringify({ error: 'Invalid request' }), { status: 400 }); }
 
-  const { message, course_slug, lesson_number, piece_date, lesson_title, lesson_context } = body;
+  const { message, course_slug, lesson_number, piece_date, piece_id, lesson_title, lesson_context } = body;
 
   if (!message || !course_slug || lesson_number == null) {
     return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
@@ -83,6 +83,15 @@ export const POST: APIRoute = async ({ locals, request }) => {
   if (course_slug === 'daily' && (typeof piece_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(piece_date))) {
     return new Response(JSON.stringify({ error: 'Missing or invalid piece_date' }), { status: 400 });
   }
+
+  // piece_id is optional on the wire (legacy cached client bundles may
+  // predate sub-task 3.2 threading). Validate UUID shape when present;
+  // anything malformed is treated as absent so observer events fall
+  // back to null-piece_id rather than bleeding a malformed value into
+  // the column. Strict UUID regex — same shape agents-side emits via
+  // crypto.randomUUID().
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const scopedPieceId: string | null = (typeof piece_id === 'string' && UUID_RE.test(piece_id)) ? piece_id : null;
 
   // Input validation: limit message length to prevent API cost abuse
   if (typeof message !== 'string' || message.length > 2000) {
@@ -127,6 +136,7 @@ export const POST: APIRoute = async ({ locals, request }) => {
         loadedCount: ZITA_HISTORY_LIMIT,
         clippedCount: totalCount - ZITA_HISTORY_LIMIT,
       },
+      pieceId: scopedPieceId,
     });
   }
 
@@ -187,6 +197,7 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
           pieceDate: piece_date ?? null,
           upstreamBody,
         },
+        pieceId: scopedPieceId,
       });
       return new Response(JSON.stringify({ error: 'Zita is temporarily unavailable. Try again later.' }), { status: 503 });
     }
@@ -229,6 +240,7 @@ ${lesson_context ? `\nWhat the reader has been learning:\n${lesson_context}` : '
         pieceDate: piece_date ?? null,
         errorMessage: msg,
       },
+      pieceId: scopedPieceId,
     });
     return new Response(JSON.stringify({ error: msg }), { status: 500 });
   }
