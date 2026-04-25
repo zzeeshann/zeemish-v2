@@ -588,7 +588,7 @@ function renderInteractiveSection(i: NonNullable<MadeEnvelope['interactive']>): 
   if (i.voiceScore != null) meta.push(`Voice ${i.voiceScore}/100`);
   meta.push(revisionsLabel);
   const lowNote = i.qualityFlag === 'low'
-    ? `<p class="made-interactive-low made-tier-rough">Shipped as <strong>Rough</strong> — auditor max-failed at 3 rounds. The reader can still try it.</p>`
+    ? `<p class="made-interactive-low">The auditor flagged a concern beyond voice across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves.</p>`
     : '';
   return `
     <section class="made-section">

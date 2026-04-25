@@ -2,6 +2,38 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Drawer drops Rough tier label for interactive `quality_flag='low'`
+
+**Context / trigger:** The transparency drawer at `/daily/<date>/<slug>/#made` shipped a self-contradicting message on the 2026-04-25 Maine piece. The "interactive built from this piece" section read **"A quiz titled 'Proportional Displacement and Attribution' · Voice 88/100 · 2 revisions"** with a muted note immediately below: **"Shipped as Rough — auditor max-failed at 3 rounds. The reader can still try it."** Voice 88/100 is **Polished** tier in the daily-piece tier system at [src/lib/audit-tier.ts:27](../src/lib/audit-tier.ts:27) (≥85). The drawer borrowed the word "Rough" from a vocabulary that has nothing to do with this state. Reader sees a contradiction; brand pays the cost.
+
+The two vocabularies mean different things:
+- **Daily-piece tiers** (`polished` / `solid` / `rough`) are pure functions of `voice_score`. "Rough" = voice <70.
+- **Interactive `quality_flag='low'`** fires whenever ANY of the four InteractiveAuditor dimensions (voice / structure / essence / factual) max-fails all 3 rounds, per the 2026-04-24 ship-as-low reversal of sub-task 4.5. Voice is one of four dimensions, not the gate.
+
+The Maine quiz passed voice (88), structure, and factual at the final round — it failed essence, the same way the FISA quiz failed essence on 2026-04-24. Both were the only `quality_flag='low'` rows in `interactives` (2 of 6 total artefacts as of writing). Both showed Voice 88 + "Rough" in the drawer. The label was wrong on every shipped-low artefact since the drawer's "How this was made" extension landed.
+
+**Decision:** drop the daily-piece tier vocabulary from `renderInteractiveSection`'s `qualityFlag === 'low'` branch entirely. New copy names what actually happened:
+
+> "The auditor flagged a concern beyond voice across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves."
+
+The `made-tier-rough` CSS class drops from the `<p>` (it was importing daily-piece tier styling — colour `#6B6B6B` — into a non-tier context). `.made-interactive-low` gains `color: #6B6B6B` standalone so the visual hierarchy (subtle informational note vs. brand-green CTA) survives the class drop.
+
+**What's deliberately NOT in this commit:**
+- **Naming the failed dimension** ("essence-not-reference flagged"). Tempting because the `logInteractiveGeneratorMetered` observer event already carries `context.finalAudit.essencePassed` — but reading observer-event JSON from the drawer's API would couple the reader path to event-shape, fragile. Dimension naming lands cleanly on top of a future `interactive_audit_results` table (the deferred 2026-04-24 sub-task 4.1 FOLLOWUP, now triggered for separate ship).
+- **Reverting ship-as-low.** Phase-1 inspection of both shipped-low artefacts confirmed they're useful: the Maine quiz is genuinely good (5 abstract questions on proportional displacement, no proper-noun leaks); the FISA quiz is mostly good with one near-paraphrase issue. 4-of-5 acceptable questions reaching readers beats a 404. The 2026-04-24 reversal stands.
+- **Tuning the auditor's essence strictness.** The auditor IS over-firing on cases the 2026-04-24 prompt loosening explicitly listed in "Do NOT fail for" (concept-match, structural analogies, worked numeric examples, thematic echo). But that's a separate concern from the drawer copy. Diagnosis recorded against prod observer events; tuning waits for round-level data from the deferred audit-results table.
+
+**Trade-offs:**
+- New copy is longer than the original ("readers can try it and judge for themselves" vs. "The reader can still try it"). The shipped-low note is rare (2 of 6 artefacts so far, ratio expected to drop with auditor tuning), so the extra line takes minimal screen real estate at the population level.
+- Doesn't blame the auditor by name — readers don't need to know which agent flagged what. The honest framing ("auditor flagged a concern beyond voice") is enough.
+- Existing two shipped-low artefacts retroactively get the new copy on next page render. No backfill, no schema change. Drawer is rendered client-side from API JSON.
+
+**Files:** [src/interactive/made-drawer.ts](../src/interactive/made-drawer.ts) `renderInteractiveSection` lowNote, [src/styles/made.css](../src/styles/made.css) `.made-interactive-low`. CLAUDE.md "How this was made drawer surfaces post-publish agents (2026-04-25)" section's quoted copy synced + a forward note added linking to this entry.
+
+**Verification:** `pnpm build` clean. After deploy, the Maine drawer + the 2026-04-24 FISA drawer (`/daily/2026-04-24/after-2-failed-votes-mike-johnson-unveils-new-plan-to-extend-key-u-s-spy-powers/#made`) both render the new copy without the "Rough" label. Voice 88/100 line and the lowNote no longer contradict each other.
+
+---
+
 ## 2026-04-25: Surface Categoriser + Interactive in "How this was made" drawer
 
 **Context / trigger:** The transparency drawer at `/daily/<date>/<slug>/#made` advertises itself as **"the full creation story of this piece — timeline, auditors, rules."** Today it isn't. Three of the 16 agents leave no trace in the drawer: **Categoriser** (#13, since 2026-04-23 — writes to `categories` + `piece_categories`), **InteractiveGenerator** (#15, since 2026-04-24 — writes to `interactives` + sets `daily_pieces.interactive_id`), and **InteractiveAuditor** (#16, since 2026-04-24 — final state on the `interactives` row). All three run as Director alarms 1s after `publishing done` and log only to `observer_events`, not `pipeline_log`, so the drawer's existing TIMELINE block can't see them. The drawer's API queried 6 tables and skipped the 4 that hold this story. User caught it on the 2026-04-25 Maine piece; the "See if it landed →" link on the last beat (sub-task 4.6) proved a `categories` row + `interactives` row both existed for that pieceId — both invisible to the drawer.

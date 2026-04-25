@@ -636,6 +636,7 @@ made-drawer[data-open] .made-panel {
   margin: 0 0 0.75rem;
   font-size: 0.75rem;
   line-height: 1.5;
+  color: #6B6B6B;
 }
 
 .made-interactive-cta {
