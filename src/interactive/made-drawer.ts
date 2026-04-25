@@ -580,6 +580,38 @@ function renderCategory(c: MadeEnvelope['categories'][number]): string {
   `;
 }
 
+/**
+ * Reader-facing copy for `qualityFlag === 'low'`. When per-round
+ * audit data is available (post-2026-04-25 migration 0023), name
+ * the dimension(s) the auditor flagged. Otherwise fall back to the
+ * generic copy from 2026-04-25 (legacy interactives + transient
+ * D1 read failures both land here).
+ *
+ * "essence-not-reference" is the long-form name; the auditor calls
+ * the dimension `essence` internally. "essence-not-reference"
+ * better signals what the rubric measures to a non-operator reader.
+ */
+const DIMENSION_LABEL: Record<string, string> = {
+  voice: 'voice',
+  structure: 'structure & pedagogy',
+  essence: 'essence-not-reference',
+  factual: 'factual',
+};
+
+function buildLowNote(failedDimensions: string[]): string {
+  if (failedDimensions.length === 0) {
+    return 'The auditor flagged a concern beyond voice across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves.';
+  }
+  const labels = failedDimensions.map((d) => DIMENSION_LABEL[d] ?? d);
+  const joined = labels.length === 1
+    ? labels[0]
+    : labels.length === 2
+      ? `${labels[0]} and ${labels[1]}`
+      : `${labels.slice(0, -1).join(', ')}, and ${labels[labels.length - 1]}`;
+  const rubricWord = labels.length === 1 ? 'rubric' : 'rubrics';
+  return `The auditor flagged the ${joined} ${rubricWord} across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves.`;
+}
+
 function renderInteractiveSection(i: NonNullable<MadeEnvelope['interactive']>): string {
   const slug = encodeURIComponent(i.slug);
   const typeLabel = i.type || 'interactive';
@@ -588,7 +620,7 @@ function renderInteractiveSection(i: NonNullable<MadeEnvelope['interactive']>): 
   if (i.voiceScore != null) meta.push(`Voice ${i.voiceScore}/100`);
   meta.push(revisionsLabel);
   const lowNote = i.qualityFlag === 'low'
-    ? `<p class="made-interactive-low">The auditor flagged a concern beyond voice across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves.</p>`
+    ? `<p class="made-interactive-low">${escapeHtml(buildLowNote(i.failedDimensions))}</p>`
     : '';
   return `
     <section class="made-section">

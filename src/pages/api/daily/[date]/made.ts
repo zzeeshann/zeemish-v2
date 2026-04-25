@@ -329,13 +329,14 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
     try {
       const row = await db
         .prepare(
-          `SELECT slug, type, title, voice_score, quality_flag, revision_count, published_at
+          `SELECT id, slug, type, title, voice_score, quality_flag, revision_count, published_at
              FROM interactives
             WHERE source_piece_id = ?
             LIMIT 1`,
         )
         .bind(pieceIdFilter)
         .first<{
+          id: string;
           slug: string;
           type: string;
           title: string;
@@ -345,6 +346,38 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
           published_at: number | null;
         }>();
       if (row) {
+        // Latest-round failed dimensions (post-2026-04-25 migration
+        // 0023). Single query: `(interactive_id, round)` index covers
+        // both the WHERE and the GROUP BY. Returns empty array for
+        // legacy interactives (no rows) or clean passes (all passed=1
+        // — filtered out). Fixed-order sort matches the Auditor's
+        // dimension order so drawer copy reads naturally.
+        let failedDimensions: string[] = [];
+        try {
+          const auditRes = await db
+            .prepare(
+              `SELECT dimension
+                 FROM interactive_audit_results
+                WHERE interactive_id = ?
+                  AND round = (
+                    SELECT MAX(round)
+                      FROM interactive_audit_results
+                     WHERE interactive_id = ?
+                  )
+                  AND passed = 0
+                ORDER BY CASE dimension
+                  WHEN 'voice'     THEN 1
+                  WHEN 'structure' THEN 2
+                  WHEN 'essence'   THEN 3
+                  WHEN 'factual'   THEN 4
+                  ELSE 5
+                END`,
+            )
+            .bind(row.id, row.id)
+            .all<{ dimension: string }>();
+          failedDimensions = auditRes.results.map((r) => r.dimension);
+        } catch { /* legacy or transient — leave empty */ }
+
         const interactive: MadeInteractive = {
           slug: row.slug,
           type: row.type,
@@ -353,6 +386,7 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
           qualityFlag: row.quality_flag === 'low' ? 'low' : null,
           revisionCount: row.revision_count ?? 0,
           publishedAt: row.published_at ?? null,
+          failedDimensions,
         };
         envelope.interactive = interactive;
       }

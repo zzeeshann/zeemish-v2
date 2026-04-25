@@ -2,6 +2,60 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Ship `interactive_audit_results` table — closes deferred 4.1, unblocks dimension-naming in drawer
+
+**Context / trigger:** The same-day "Drawer drops Rough tier label" fix landed honest copy ("The auditor flagged a concern beyond voice…") but couldn't say WHICH rubric the auditor flagged because the data wasn't persisted. The `logInteractiveGeneratorMetered` observer event already carried per-dimension pass/fail in its `context.finalAudit` JSON, but reading event-shape from the reader path would couple the drawer to event-context shape — fragile. Sub-task 4.1's deferred FOLLOWUP (`interactive_audit_results` table) had been logged on 2026-04-24 with two unblock conditions: "when 4.5 ships OR first debugging session needs the context." Both became true on 2026-04-25 — Phase-1 diagnosis of the 2026-04-25 Maine + 2026-04-24 FISA shipped-low artefacts showed the auditor over-firing on essence on cases the loosened prompt explicitly listed as "Do NOT fail for" (concept-match, structural analogies, worked numeric examples, thematic echo). Tuning the prompt is downstream — but tuning blind without round-by-round data would risk over-correcting. Schema-fits-the-need over query-layer bandaid.
+
+**Decisions:**
+
+1. **Schema mirrors `audit_results` for daily pieces.** `interactive_audit_results(id TEXT PK, interactive_id TEXT NOT NULL, round INTEGER NOT NULL, dimension TEXT NOT NULL, passed INTEGER NOT NULL, score INTEGER, notes TEXT, created_at INTEGER NOT NULL)` + composite index on `(interactive_id, round)`. The deferred FOLLOWUP entry's hint had `auditor TEXT NOT NULL` to mirror the daily-piece column name; renamed to `dimension` because that's the term used everywhere else in the interactive code path (`InteractiveAuditDimension`, `audit.essence.passed`, etc.). Operator clarity beats column-name parity.
+
+2. **Loose TEXT for `dimension` not enum / CHECK.** Consistent with `observer_events.severity`, `learnings.source`, `learnings.category`, `audit_results.auditor`. Adding/folding dimensions stays a zero-migration change. Risk: a typo in the writer drops a row into a never-queried bucket — caught at the next code review since the dimension list is enumerated in [persistAuditRows](agents/src/interactive-generator.ts) directly.
+
+3. **No FK REFERENCES.** Consistent with every other join column in this codebase's 22 prior migrations. Application-layer integrity. Orphan rows from declined-path generations (Generator pre-allocates `interactiveId` before the loop, then bails on Claude's empty-shape decline) are tolerated — same pattern `audit_results` has carried with orphan piece_ids since the day-keyed era.
+
+4. **`score INTEGER` nullable, voice only.** Voice scores 0–100; the three binary dimensions (structure/essence/factual) leave NULL. Matches the auditor's actual return shape (`voice.score`, `structure.passed` only, etc.).
+
+5. **`notes TEXT` as JSON-stringified array.** Same shape `audit_results.notes` carries today. Combines `violations` + `suggestions` into one array per row to keep the reader-side parsing simple — splitting them would require another column or a discriminator field on each item. The auditor's `violations`/`issues` come first in the array, suggestions second; if a future reader wants to render them distinctly, the order is preserved.
+
+6. **Pre-allocate `interactiveId` before the produce→audit→revise loop.** Matches Director's pre-allocate-piece_id pattern from the 2026-04-22 piece_id schema fix. Was previously allocated inside the commit branch at line 394 of [interactive-generator.ts](agents/src/interactive-generator.ts); moving it up means audit rows have a stable FK regardless of commit/decline outcome. Cost: a wasted UUID + up to 12 orphan rows on the declined path. Wins: one writer site, no two-phase commit, no in-memory buffering of audit summaries through the loop. Audit_results already tolerates orphans from the day-keyed era; this matches the convention.
+
+7. **Best-effort persistence inside the loop.** `persistAuditRows` is wrapped in its own try/catch; a write failure logs to `console.error` but does NOT abort the round. The auditor's verdict drives the produce/revise/commit decision regardless of forensic persistence — the drawer's `failedDimensions` field tolerates an empty array. Safer than letting a transient D1 hiccup max-fail an otherwise-passing generation.
+
+8. **D1 batch INSERT for the 4-row write.** `this.env.DB.batch([stmt1, stmt2, stmt3, stmt4])` rather than 4 sequential `.run()` calls. Single round-trip per round; matches existing patterns in `agents/src/director.ts` and `agents/src/learner.ts`. UUID pre-generation per row inside the map is cheap and explicit.
+
+9. **Reader path: latest-round only on the drawer.** Drawer is reader-facing. A future admin interactive-detail page can render full per-round history; the drawer renders just `failedDimensions: string[]` for the latest round's failed dimensions, ordered voice→structure→essence→factual. Single query with a correlated subquery for `MAX(round)`. Order matters — the auditor evaluates dimensions in this sequence, so the drawer copy reads naturally ("the voice and essence-not-reference rubrics" rather than "the essence-not-reference and voice rubrics").
+
+10. **Dimension labels long-form for readers.** `DIMENSION_LABEL` map in [made-drawer.ts](src/interactive/made-drawer.ts) renders `essence` → "essence-not-reference" (the rubric's full name) and `structure` → "structure & pedagogy" (matches the prompt's section header). Internal shorthand stays in code; readers see the human form.
+
+11. **Defense-in-depth: `escapeHtml` on `buildLowNote` output.** Even though `failedDimensions` comes from a fixed enum populated by application code, the dimension TEXT column is loose; future widening would be one less audit-trail concern.
+
+12. **No backfill.** The two existing `quality_flag='low'` rows (FISA 2026-04-24 + Maine 2026-04-25) can't be reconstructed without re-running the auditor — too expensive for forensic value. Final-round dimension-pass data IS observable for both via observer_events JSON. Both legacy artefacts will continue rendering the 2026-04-25-am generic copy ("a concern beyond voice"); fresh interactives generated post-migration will name the rubric.
+
+**Trade-offs:**
+- Adds one query per drawer render for pieces that have an interactive (~half of recent pieces). Indexed via `(interactive_id, round)` composite + correlated subquery — single round-trip. Zero cost for pieces without an interactive (the outer query early-exits).
+- Doesn't yet extend `loadMadeTeaser` — the open-affordance button still shows the same teaser counts as before. Intentional: teaser is for "what's behind the drawer" enticement, dimension-name belongs in the drawer body.
+- `notes` field stays unread by the drawer in v1 — it's persisted for the future admin per-interactive page. Could be omitted from the schema if storage cost becomes a concern; kept because (a) zero rows today and (b) the column is the bridge to the operator-facing surface this table also enables.
+- Doesn't solve the auditor over-firing problem — that's the deferred (C) follow-up. But (B) is the prerequisite for any credible (C) tuning: round-by-round data shows whether the auditor flags the same false positives across all 3 rounds (auditor stuck) or whether each round trips a new pattern (Generator + Auditor in unproductive dialog).
+
+**Files:**
+- [migrations/0023_interactive_audit_results.sql](../migrations/0023_interactive_audit_results.sql) — table + composite index, additive only.
+- [agents/src/interactive-generator.ts](../agents/src/interactive-generator.ts) — pre-allocate `interactiveId` before loop, persist 4 rows per round via new `persistAuditRows` helper, drop the now-redundant inline `crypto.randomUUID()` from the commit path.
+- [src/lib/made-by.ts](../src/lib/made-by.ts) — extend `MadeInteractive` with `failedDimensions: string[]`.
+- [src/pages/api/daily/[date]/made.ts](../src/pages/api/daily/[date]/made.ts) — added `id` to interactives SELECT, latest-round failed-dimension query.
+- [src/interactive/made-drawer.ts](../src/interactive/made-drawer.ts) — new `buildLowNote(failedDimensions)` helper + `DIMENSION_LABEL` map, `renderInteractiveSection` routes through it via `escapeHtml`.
+- Docs: SCHEMA.md (19 tables, 23 migrations + new section), AGENTS.md (Auditor "Persistence" sub-line), FOLLOWUPS.md (closes 2026-04-24 entry), CLAUDE.md (current-state + new top-level section).
+
+**Verification:**
+- `pnpm build` clean.
+- agents typecheck shape unchanged from prior session (the `persistAuditRows` helper is fully typed; pre-existing SDK-typing errors in `server.ts` are unrelated).
+- Local migration applies clean: `wrangler d1 migrations apply zeemish` adds 0023.
+- Remote migration apply: `wrangler d1 migrations apply zeemish --remote` clean.
+- Drawer renders correctly via stubbed envelope for 4 cases: clean-pass (no lowNote), shipped-low single-dimension fail, shipped-low multi-dimension fail, legacy interactive (no audit rows → generic copy).
+- After deploy, next interactive generation (cron 02:00 UTC or manual `/interactive-generate-trigger`) will produce 4–12 rows in `interactive_audit_results` keyed to the new `interactive_id`. Failure mode (generation infrastructure error) leaves orphan audit rows; declined path same.
+
+---
+
 ## 2026-04-25: Drawer drops Rough tier label for interactive `quality_flag='low'`
 
 **Context / trigger:** The transparency drawer at `/daily/<date>/<slug>/#made` shipped a self-contradicting message on the 2026-04-25 Maine piece. The "interactive built from this piece" section read **"A quiz titled 'Proportional Displacement and Attribution' · Voice 88/100 · 2 revisions"** with a muted note immediately below: **"Shipped as Rough — auditor max-failed at 3 rounds. The reader can still try it."** Voice 88/100 is **Polished** tier in the daily-piece tier system at [src/lib/audit-tier.ts:27](../src/lib/audit-tier.ts:27) (≥85). The drawer borrowed the word "Rough" from a vocabulary that has nothing to do with this state. Reader sees a contradiction; brand pays the cost.

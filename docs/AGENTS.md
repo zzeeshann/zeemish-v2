@@ -173,6 +173,7 @@ Learner: runs off-pipeline on reader engagement data
 - **Output:** `InteractiveAuditResult` — `{passed, voice: {passed, score, violations, suggestions}, structure: {passed, issues, suggestions}, essence: {passed, violations, suggestions}, factual: {passed, issues, suggestions}, tokensIn, tokensOut, durationMs}`. `passed` is `true` iff ALL four dimensions pass.
 - **Method:** `audit(quiz, piece)`
 - **Defensive pass-gate:** Claude's `passed` boolean is trusted, but clamped to threshold logic (voice `passed && score ≥ 85`; structure/essence/factual `passed && issues.length === 0`). A claimed pass with contradicting score/issues becomes a fail — protects against model inconsistencies.
+- **Persistence (post-2026-04-25):** Auditor itself doesn't write — Generator's loop persists 4 rows per round (one per dimension) to `interactive_audit_results` after each `auditor.audit()` call. Closes the deferred FOLLOWUPS 2026-04-24 sub-task 4.1 entry. Rows include `passed`, `score` (voice only), and `notes` (JSON-stringified violations + suggestions). Reader site is the made.ts API for the drawer's `failedDimensions` field. See SCHEMA.md `interactive_audit_results` + DECISIONS 2026-04-25 "Ship interactive_audit_results table".
 - **File:** `agents/src/interactive-auditor.ts`
 - **Prompt:** `agents/src/interactive-auditor-prompt.ts` (single combined prompt via `INTERACTIVE_AUDITOR_PROMPT`; voice block embeds `VOICE_CONTRACT` directly)
 

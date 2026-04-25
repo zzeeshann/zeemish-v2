@@ -264,6 +264,16 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
     };
 
     // ── 3. Produce → audit → revise loop ─────────────────────────
+    //
+    // `interactiveId` is pre-allocated here so we can persist
+    // per-round audit rows during the loop using a stable foreign
+    // key. On the declined path the id is never INSERTed into
+    // `interactives` and any audit rows already written become
+    // orphans — same pattern `audit_results` has tolerated since
+    // the day-keyed era. On the commit path (clean OR shipped-low)
+    // the same id lands in the `interactives` row at step 5.
+    const interactiveId = crypto.randomUUID();
+
     const auditor = await this.subAgent(
       InteractiveAuditorAgent,
       `interactive-auditor-${pieceId}`,
@@ -338,6 +348,21 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       cumulativeTokensIn += audit.tokensIn;
       cumulativeTokensOut += audit.tokensOut;
 
+      // Persist 4 rows (one per dimension) keyed to the pre-allocated
+      // `interactiveId` + this `round`. Best-effort: a write failure
+      // here must NOT abort the loop — the auditor's verdict drives
+      // the produce/revise/commit decision regardless of forensic
+      // persistence. Wrap in its own try so a transient D1 error
+      // can't sink an otherwise-passing generation.
+      try {
+        await this.persistAuditRows(interactiveId, round, audit);
+      } catch (e) {
+        console.error(
+          `interactive-generator: failed to persist audit rows for ${interactiveId} round ${round}`,
+          e,
+        );
+      }
+
       if (audit.passed) {
         passed = true;
         break;
@@ -391,7 +416,6 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
     const finalSlug = await this.resolveFreeSlug(lastQuiz.slug);
     lastQuiz.slug = finalSlug;
 
-    const interactiveId = crypto.randomUUID();
     const publishedAt = Date.now();
     const fileContent = JSON.stringify(
       {
@@ -578,6 +602,75 @@ export class InteractiveGeneratorAgent extends Agent<Env, InteractiveGeneratorSt
       tokensIn,
       tokensOut,
     };
+  }
+
+  /**
+   * Persist 4 rows (one per dimension) for one audit round to
+   * `interactive_audit_results`. Voice carries a 0–100 score;
+   * the three binary dimensions leave score NULL. `notes` is the
+   * auditor's per-dimension `violations` / `issues` strings,
+   * JSON-stringified — same shape `audit_results.notes` carries.
+   * Suggestions stay separate so a future reader can render them
+   * distinctly, but for v1 we collapse violations + suggestions
+   * into one `notes` array per row to keep the shape simple.
+   */
+  private async persistAuditRows(
+    interactiveId: string,
+    round: number,
+    audit: InteractiveAuditResult,
+  ): Promise<void> {
+    const now = Date.now();
+    type Row = {
+      dimension: 'voice' | 'structure' | 'essence' | 'factual';
+      passed: boolean;
+      score: number | null;
+      notes: string[];
+    };
+    const rows: Row[] = [
+      {
+        dimension: 'voice',
+        passed: audit.voice.passed,
+        score: audit.voice.score,
+        notes: [...audit.voice.violations, ...audit.voice.suggestions],
+      },
+      {
+        dimension: 'structure',
+        passed: audit.structure.passed,
+        score: null,
+        notes: [...audit.structure.issues, ...audit.structure.suggestions],
+      },
+      {
+        dimension: 'essence',
+        passed: audit.essence.passed,
+        score: null,
+        notes: [...audit.essence.violations, ...audit.essence.suggestions],
+      },
+      {
+        dimension: 'factual',
+        passed: audit.factual.passed,
+        score: null,
+        notes: [...audit.factual.issues, ...audit.factual.suggestions],
+      },
+    ];
+
+    const stmt = this.env.DB.prepare(
+      `INSERT INTO interactive_audit_results
+       (id, interactive_id, round, dimension, passed, score, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const batch = rows.map((r) =>
+      stmt.bind(
+        crypto.randomUUID(),
+        interactiveId,
+        round,
+        r.dimension,
+        r.passed ? 1 : 0,
+        r.score,
+        JSON.stringify(r.notes),
+        now,
+      ),
+    );
+    await this.env.DB.batch(batch);
   }
 
   /**

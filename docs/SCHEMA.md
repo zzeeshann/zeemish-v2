@@ -2,7 +2,7 @@
 
 Database: `zeemish` (Cloudflare D1, SQLite)
 Database ID: `f3cdccbf-7cea-4af1-b524-20f6a6fe1dd4`
-**18 tables across 22 migrations.**
+**19 tables across 23 migrations.**
 
 ## Reader-side tables
 
@@ -318,7 +318,23 @@ Append-only event log of reader interactions with interactives. Not aggregated p
 
 Indexes: `idx_int_engagement_user` on `user_id`, `idx_int_engagement_interactive` on `interactive_id`, `idx_int_engagement_int_type` on `(interactive_id, event_type)`. Migration: `0022_interactives.sql`.
 
-## Migrations summary (22 migrations, 18 tables)
+### interactive_audit_results
+Per-round per-dimension audit output for interactives. Closes the deferred FOLLOWUPS 2026-04-24 sub-task 4.1 entry. Mirrors `audit_results` for daily pieces — one row per round × dimension. Up to 12 rows per `generate()` invocation (3 rounds × 4 dimensions). Empty for all pre-2026-04-25 interactives — no backfill (final-round data available via observer_events for forensic context).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | TEXT PK | UUID |
+| interactive_id | TEXT NOT NULL | `interactives.id`. Non-enforced FK. Orphan rows (declined-path generations that never INSERTed an `interactives` row) are tolerated, same as `audit_results` orphan piece_ids from the day-keyed era. |
+| round | INTEGER NOT NULL | 1, 2, or 3. Matches `INTERACTIVE_MAX_ROUNDS` in [agents/src/interactive-generator.ts](../agents/src/interactive-generator.ts). |
+| dimension | TEXT NOT NULL | `'voice'` / `'structure'` / `'essence'` / `'factual'`. Loose TEXT — adding/folding dimensions is a zero-migration change. |
+| passed | INTEGER NOT NULL | 0 / 1. SQLite has no real boolean type. |
+| score | INTEGER | Voice only (0–100); NULL for the three binary dimensions. |
+| notes | TEXT | JSON-stringified array of the auditor's per-dimension violations + suggestions, in that order. Matches `audit_results.notes` shape. |
+| created_at | INTEGER NOT NULL | Unix ms |
+
+Indexes: `idx_int_audit_interactive_round` on `(interactive_id, round)` — composite, leftmost-prefix friendly so a single `interactive_id` lookup also benefits. Migration: `0023_interactive_audit_results.sql`.
+
+## Migrations summary (23 migrations, 19 tables)
 - `0001_init.sql` — users, progress, submissions, zita_messages
 - `0002_observer_events.sql` — agent_tasks (later dropped), observer_events
 - `0003_engagement_learnings.sql` — engagement, learnings
@@ -341,3 +357,4 @@ Indexes: `idx_int_engagement_user` on `user_id`, `idx_int_engagement_interactive
 - `0020_observer_events_piece_id.sql` — multi-per-day audit. Added nullable `piece_id TEXT` to `observer_events` + `idx_observer_events_piece`. Additive ALTER, no backfill — historical rows stay NULL and surface on per-piece admin via the existing 36h day-of-publish window fallback. New writes from `agents/src/observer.ts` (13 helpers, piece-scoped signature extended) and `src/lib/observer-events.ts` (optional `pieceId` field) populate piece_id going forward. System-event writers (admin settings changes, Zita rate limits) keep piece_id NULL permanently.
 - `0021_categories.sql` — Area 2 sub-task 2.1. Created `categories(id, slug UNIQUE, name, description, locked, piece_count, created_at, updated_at)` + `piece_categories(piece_id, category_id, confidence, created_at)` with composite PK. Data surface for the 14th agent (Categoriser, sub-task 2.2) plus the library category filter (sub-task 2.4) and admin management page (sub-task 2.5). Both tables empty at migration time — populated organically by Categoriser on new pieces and by a one-time seed script (sub-task 2.3) over pre-Categoriser pieces. Additive, rollback = DROP both tables.
 - `0022_interactives.sql` — Area 4 sub-task 4.1. Created `interactives(id, slug UNIQUE, type, title, concept, source_piece_id, content_json, voice_score, quality_flag, revision_count, published_at, created_at)` + `interactive_engagement(id, user_id, interactive_id, event_type, score, per_question_correctness, created_at)` append-only event log. Added `daily_pieces.interactive_id TEXT` as the single source of truth for "piece has an interactive" — deprecated the unused `has_interactive` INTEGER column scaffolded in 0006 (left physical since SQLite DROP COLUMN would require a `daily_pieces` rebuild with too-wide blast radius). Data surface for the 15th + 16th agents (InteractiveGenerator + InteractiveAuditor, sub-tasks 4.4 + 4.5). All new tables empty at migration time. Additive, rollback = DROP both new tables (the `daily_pieces.interactive_id` column stays inert when null if code is rolled back).
+- `0023_interactive_audit_results.sql` — Closes the deferred FOLLOWUPS 2026-04-24 sub-task 4.1 entry. Created `interactive_audit_results(id, interactive_id, round, dimension, passed, score, notes, created_at)` + composite index on `(interactive_id, round)`. Per-round per-dimension audit output, mirroring `audit_results` shape. Writer site is InteractiveGeneratorAgent's produce→audit→revise loop (writes 4 rows per round after each `auditor.audit()` call); reader site is the made.ts API for the drawer's `failedDimensions` field. Pre-allocates `interactive_id` before the loop so audit rows have a stable FK regardless of the eventual commit/decline outcome. Triggered by the 2026-04-25 Maine drawer's voice-vs-Rough contradiction — once we name the dimension that flagged, "Shipped as Rough" stops conflating tier vocabularies. Empty at migration time (the 2 existing `quality_flag='low'` rows can't be reconstructed). Additive, rollback = DROP TABLE.

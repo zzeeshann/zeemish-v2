@@ -44,11 +44,29 @@ The transparency drawer at `/daily/<date>/<slug>/#made` now surfaces the three a
 
 **Failure / decline = silent omission.** Pre-2026-04-23 / pre-2026-04-24 pieces gracefully omit both sections (no backfill, no placeholder). Categoriser failure or InteractiveGenerator decline-as-redundant → section absent (failure visibility belongs in observer_events → admin, not in the reader-facing drawer).
 
-**Deferred deliberately:** per-round InteractiveAuditor surface (the `interactive_audit_results` table from FOLLOWUPS 2026-04-24 sub-task 4.1 stays deferred — drawer is reader-facing, per-round violations on a 5-question quiz are operator-forensic; if admin ever needs them, ship the table then). `interactive_engagement` aggregates also out of scope (creation story ≠ stats dashboard). Drawer teaser counts (`loadMadeTeaser`) NOT extended — two extra queries per page render for marginal value.
+**Deferred deliberately at first ship, now resolved:** per-round InteractiveAuditor surface (`interactive_audit_results` table from FOLLOWUPS 2026-04-24 sub-task 4.1) was deferred at the drawer's first ship — "if admin ever needs them, ship the table then." It hit both unblock conditions same-day: 4.5 has shipped, AND the 2026-04-25 voice-vs-Rough drawer contradiction was a debugging session that needed dimension-named context. Migration 0023 ships the table same session as the second drawer copy fix; drawer's `failedDimensions` field reads the latest round's failed dimensions and names the rubric inline. See "Interactive audit-results table + dimension-named drawer copy (2026-04-25)" below. `interactive_engagement` aggregates still out of scope (creation story ≠ stats dashboard). Drawer teaser counts (`loadMadeTeaser`) NOT extended — two extra queries per page render for marginal value.
 
 Two new types on the `MadeEnvelope` (`MadeCategory`, `MadeInteractive`) keep the server endpoint, the Astro component, and the Web Component agreeing on shape. piece_id-keyed queries with no date-keyed fallback — both new tables (`piece_categories` + `interactives.source_piece_id`) post-date the piece_id_backfill era, so the `pieceIdFilter ? ... : ...` ternary used elsewhere in the API is unnecessary; if `pieceIdFilter` is null (stale cached drawer bundle), both sections silently omit. Each query in its own try/catch so a failure on one can't sink the other.
 
 **Verified end-to-end in dev preview** (local D1 has no Categoriser/InteractiveGenerator data — those agents only run in prod, so renderer paths verified via stubbed fetch with prod-shape envelopes; API query syntax verified directly against migrations 0021 + 0022): API returns 200 with new fields present; with stubbed prod-shape data Maine drawer renders 2 chips with `/library/<slug>/` hrefs in 87% → 64% order, CTA → `/interactives/chokepoints-and-cascades/`, copy reads "A quiz titled \"Chokepoints and Cascades\" · Voice 92/100 · 1 revision"; `qualityFlag='low'` renders the muted Rough note; plural variants (`0 revisions` / `1 revision` / `2 revisions`) all correct; mobile 375px chips wrap to 3 separate rows with no horizontal overflow; section order verified Categories → Interactive between AUDIO and COMMIT; zero console errors, zero server errors, `pnpm build` clean. See DECISIONS 2026-04-25 "Surface Categoriser + Interactive in 'How this was made' drawer" for the full design decisions including why two dedicated sections vs one combined block, why InteractiveAuditor visibility is final-state-only, and why type-agnostic copy.
+
+## Interactive audit-results table + dimension-named drawer copy (2026-04-25)
+
+Two-commit pair fixing a self-contradicting drawer message + closing the deferred 2026-04-24 sub-task 4.1 FOLLOWUP. Triggered when the 2026-04-25 Maine piece's drawer rendered "**Voice 88/100 · 2 revisions**" alongside "**Shipped as Rough**" — voice 88 is **Polished** in the daily-piece tier system at [src/lib/audit-tier.ts:27](src/lib/audit-tier.ts:27) (≥85). The drawer was borrowing the daily-piece tier word "Rough" for an interactive state that fires whenever ANY of four auditor dimensions max-fails (not just voice). Two of six shipped interactives (FISA + Maine, both essence-failed) had been rendering this contradiction since the drawer's "How this was made" extension landed earlier the same day.
+
+**Commit 1 — Drawer drops "Rough" tier label.** Same-day fix. [src/interactive/made-drawer.ts:583](src/interactive/made-drawer.ts:583) `renderInteractiveSection`'s `qualityFlag === 'low'` branch dropped the daily-piece `made-tier-rough` CSS class + the word "Rough" itself. New copy names what actually happened: *"The auditor flagged a concern beyond voice across all 3 rounds. The quiz still shipped — readers can try it and judge for themselves."* `.made-interactive-low` gained `color: #6B6B6B` standalone so the visual hierarchy survives the class drop. No schema change, no observer-event coupling. See DECISIONS 2026-04-25 "Drawer drops Rough tier label for interactive `quality_flag='low'`".
+
+**Commit 2 — `interactive_audit_results` table + dimension-named drawer copy.** Migration 0023 mirrors `audit_results` for daily pieces: `(id, interactive_id, round, dimension, passed, score, notes, created_at)` with composite `(interactive_id, round)` index. Up to 12 rows per `generate()` (3 rounds × 4 dimensions). Empty at migration time — no backfill (the 2 existing `quality_flag='low'` rows can't be reconstructed; final-round data observable via observer_events for forensic context). Writer is [InteractiveGeneratorAgent](agents/src/interactive-generator.ts) — `interactiveId` pre-allocated before the produce→audit→revise loop (matches Director's pre-Director piece_id pattern from 2026-04-22), new `persistAuditRows(interactiveId, round, audit)` helper writes 4 rows after each `auditor.audit()` call via D1 batch INSERT. Best-effort try/catch — a transient D1 failure can't sink an otherwise-passing generation. On the declined path the pre-allocated id is never INSERTed into `interactives`; orphan audit rows are tolerated (same pattern `audit_results` has carried since the day-keyed era).
+
+**Reader path:** [src/lib/made-by.ts](src/lib/made-by.ts) `MadeInteractive` gains `failedDimensions: string[]`. [src/pages/api/daily/[date]/made.ts](src/pages/api/daily/[date]/made.ts) extends the existing interactive query block — added `id` to the SELECT, then a single follow-up query filtering to the latest round's `passed=0` rows ordered voice→structure→essence→factual. Wrapped in its own try/catch so a missing table or transient error leaves `failedDimensions = []` and the drawer falls back to the 2026-04-25-am generic copy. Drawer's [renderInteractiveSection](src/interactive/made-drawer.ts) routes through new `buildLowNote(failedDimensions)` helper — when non-empty, names the rubric inline ("essence-not-reference", "structure & pedagogy", or comma/and-joined for multi-dimension fails); when empty, returns the generic copy. Dimension labels in `DIMENSION_LABEL` map: `essence` → "essence-not-reference" (long-form for readers; the auditor's internal `essence` shorthand wouldn't read naturally on the page).
+
+**`escapeHtml` wraps `buildLowNote`** in `renderInteractiveSection` even though the dimension list is a fixed enum. Defense-in-depth — one less audit-trail concern if the dimension TEXT value is ever widened.
+
+**What this enables:** the drawer is honest about which rubric flagged. A future admin interactive-detail page (eventual `/dashboard/admin/interactive/<slug>/`) can render the full revision history without a schema change. And tuning InteractiveAuditor essence (commit C in the original 3-phase plan) now has round-by-round data to work against — Phase-1 diagnosis showed 100% false-positive shipped-low artefacts on the loosened prompt's "Do NOT fail for" list (concept-match, structural analogies, worked numeric examples, thematic echo); 1–2 fresh cycles will tell us whether to ship a second tuning pass.
+
+**What's NOT in this commit:** no admin per-interactive page yet — `/dashboard/admin/interactive/<slug>/` lands when an operator-facing surface needs it (the underlying data is now persistent, so building the page is purely UI work). Per-round timeline rendering on the drawer also out of scope — drawer is reader-facing, latest-round-only is the right granularity.
+
+**Verified end-to-end in dev preview** (same approach as the 2026-04-25-am drawer ship — local D1 has no Generator/Auditor data, so verification uses stubbed fetch with prod-shape envelopes; agents-side path validated via type-checking + the pre-allocate-then-batch-INSERT shape against migration 0023's columns). API query SQL validated against the exact column types in migration 0023 (text/integer/integer/text/integer/integer/text/integer). Drawer renders correctly for: (a) clean-pass interactive (`failedDimensions=[]`, no lowNote), (b) shipped-low with single dimension fail (`["essence"]` → "the essence-not-reference rubric"), (c) shipped-low with multi-dimension fail (`["voice", "essence"]` → "the voice and essence-not-reference rubrics"), (d) legacy interactive with no audit rows + qualityFlag='low' (falls back to generic copy). `pnpm build` clean. Migration applies cleanly to local + remote D1 (additive ALTER + index, zero existing rows affected).
 
 ## Curator duplicate-pick fix — 2026-04-24 twin pieces on same day (2026-04-24)
 
@@ -431,7 +449,7 @@ Six commits shipped working through `docs/FOLLOWUPS.md` step by step. Rollback p
 
 ### Stack
 - Frontend: Astro + MDX + TypeScript strict + Tailwind + Web Components
-- Backend: Cloudflare Workers (Astro adapter) + D1 (18 tables) + R2 (audio)
+- Backend: Cloudflare Workers (Astro adapter) + D1 (19 tables) + R2 (audio)
 - Agents: Cloudflare Agents SDK v0.11.1
 - AI: Anthropic Claude Sonnet 4.5
 - Audio: ElevenLabs (Frederick Surrey voice)
@@ -463,13 +481,13 @@ Pipeline: Scanner → Curator → Drafter → [Voice, Structure, Fact] → Integ
 - **Public** (`/dashboard/`) — anyone can visit. Shows pipeline status, quality scores, agent team, library stats, recent pieces. Transparency is the brand.
 - **Admin** (`/dashboard/admin/`) — ADMIN_EMAIL only. Pipeline controls, observer events with acknowledge, engagement data, agent tasks.
 
-### Database (D1 — 18 tables, 22 migrations)
+### Database (D1 — 19 tables, 23 migrations)
 See `docs/SCHEMA.md`.
 - Reader: users, progress, submissions, zita_messages, magic_tokens
 - Agent: observer_events, engagement, learnings, audit_results, pipeline_log
 - Daily: daily_candidates, daily_pieces (+ `has_audio` + `interactive_id` cols), daily_piece_audio (per-beat MP3 rows)
 - Categoriser: categories, piece_categories (sub-task 2.1, migration 0021)
-- Interactives: interactives, interactive_engagement (Area 4 sub-task 4.1, migration 0022)
+- Interactives: interactives, interactive_engagement (Area 4 sub-task 4.1, migration 0022), interactive_audit_results (per-round per-dimension audit notes, migration 0023)
 
 ### Key directories
 ```
@@ -508,7 +526,7 @@ docs/handoff/           Original architecture + specs
 - `docs/PROJECT-BRIEF.md` — current-state project brief; paste-able into Claude project-level descriptions
 - `docs/ARCHITECTURE.md` — what's built, deviations from plan
 - `docs/AGENTS.md` — all 16 agents, endpoints, secrets
-- `docs/SCHEMA.md` — all 18 D1 tables, 22 migrations
+- `docs/SCHEMA.md` — all 19 D1 tables, 23 migrations
 - `docs/RUNBOOK.md` — how to run, deploy, trigger, revert
 - `docs/DECISIONS.md` — technical decisions (append-only)
 - `docs/FOLLOWUPS.md` — known bugs and queued work (append-only)

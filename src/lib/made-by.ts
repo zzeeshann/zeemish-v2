@@ -136,6 +136,13 @@ export interface MadeInteractive {
   qualityFlag: 'low' | null;
   revisionCount: number;
   publishedAt: number | null;
+  /** Dimensions that failed at the LATEST round of audit, in fixed
+   *  order (voice → structure → essence → factual). Empty array for
+   *  a clean pass OR for legacy interactives generated before
+   *  migration 0023 (no `interactive_audit_results` rows exist).
+   *  Drawer reads this only when `qualityFlag === 'low'` to name
+   *  what the auditor flagged. */
+  failedDimensions: string[];
 }
 
 export interface MadeEnvelope {

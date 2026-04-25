@@ -120,19 +120,13 @@ Fix (when triggered):
 
 ---
 
-## [open] 2026-04-24: Per-round audit notes for interactives
+## [resolved] 2026-04-24: Per-round audit notes for interactives
 
 **Surfaced:** 2026-04-24 during Area 4 sub-task 4.1 schema design. InteractiveAuditor (sub-task 4.5) runs up to 3 revision rounds, same pattern as Integrator on daily pieces. Daily pieces persist per-round audit detail in `audit_results` (auditor / passed / score / notes / draft_id / piece_id / created_at) — operators can see the full revision history on the admin piece-detail page. Interactives currently persist only `revision_count` on the `interactives` row itself. Round-level notes (what the auditor flagged, what changed between rounds) are not captured.
 
 **Hypothesis:** Not wrong to defer. For the minimum Generator+Auditor loop to work, `revision_count` (did it pass on round 1 / 2 / 3?) is enough. Per-round notes become valuable (a) when a debugging session needs to understand *why* an interactive was revised and what changed, OR (b) when 4.5 ships and we find the auditor's flags are worth surfacing on the admin page like daily-piece audit rounds are.
 
-**Investigation hints when resumed:**
-- Pattern: mirror `audit_results` with a new table `interactive_audit_results(id TEXT PK, interactive_id TEXT NOT NULL, round INTEGER NOT NULL, auditor TEXT NOT NULL, passed INTEGER NOT NULL, score INTEGER, notes TEXT, created_at INTEGER NOT NULL)` + composite index on `(interactive_id, round)`.
-- Writer site: InteractiveAuditor (sub-task 4.5) — write one row per round × auditor pair (voice / structure / essence / fact), same shape as `saveAuditResults` for daily pieces.
-- Reader site: admin interactive-detail page (not yet built — would be `/dashboard/admin/interactive/<slug>/` or similar).
-- Migration would be additive, empty at migration time.
-
-**Priority:** low. Revisit when 4.5 ships or the first debugging session needs the context — whichever comes first.
+**Resolved:** 2026-04-25. Both unblock conditions hit: 4.5 has shipped, AND the 2026-04-25 Maine drawer's voice-vs-Rough contradiction was a debugging session that needed the dimension-named context. Migration `0023_interactive_audit_results.sql` adds `interactive_audit_results(id, interactive_id, round, dimension, passed, score, notes, created_at)` with composite index on `(interactive_id, round)`. Writer is InteractiveGeneratorAgent's loop — pre-allocates `interactiveId` before the produce→audit→revise loop and persists 4 rows per round (one per dimension) via the new `persistAuditRows` helper after each `auditor.audit()` call. Reader is `made.ts` API which surfaces `failedDimensions: string[]` on `MadeInteractive` (latest round's failed dimensions only, in fixed voice→structure→essence→factual order). Drawer's `qualityFlag === 'low'` branch reads it via the new `buildLowNote(failedDimensions)` helper, naming the rubric inline ("essence-not-reference") when present, falling back to generic copy when empty (legacy interactives + clean-pass parents). Schema design choices (TEXT dimension instead of CHECK, no FK REFERENCES, orphan-tolerance) match codebase convention. The two existing `quality_flag='low'` rows (FISA + Maine) were NOT backfilled — final-round data remains observable via observer_events for forensic context. See DECISIONS 2026-04-25 "Ship interactive_audit_results table".
 
 ---
 
