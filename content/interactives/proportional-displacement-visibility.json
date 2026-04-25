@@ -1,0 +1,71 @@
+{
+  "slug": "proportional-displacement-visibility",
+  "type": "quiz",
+  "title": "Proportional Displacement and Attribution",
+  "concept": "When new consumption claims represent a large fraction of total available capacity, the displacement of existing users becomes individually attributable rather than systemically diffuse, changing the political economy of allocation.",
+  "interactiveId": "d9665e78-ae37-48aa-bb9e-7d733b4540a6",
+  "sourcePieceId": "06a9524c-115c-4853-9aa3-478b68fcd1dd",
+  "publishedAt": 1777082710134,
+  "voiceScore": 88,
+  "qualityFlag": "low",
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "What determines whether displacement is perceived as a specific actor's fault versus a general systemic pressure?",
+        "options": [
+          "Whether the new claimant is a private corporation or a public entity",
+          "Whether the new claim represents a measurable fraction of total capacity, making displacement traceable to a single decision (correct)",
+          "Whether existing users were consulted before the new claim was approved",
+          "Whether the displacement happens gradually over years or suddenly within weeks"
+        ],
+        "correctIndex": 1,
+        "explanation": "Proportionality creates attribution. If a new user takes 3% of total capacity, displaced users experience generalized scarcity. If a new user takes 30%, displaced users can point to a causal link between that specific arrival and their specific loss. The third option confuses procedural legitimacy with structural visibility."
+      },
+      {
+        "question": "Why does adding capacity in fixed-step increments create different political dynamics than smooth, continuous expansion?",
+        "options": [
+          "Fixed-step additions create discrete before/after states where winners and losers are identifiable, while continuous expansion diffuses benefits and costs across time (correct)",
+          "Fixed-step projects require environmental review while continuous expansion does not",
+          "Engineering constraints make fixed-step additions more expensive per unit of capacity",
+          "Regulatory agencies only have jurisdiction over projects that exceed minimum size thresholds"
+        ],
+        "correctIndex": 0,
+        "explanation": "Discreteness creates legibility. A single new substation or transmission line serving a new claimant produces a visible 'who got what' moment. Continuous organic growth spreads benefits and costs across many actors over time, erasing clear causation. The fourth option describes a real permitting dynamic but misses the core mechanism of temporal concentration versus diffusion."
+      },
+      {
+        "question": "In allocation conflicts, what is the structural difference between 'fairness' and 'efficiency' as decision criteria?",
+        "options": [
+          "Fairness prioritizes equal distribution while efficiency prioritizes speed of implementation",
+          "Fairness requires stakeholder consent processes while efficiency requires only technical analysis",
+          "Fairness asks 'who deserves this' based on distributional principles, while efficiency asks 'which use generates highest return' based on output measurement (correct)",
+          "Fairness applies to public goods while efficiency applies to private markets"
+        ],
+        "correctIndex": 2,
+        "explanation": "Fairness and efficiency answer different questions using incompatible metrics. Efficiency maximizes total value produced — a calculation. Fairness adjudicates competing moral claims to scarce resources — a judgment with no technical solution. The first option wrongly reduces fairness to equality rather than recognizing it as a broader distributional question."
+      },
+      {
+        "question": "When does proportional consumption create a coordination problem that pricing alone cannot resolve?",
+        "options": [
+          "When the resource has already reached its supply ceiling, so higher prices cannot summon additional availability (correct)",
+          "When consumers lack perfect information about current pricing levels",
+          "When the resource is publicly owned and therefore not subject to market mechanisms",
+          "When demand elasticity is low and consumers continue purchasing despite price increases"
+        ],
+        "correctIndex": 0,
+        "explanation": "Price works by two mechanisms: rationing existing supply among claimants, and incentivizing new supply. At a hard capacity boundary, only the first mechanism remains functional. Price can decide who wins among existing claimants but cannot expand the pie, forcing an explicit zero-sum choice. The fourth option describes inelastic demand, which is a different phenomenon from supply-side physical constraints."
+      },
+      {
+        "question": "Which scenario does NOT exhibit proportional displacement where a single actor's claim creates individually attributable impacts?",
+        "options": [
+          "A hospital opening in a region where medical specialists are scarce, hiring 40% of available doctors and forcing other clinics to reduce services",
+          "A reservoir allocation where a new industrial user receives a permit for 25% of annual flow, reducing agricultural allocations proportionally",
+          "A social media platform where each additional user increases the value of the network for all existing users through expanded connection possibilities (correct)",
+          "A zoning decision that converts 30% of a district's commercial space to residential, reducing retail density and foot traffic for remaining stores"
+        ],
+        "correctIndex": 2,
+        "explanation": "Network effects exhibit positive feedback — each user increases value for others rather than consuming a rival resource. The other three scenarios show clear proportional displacement: one actor's gain is other actors' measurable, attributable loss. The reservoir example might seem most obvious, but the hospital and zoning cases are structurally identical — a large proportional claim that other users can trace to a specific decision."
+      }
+    ]
+  }
+}
