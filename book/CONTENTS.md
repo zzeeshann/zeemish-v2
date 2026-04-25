@@ -37,6 +37,10 @@ Status legend: **✓ written** · **○ outline** · **◇ vision** (describes a
 - ○ [16 — What happens next](./16-what-happens-next.md)
 - ◇ [17 — Zita: the deep agent Zeemish doesn't yet have](./17-zita-the-deep-agent.md)
 
+### Part 5 — Reaching the world
+
+- ✓ [18 — How the world finds Zeemish](./18-discoverability.md)
+
 ### Appendices
 
 - ✓ [99 — Glossary](./99-glossary.md)

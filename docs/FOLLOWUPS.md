@@ -13,6 +13,61 @@ Format per entry:
 
 ---
 
+## [open] 2026-04-25: Submit zeemish.io sitemap to Google Search Console + Bing Webmaster Tools
+
+**Surfaced:** 2026-04-25 SEO foundations shipping (commit `b089d6d`). The `/sitemap.xml` endpoint is live and auto-updates on every request, but neither Google Search Console nor Bing Webmaster Tools knows the URL exists yet. Until submitted, organic indexing waits on whatever the crawlers happen to discover via inbound links — slow and uneven.
+
+**Hypothesis:** This is a one-time human action, not code work. RUNBOOK has the step-by-step under "Submit sitemap to search engines". Verifying ownership uses a DNS TXT record on the Cloudflare zone (preferred over the HTML-file method since auto-deploy doesn't touch DNS).
+
+**Investigation hints when resumed:**
+- Search Console: https://search.google.com/search-console — add `https://zeemish.io` as a URL-prefix property, verify via DNS TXT, then Sitemaps → Add `sitemap.xml`. First crawl typically lands within 1–3 days.
+- Bing Webmaster Tools: https://www.bing.com/webmasters — same DNS TXT verification. Smaller share but free upside.
+- After first crawl, monitor the Coverage report for any URL-shape issues (404s, redirect chains). The Phase-4 `/daily/{date}/` → 404 transition (no 301 from old date-only URLs) might surface here as "Crawled — currently not indexed" entries.
+
+**Priority:** medium. Site has been live since 2026-04-18 with no indexed presence; every day of delay is teaching pieces invisible to organic search.
+
+---
+
+## [open] 2026-04-25: URL canonicalisation — pre-Phase-4 date-only URLs 404 with no 301
+
+**Surfaced:** 2026-04-25 SEO foundations review. Per CLAUDE.md "Multi-piece cadence — Phase 4 URL routing", the canonical reader URL changed from `/daily/YYYY-MM-DD/` to `/daily/YYYY-MM-DD/{slug}/` on 2026-04-21. Phase 4's decision was "no 301 redirect layer — old URLs stop existing (dev-phase decision from Phase 1 DECISIONS)". At submission time this was correct (site was 3 days old, near-zero external links). With Search Console submission imminent (preceding entry), and time accruing for any external links pointing at the old shape, the indexing impact is starting to matter.
+
+**Hypothesis:** Add a 301 redirect at the route level. Two options:
+1. **Astro middleware.** Match `/daily/YYYY-MM-DD/$` (no slug), look up the matching piece's slug from the content collection (build-time data, no D1), 301 to `/daily/YYYY-MM-DD/{slug}/`. Single match per date works at `interval_hours=24`; at multi-per-day cadence the match is ambiguous (two pieces share a date). Solution: redirect to `/daily/{date}/` index page (which already shows a disambiguation list when multiple pieces exist for the date — see Phase 7 `[date]/index.astro` route).
+2. **Cloudflare Bulk Redirect.** Static rule list managed in the Cloudflare dashboard. Simpler but requires manual maintenance.
+
+Option 1 wins on automation — content collection is the source of truth, no manual sync.
+
+**Investigation hints when resumed:**
+- Pre-Phase-4 published pieces: 5 (per Phase 4 backfill — see CLAUDE.md). Their old URLs: `/daily/2026-04-13/` through `/daily/2026-04-17/`. Hit each with curl after the fix to confirm 301 → 200 chain.
+- The `[date]/index.astro` route already exists for the legacy URL handler (Phase 7 commit `3208c86`) — it redirects when unambiguous, shows a disambiguation list at multi-per-day. Verify it's still working before adding new logic; it may already cover this case.
+
+**Priority:** low. Mitigated significantly by the existing `[date]/index.astro` legacy URL handler (verify it's actually intercepting first — preceding bullet). If it is, this entry can close immediately.
+
+---
+
+## [open] 2026-04-25: Drafter slug strategy — concept-based slugs over headline-derived
+
+**Surfaced:** 2026-04-25 SEO foundations review. Current daily-piece slugs derive from the news headline via Director: `slugify(curatorBrief.headline).slice(0, 60)`. That gives URLs like `maine-gov-janet-mills-vetoes-ban-on-data-center-construction` — accurate but news-cycle-bound. Six months from now the underlying teaching ("data centre grid capacity") is still relevant; the proper-noun-heavy slug is not. SEO ranking and reader memorability would both benefit from concept-based slugs.
+
+**Hypothesis:** Two changes, in order:
+1. Drafter prompt addition: include a `slug` field in the Drafter's JSON output schema. Prompt instruction: "Write a 2–4 word concept-focused slug. Examples: `data-center-grid-capacity`, `chokepoints-and-cascades`, `proportional-displacement`. Avoid proper nouns, dates, and headline phrasing — these date the URL."
+2. Director: prefer `draft.slug` when present, fall back to current headline-derived slug for safety. Same `slugify` + 60-char cap + collision-resolution as today.
+
+**Caveats:**
+- Existing pieces stay at their current URL forever (permanence rule). Only new pieces get concept slugs.
+- Need a slug-collision strategy across the growing library — current headline-based slugs are unique by virtue of being long; concept slugs are short and may collide. Same `-2`/`-3` suffix mechanic from interactives sub-task 4.4.
+- Writer-side change only (no schema, no migration). Rollback is a one-line revert.
+
+**Investigation hints when resumed:**
+- Director slug derivation lives at [agents/src/director.ts](../agents/src/director.ts) (search for `slugify` or `filename`).
+- Drafter prompt lives at [agents/src/drafter-prompt.ts](../agents/src/drafter-prompt.ts) — JSON output schema is the touch site.
+- Look at the 7 existing interactives in `content/interactives/` for examples of well-chosen concept-based slugs (`chokepoints-and-cascades`, `proportional-displacement-visibility`, `phase-change-disruption`) — that prompt design is the pattern to copy.
+
+**Priority:** low. Cosmetic for the URL layer; doesn't affect ranking until the library has enough pieces that long-tail SEO matters (currently 12 pieces, 8 days live). Revisit when piece count crosses ~50 or when a competing concept-tagged URL outranks a Zeemish piece on the same topic.
+
+---
+
 ## [open] 2026-04-24: reset-today.sh doesn't recount categories.piece_count after piece-id delete
 
 **Surfaced:** 2026-04-24 during operator-led cleanup of the duplicate 2026-04-24 piece (pieceId 159a972a). After wiping the piece's `piece_categories` row via `scripts/reset-today.sh --piece-id` pattern, the `information-asymmetry-markets` category chip on /library/ still showed "2" while only 1 piece remained. `categories.piece_count` is denormalised (per sub-task 2.1 — writer maintains, admin "Recount" button is the drift escape hatch) but 2.5's admin Recount UI is deferred. The script has no inline recount step, so every operator delete drifts the library chip count.

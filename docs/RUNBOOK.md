@@ -33,6 +33,32 @@ pnpm build
 # Output in dist/
 ```
 
+## Submit sitemap to search engines
+
+One-time human action after the SEO foundations shipped (2026-04-25). The sitemap auto-generates on every request — submission is just registering the URL with the major crawlers so they know to schedule fetches. Re-submission isn't needed when new pieces publish; the crawlers re-poll the URL on their own cadence.
+
+### Google Search Console
+1. Go to https://search.google.com/search-console
+2. Add property → URL prefix → `https://zeemish.io`
+3. Verify ownership (DNS TXT record on the Cloudflare zone, or the HTML file method — DNS is preferred since the site auto-deploys)
+4. Sitemaps → Add a new sitemap → enter `sitemap.xml` → Submit
+5. Wait 1–3 days for the first crawl; check Coverage report for any errors
+
+### Bing Webmaster Tools
+1. Go to https://www.bing.com/webmasters
+2. Add a site → `https://zeemish.io`
+3. Verify ownership (same DNS TXT method works)
+4. Sitemaps → Submit sitemap → `https://zeemish.io/sitemap.xml`
+
+### Regenerate the OG image
+When the brand or design changes:
+```bash
+node scripts/generate-og-image.mjs
+git add public/og-image.png
+git commit -m "chore(seo): refresh og:image"
+```
+The script's inline SVG is the source of truth — edit it there, not in the PNG.
+
 ## Deploy
 
 ### Site
