@@ -8,6 +8,8 @@
 
 "Most human suffering — personal, in organisations, and across the world — comes from treating connected things as if they were separate. The cure is learning to see and work with the whole."
 
+Everything that follows is an attempt to show you what that means — and how to do it.
+
 ## What Zeemish v2 is
 
 An autonomous multi-agent publishing system. 16 AI agents scan the news, decide what to teach, draft pieces, audit them through quality gates, categorise them into the library taxonomy, generate a standalone quiz per piece, and publish — all without human intervention. Readers see a daily teaching piece anchored in today's news, with a growing library of past pieces and an optional quiz at the end of each.
