@@ -1,0 +1,71 @@
+{
+  "slug": "procedural-legitimacy-under-constraint",
+  "type": "quiz",
+  "title": "Procedural Legitimacy Under Constraint",
+  "concept": "Systems preserve socially contested outcomes by redesigning processes to reduce observer discomfort when core objectives cannot change but methods become unavailable.",
+  "interactiveId": "e6d796da-96d2-4576-85b0-0bf60c3b67cc",
+  "sourcePieceId": "7eb5f8a3-29d2-4059-94a9-bb88904f3cf7",
+  "publishedAt": 1777127189163,
+  "voiceScore": 78,
+  "qualityFlag": "low",
+  "content": {
+    "type": "quiz",
+    "questions": [
+      {
+        "question": "When a system's preferred implementation method becomes unavailable but the system continues operating, what does the choice of replacement method primarily optimize for?",
+        "options": [
+          "Minimizing cost while maintaining identical functional performance",
+          "Reducing discomfort for those who authorize or observe the process",
+          "Improving outcomes for those directly experiencing the process",
+          "Satisfying legal requirements that mandate procedural changes"
+        ],
+        "correctIndex": 1,
+        "explanation": "Systems facing method constraints while preserving outcomes optimize for continued social tolerance. The replacement must be acceptable to authorizers and observers, not better for participants. Cost and legal compliance are secondary to maintaining the political coalition that permits continuation."
+      },
+      {
+        "question": "A process transitions from Method A to Method B to Method C over decades, with each change described as 'more humane' despite identical endpoints. What actually changed?",
+        "options": [
+          "The experience of the person undergoing the process",
+          "The visual and conceptual presentation of the process to society",
+          "The legal standard defining acceptable outcomes",
+          "The duration required to complete the process"
+        ],
+        "correctIndex": 1,
+        "explanation": "Identical endpoints mean identical participant experiences. Changes in presentation — how the process looks, what it resembles, how it can be described — allow continuation by reducing cognitive dissonance in observers. The process becomes easier to authorize without changing what it achieves."
+      },
+      {
+        "question": "When external suppliers refuse to provide critical inputs for a socially contested process, under what condition does the system abandon its objective rather than find alternative methods?",
+        "options": [
+          "When no technically feasible alternative methods exist",
+          "When all available alternatives exceed acceptable cost thresholds",
+          "When replacement methods would expose the system's true priority structure in ways that destroy observer tolerance",
+          "When legal authority to implement alternative methods is absent"
+        ],
+        "correctIndex": 2,
+        "explanation": "Technical feasibility, cost, and legal authority are solvable if political will exists. Systems abandon objectives when adaptation would require using methods so visibly worse that they expose contradictions observers need hidden. A method that makes the outcome impossible to rationalize ends the process where mere difficulty would not."
+      },
+      {
+        "question": "Two systems produce identical outcomes through different processes. System X uses a method resembling widely accepted routine procedures. System Y uses a method with no familiar analogue. Which faces greater implementation constraint?",
+        "options": [
+          "System X, because resemblance to accepted procedures increases regulatory scrutiny",
+          "System Y, because novel methods require higher observer tolerance than familiar-seeming ones",
+          "Neither — identical outcomes generate identical social acceptance regardless of method",
+          "System X, because resemblance creates false expectations that amplify disappointment"
+        ],
+        "correctIndex": 1,
+        "explanation": "Resemblance to normalized activities lowers the psychological barrier to authorization and observation. Novel methods require participants and observers to confront what the process achieves without familiar packaging to soften cognitive friction. Identical outcomes do not generate identical tolerance when procedural framing differs."
+      },
+      {
+        "question": "A system cycles through multiple method changes over time, each time adopting what was previously considered an inferior alternative. What constraint prevents returning to the original method?",
+        "options": [
+          "Technical knowledge of the original method has been lost",
+          "The original method is now legally prohibited",
+          "Control over critical inputs has shifted to actors who refuse participation",
+          "Public opinion has decisively rejected the original method's underlying principle"
+        ],
+        "correctIndex": 2,
+        "explanation": "Adopting previously rejected methods demonstrates continued commitment to the outcome despite degraded options. Input control by refusing actors creates a hard constraint that legal authority and public opinion cannot override — the system can authorize the method but cannot compel suppliers to provide necessary resources. Technical knowledge loss is rarely the binding constraint for processes with institutional continuity."
+      }
+    ]
+  }
+}
