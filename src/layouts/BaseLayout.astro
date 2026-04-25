@@ -43,6 +43,9 @@ const ogImageUrl = new URL('/og-image.svg', Astro.site ?? Astro.url).toString();
     <meta name="twitter:description" content={ogDescription} />
     <meta name="twitter:image" content={ogImageUrl} />
 
+    <!-- Feed auto-discovery for Feedly / Inoreader / NetNewsWire / etc. -->
+    <link rel="alternate" type="application/rss+xml" title="Zeemish daily pieces" href="/rss.xml" />
+
     <!-- Fonts: preconnect first, then load -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

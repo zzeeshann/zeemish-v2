@@ -2,6 +2,38 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Sitemap + RSS feed + robots.txt sitemap directive
+
+**Context / trigger:** A daily publication without machine-readable discoverability is the single biggest miss a content site can make. No sitemap meant Google Search Console had nothing to crawl on a schedule — new pieces were invisible to organic search until they were stumbled across. No RSS meant Zeemish couldn't reach feed readers (Feedly, Inoreader, NetNewsWire) or the various AI ingestion pipelines that consume RSS. Cost is small; distribution is real.
+
+**Decisions:**
+
+1. **Hand-rolled `/sitemap.xml.ts` rather than `@astrojs/sitemap`.** The integration only auto-includes prerendered routes. The site is hybrid: daily-piece pages and interactive pages are prerendered (Phase 4 + Area 4 sub-task 4.2), but `/library/` and `/library/<slug>/` are SSR (Area 2 sub-task 2.4 — they need D1 access for the categories query). Category slugs themselves live in D1 and aren't visible at build time without seeding `customPages` from a build-time DB query (not feasible on Cloudflare). So the integration would have given us prerendered pages for free but required a second hand-rolled sitemap for the SSR + DB-derived URLs. One SSR endpoint is simpler than two.
+
+   The endpoint enumerates: homepage, /daily/, /library/, every published daily piece (slug-inclusive URL via `pieceUrl(date, deriveSlug(id))`), every interactive (`/interactives/<slug>/`), every category page (`/library/<slug>/`, joined from D1 `categories` via the existing `getCategories` helper). Fail-open on D1 error — static entries always render so the sitemap is never blank.
+
+   Single URL `/sitemap.xml` rather than `/sitemap-index.xml` because the integration's index file is only useful past the 50k-URL limit. We're at 25 URLs today and would need ~3000× growth to hit the cap. `Cache-Control: public, max-age=3600` so the CDN serves it fast between rebuilds.
+
+2. **Hand-rolled `/rss.xml.ts` rather than `@astrojs/rss`.** Briefly added the package, then removed it: `@astrojs/rss`'s default guid is the link with `isPermaLink="true"` (verified at [node_modules/@astrojs/rss/dist/index.js:145](../node_modules/@astrojs/rss/dist/index.js)), and there's no first-class option to override it — putting `<guid>` in `customData` would emit two `<guid>` elements per item, which is invalid RSS. Spec called for `pieceId` as a stable non-URL guid (the right call: `pieceId` is the durable identity of a piece across any future URL changes, so feed readers de-duplicate cleanly). Hand-rolling gave exact control. Also honors the CLAUDE.md "no new dependencies without justification" rule. The hand-rolled XML is ~30 lines including escape helper and RFC 1123 date formatting via `Date.prototype.toUTCString()`.
+
+3. **RSS 2.0 over Atom.** RSS 2.0 has the broadest reader support (Feedly, Inoreader, NetNewsWire, the AI ingestion pipelines that consume feeds). Atom is technically cleaner but every reader speaks RSS 2.0 and Atom is overkill for a single-channel news-style feed. Included `xmlns:atom` + `<atom:link rel="self">` per the validator's recommended best-practice for RSS 2.0 self-discovery.
+
+4. **Description-only items, no full content.** For v1 the RSS item carries the same `description` that's in MDX frontmatter (typically 300–500 chars summary written by Drafter). No `<content:encoded>` with the full beat text. Reasoning: (a) the daily-piece reading experience is built around `<lesson-shell>` beat-by-beat navigation, audio, and the made-by drawer — none of which translates to RSS; (b) full content in RSS encourages reader-app consumption, which would steal the reading experience the site is designed for; (c) AI ingestion pipelines that want full content can fetch the canonical URL from the `<link>`. If reader demand for full content surfaces, adding `<content:encoded>` is a one-line change.
+
+5. **`pieceId` as guid with `isPermaLink="false"`.** The `pieceId` UUID is the stable durable identity in D1; `link` is a derived URL. If we ever change the URL scheme (added `/daily/` already once for slug-inclusion at multi-per-day cadence in Phase 4), feed readers indexed by `pieceId` won't double-publish the same piece. `isPermaLink="false"` tells readers explicitly: this is an opaque identifier, don't try to fetch it.
+
+6. **`robots.txt` advertises the sitemap via the standard `Sitemap:` directive.** This is what Google + Bing crawlers look for to discover the sitemap without manual submission. The Search Console one-time submission is still recommended but the directive means even discovery without submission works.
+
+7. **`<link rel="alternate" type="application/rss+xml">` in BaseLayout `<head>`.** Site-wide auto-discovery — every page advertises the feed, so Feedly's "subscribe to this site" detection works from anywhere on zeemish.io, not just the homepage.
+
+**Why now:** Site is 8 days old, publishing 1+ pieces/day, growing library that's not yet indexed anywhere. SEO and feed-reader distribution are pure-upside additions: a sitemap submission is a one-time action, an RSS feed opens a permanent distribution channel, neither competes with the canonical reading experience on zeemish.io.
+
+**Trade-offs accepted:** Hand-rolled XML means we own the escape function and the RFC 1123 date format (both trivial: 5-line `xmlEscape`, native `toUTCString()`). If the URL list grows past 50k entries we'll need to add sitemap-index splitting (not a near-term concern). Description-only RSS may slightly under-index in AI training pipelines that prefer full text — acceptable cost for the v1.
+
+**Verified end-to-end in dev preview:** `/sitemap.xml` returns 200 with `application/xml`, lists 25 URLs (1 home + 1 daily index + 1 library index + 12 daily pieces + 7 interactives + 3 categories — local D1 has fewer categories than prod). `/rss.xml` returns 200 with `application/rss+xml`, lists all 12 daily pieces newest first with correct `pubDate`, `guid`, and description. `robots.txt` ends with `Sitemap: https://zeemish.io/sitemap.xml`. Homepage source contains the RSS auto-discovery `<link>`. `pnpm build` clean.
+
+**Files:** [src/pages/sitemap.xml.ts](../src/pages/sitemap.xml.ts) (new), [src/pages/rss.xml.ts](../src/pages/rss.xml.ts) (new), [public/robots.txt](../public/robots.txt) (Sitemap directive), [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro) (auto-discovery link), [docs/ARCHITECTURE.md](ARCHITECTURE.md) (new "Public discoverability surfaces" section).
+
 ## 2026-04-25: Fix `(correct)` answer-leak in interactive revision/audit prompts + validator guard
 
 **Context / trigger:** Operator screenshot of [/interactives/proportional-displacement-visibility/](https://zeemish.io/interactives/proportional-displacement-visibility/) showed the correct option in every question with a literal " (correct)" suffix appended to the visible option text — readers could see the answers. Live for the time between publish (2026-04-25 01:25 UTC, commit `4de1804`) and this fix. Only this one piece affected; the other six interactives in `content/interactives/` had no `(correct)` strings.

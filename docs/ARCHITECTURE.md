@@ -101,6 +101,12 @@ This applies to every agent. No exceptions. The past stays. The future gets bett
 - [x] Scheduled: Director on hourly cron gated by `admin_settings.interval_hours` (default 24 → fires at 02:00 UTC every day including weekends)
 - [x] First daily piece published and live
 
+### Public discoverability surfaces (complete — 2026-04-25)
+- [x] `/sitemap.xml` — SSR endpoint at [src/pages/sitemap.xml.ts](../src/pages/sitemap.xml.ts). Enumerates homepage, /daily/, /library/, every published daily piece (with slug-inclusive URL), every interactive, every category page (D1-driven). Hand-rolled rather than `@astrojs/sitemap` because the integration only emits prerendered routes — `/library/` and `/library/<slug>/` are SSR. Fail-open on D1 error so static entries always render. Cache-Control: `public, max-age=3600`. Submit to Google Search Console once; never has to be touched again.
+- [x] `/rss.xml` — SSR endpoint at [src/pages/rss.xml.ts](../src/pages/rss.xml.ts). RSS 2.0 feed of every daily piece, newest first by `publishedAt` DESC. Per-item: title, canonical link, description (frontmatter), pubDate (`publishedAt` → RFC 1123), guid (`pieceId` with `isPermaLink="false"` so feed readers de-duplicate by stable UUID even if URL shape changes). Description-only for v1; full `<content:encoded>` deferred until reader demand surfaces. Hand-rolled — `@astrojs/rss`'s default guid is the link with `isPermaLink="true"` and isn't overridable without duplicating the element.
+- [x] `robots.txt` advertises the sitemap via `Sitemap: https://zeemish.io/sitemap.xml` directive at the bottom.
+- [x] BaseLayout `<head>` carries `<link rel="alternate" type="application/rss+xml" title="Zeemish daily pieces" href="/rss.xml" />` so Feedly / Inoreader / NetNewsWire auto-discover the feed from any page.
+
 ## What's NOT built (honest gaps)
 
 ### Small remaining items
