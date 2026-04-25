@@ -2,6 +2,61 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Fix `(correct)` answer-leak in interactive revision/audit prompts + validator guard
+
+**Context / trigger:** Operator screenshot of [/interactives/proportional-displacement-visibility/](https://zeemish.io/interactives/proportional-displacement-visibility/) showed the correct option in every question with a literal " (correct)" suffix appended to the visible option text — readers could see the answers. Live for the time between publish (2026-04-25 01:25 UTC, commit `4de1804`) and this fix. Only this one piece affected; the other six interactives in `content/interactives/` had no `(correct)` strings.
+
+**Root cause:** [agents/src/interactive-generator-prompt.ts:245](../agents/src/interactive-generator-prompt.ts) `buildRevisionPrompt` rendered the prior attempt's options for Claude with the correct answer flagged inline:
+
+```ts
+.map((opt, j) => `  ${String.fromCharCode(65 + j)}. ${opt}${j === q.correctIndex ? ' (correct)' : ''}`)
+```
+
+The instruction below said "produce a fresh quiz... same JSON shape" — Claude faithfully echoed the annotation into the new option text. This piece max-failed all 3 audit rounds and shipped `quality_flag='low'` under the 4.5 reversal mechanism; rounds 2 + 3 used the revision prompt; round 3's output is what landed. Other interactives that passed audit clean (5 of 7 on the shipped roster) never went through the revision path so were not affected.
+
+The `validateQuiz` structural validator at [agents/src/interactive-generator.ts:642](../agents/src/interactive-generator.ts) checked counts + non-empty + bounds — option text content was not inspected, so the leak passed every gate.
+
+The auditor prompt at [agents/src/interactive-auditor-prompt.ts:166](../agents/src/interactive-auditor-prompt.ts) had the identical inline-annotation pattern. Auditor Claude doesn't generate quizzes (it returns audit verdicts), so this never produced a leak in practice — but the same fragile pattern was present and worth fixing for consistency + future-proofing.
+
+**Decisions:**
+
+1. **Repair the live JSON in place.** Stripped the 5 ` (correct)` suffixes from `content/interactives/proportional-displacement-visibility.json`. `correctIndex: N` per question already encodes the right answer; the suffix was pure leak. Falls under the metadata-vs-content carve-out (no body teaching content changed; the JSON's `correctIndex` was always the source of truth — the option text was incorrectly authored). Verified end-to-end in dev preview: zero `(correct)` substrings in any of 5 questions or the results screen.
+
+2. **Move the correct-answer marker to its own line in both the revision and auditor prompts.** New format:
+
+   ```
+     A. Option text 1
+     B. Option text 2
+     C. Option text 3
+
+   Correct answer: B
+   Explanation: ...
+   ```
+
+   The annotation can no longer be mistaken for option content because it's structurally separated. Same information for Claude; less ambiguous parse for any echo-the-shape downstream task.
+
+3. **Add a leak-marker guard to `validateQuiz`.** New check rejects any option whose text matches `/\((?:correct|incorrect)\)/i`:
+
+   ```ts
+   const leakPattern = /\((?:correct|incorrect)\)/i;
+   const leakIdx = options.findIndex((o) => leakPattern.test(o));
+   if (leakIdx !== -1) throw new Error(`validateQuiz: question ${i + 1} option ${leakIdx + 1} contains an answer-leak marker (e.g. "(correct)")`);
+   ```
+
+   Defense-in-depth — catches the pattern from any future prompt path, not just the revision one. A throw at validation forces the Generator's outer try/catch to either retry the round or terminate the run; no leaky quiz reaches `publishToPath`. The pattern matches both `(correct)` and `(incorrect)` because either annotation in option text is a leak (knowing the wrong ones eliminates them).
+
+4. **Auditor prompt fixed even though it doesn't currently generate output.** The auditor is a single Claude call returning audit JSON, not quiz JSON — so the `(correct)` marker in its prompt has never produced a reader-visible leak. Fixed anyway for two reasons: (a) consistency between the two prompts (one mental model for "how do we tell Claude which option is right"); (b) future-proofing — if the auditor ever gains a "rewrite this question" capability, the leak path opens. Cheap to fix preemptively.
+
+5. **Did not deploy a hotfix to production.** The live `proportional-displacement-visibility.json` repair is committed but only takes effect on next site-worker deploy. Not paging an emergency redeploy because (a) the affected piece is `quality_flag='low'` and shows the "didn't pass all auditor gates" warning chip — readers already see a quality-doubt signal; (b) one piece, low traffic in the first day; (c) clean fix lands with the next routine deploy + Cloudflare cache purge.
+
+**Trade-offs / explicit non-goals:**
+- Did not retry-regenerate the affected interactive. Repairing the JSON in place is the metadata-vs-content carve-out — same `correctIndex`, same explanation text, same options minus the leak suffix. A re-generation would produce a different quiz under a different `revisionCount`, losing the audit history. The repair preserves the as-shipped artefact minus the bug.
+- Did not change the 3-round retry loop or the 4.5 ship-as-low semantics. The bug was prompt construction, not the retry posture.
+- Did not add a structural reject for `(correct)` in the *auditor's* output validator. Auditor returns JSON with audit verdicts; option text doesn't appear in its output shape. If a future change widens the auditor's response shape to include rewritten content, the validator-side guard belongs there too.
+- Rollback is `git revert` of this commit + the JSON-repair commit. No schema, no migration, no data unwind.
+
+**Verification trigger:** next interactive that hits the revision path (i.e. fails audit at least once). The prompt now sends `Correct answer: B` on its own line; if Claude produces option text containing `(correct)` regardless, the validator guard catches it and forces a re-roll. Either path keeps the leak out of `publishToPath`.
+
 ## 2026-04-24: Loosen InteractiveAuditor essence rule + ship-as-low on max-fail (reverses 4.5's abandon)
 
 **Context / trigger:** Interactive Generator's first real-world run on 2026-04-24 (FISA piece "Why Bills Fail Twice Before They Pass", pieceId `71e2f879…`) max-failed all 3 audit rounds on `essence`. Operator inspection of the top-3 failure citations revealed the auditor catching concept-echoes and structural analogies — not concrete detail-leaks. Specifically:

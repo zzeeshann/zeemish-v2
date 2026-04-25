@@ -677,6 +677,13 @@ function validateQuiz(raw: RawQuiz): ValidatedQuiz {
     if (options.some((o) => o.length === 0)) {
       throw new Error(`validateQuiz: question ${i + 1} has an empty option`);
     }
+    const leakPattern = /\((?:correct|incorrect)\)/i;
+    const leakIdx = options.findIndex((o) => leakPattern.test(o));
+    if (leakIdx !== -1) {
+      throw new Error(
+        `validateQuiz: question ${i + 1} option ${leakIdx + 1} contains an answer-leak marker (e.g. "(correct)")`,
+      );
+    }
     if (correctIndex < 0 || correctIndex >= options.length) {
       throw new Error(
         `validateQuiz: question ${i + 1} correctIndex ${correctIndex} out of bounds for ${options.length} options`,

@@ -242,13 +242,15 @@ Concept: ${previous.concept}
 ${previous.questions
     .map((q, i) => {
       const optionLines = q.options
-        .map((opt, j) => `  ${String.fromCharCode(65 + j)}. ${opt}${j === q.correctIndex ? ' (correct)' : ''}`)
+        .map((opt, j) => `  ${String.fromCharCode(65 + j)}. ${opt}`)
         .join('\n');
+      const correctLetter = String.fromCharCode(65 + q.correctIndex);
       return `### Question ${i + 1}
 ${q.question}
 
 ${optionLines}
 
+Correct answer: ${correctLetter}
 Explanation: ${q.explanation}`;
     })
     .join('\n\n')}`;

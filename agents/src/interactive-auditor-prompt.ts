@@ -162,16 +162,15 @@ Concept: ${quiz.concept}
 ${quiz.questions
     .map((q, i) => {
       const optionLines = q.options
-        .map((opt, j) => {
-          const marker = j === q.correctIndex ? '(correct)' : '';
-          return `  ${String.fromCharCode(65 + j)}. ${opt} ${marker}`.trimEnd();
-        })
+        .map((opt, j) => `  ${String.fromCharCode(65 + j)}. ${opt}`)
         .join('\n');
+      const correctLetter = String.fromCharCode(65 + q.correctIndex);
       return `### Question ${i + 1}
 ${q.question}
 
 ${optionLines}
 
+Correct answer: ${correctLetter}
 Explanation: ${q.explanation}`;
     })
     .join('\n\n')}`;
