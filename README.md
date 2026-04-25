@@ -1,6 +1,10 @@
 # Zeemish
 
 > **"Educate myself for humble decisions."**
+>
+> "Most human suffering — personal, in organisations, and across the world — comes from treating connected things as if they were separate. The cure is learning to see and work with the whole."
+>
+> Everything that follows is an attempt to show you what that means — and how to do it.
 
 Daily teaching, anchored in today's news, produced by a pipeline of specialised Claude calls — each with one job. Live at **[zeemish.io](https://zeemish.io)**.
 

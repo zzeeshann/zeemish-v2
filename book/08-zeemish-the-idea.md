@@ -68,7 +68,13 @@ The project has what Zishan calls a protocol, stated at the top of the repo:
 
 *"Educate myself for humble decisions."*
 
+*"Most human suffering — personal, in organisations, and across the world — comes from treating connected things as if they were separate. The cure is learning to see and work with the whole."*
+
+*Everything that follows is an attempt to show you what that means — and how to do it.*
+
 The framing is personal — *myself*. Zeemish does not exist to educate *you*, the vague everybody. It exists so that each person who shows up, including the person who built it, can quietly learn enough to make better decisions at their own scale. The ambitions of this project are deliberately modest: not to change the world, but to add one daily reading to the lives of people who want it.
+
+The second sentence is what the agents are actually trying to do — read the news through the lens of "what connected thing is being missed here?" That lens is what Curator now uses to pick stories, what Drafter writes against, and what every auditor checks for. Without it, a daily-news system drifts into pattern-matching and subject-dismissal. With it, every story has a thread worth pulling. The third sentence is the meta-commitment: the rest of this book — every agent, every prompt, every audit gate, every learning loop — is the project's working answer to *"how do you actually do that?"*
 
 The promise is the only promise worth making: tomorrow morning, there will be another piece.
 

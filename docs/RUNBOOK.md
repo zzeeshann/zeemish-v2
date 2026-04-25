@@ -150,7 +150,7 @@ Visit https://zeemish.io/dashboard/admin/ and use
 the trigger button (requires ADMIN_EMAIL login).
 
 ### Automatic
-The Director runs on an hourly cron, gated by `admin_settings.interval_hours` (see [`src/pages/dashboard/admin/settings.astro`](../src/pages/dashboard/admin/settings.astro)). At the default value 24, only the 02:00 UTC slot fires — preserving the "every morning" cadence. Admins can flip to 1/2/3/4/6/8/12 hours via the settings page without a redeploy; change propagates at the next hourly alarm. It scans news, picks the most teachable story, drafts, audits, and publishes. At the default cadence the piece is ready by ~04:00 UTC. If the news is thin (rare, but possible on quiet weekends), Curator's skip path logs "No teachable stories" via Observer and the slot is left blank.
+The Director runs on an hourly cron, gated by `admin_settings.interval_hours` (see [`src/pages/dashboard/admin/settings.astro`](../src/pages/dashboard/admin/settings.astro)). At the default value 24, only the 02:00 UTC slot fires — preserving the "every morning" cadence. Admins can flip to 1/2/3/4/6/8/12 hours via the settings page without a redeploy; change propagates at the next hourly alarm. It scans news, picks the story whose underlying system best teaches the protocol, drafts, audits, and publishes. At the default cadence the piece is ready by ~04:00 UTC. Curator's default is to PICK; skip is rare and reserved for narrow conditions (single breaking event re-reported with no new angle, or pure product/spec announcements with no system to teach). When a skip does fire, the reason names the specific condition, not a category dismissal — see DECISIONS 2026-04-25 "Curator reframed around the Zeemish protocol".
 
 ### Check Director status
 ```bash

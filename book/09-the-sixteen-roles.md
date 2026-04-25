@@ -28,13 +28,13 @@ Here they are, in the order they run.
 
 ## 3. Curator
 
-**Job:** Pick the most teachable story from Scanner's 50 candidates.
+**Job:** Find the story whose underlying system best teaches the Zeemish protocol — and write the brief.
 
 **What it does:** Reads all 50 candidates. Picks one. Writes a brief — a short document explaining what the story is, what the underlying system is, what angle the piece should take, and roughly what beats the piece should have.
 
-**Claude call?** Yes. One call with the 50 candidates and a prompt asking for the most teachable one. Also sees the last 30 days of published headlines plus each one's underlying subject, so it can steer away from concepts the library just covered.
+**Claude call?** Yes. One call with the 50 candidates and a prompt that opens with the Zeemish protocol itself. Also sees the last 30 days of published headlines plus each one's underlying subject, so it can steer away from concepts the library just covered.
 
-**What "teachable" means in Zeemish's prompt:** a story where there's a real underlying system worth explaining, not just a headline. "Market rose 2%" is not teachable. "Market rose 2% on news of a chip shortage in a single factory" is teachable, because the factory-market connection reveals a chokepoint.
+**What "teachable" means in Zeemish's prompt:** every story connects to a system. The job is to find the connection, not to gate-keep against pieces that don't pattern-match an institutional or supply-chain template. A murder case teaches human psychology and the systems of grief and justice. A celebrity scandal teaches influence dynamics, social proof, the economics of attention. A firing-squads policy teaches the philosophy of state violence and the design of execution methods. Curator's default is to PICK; skip is reserved for the narrow case where the news is genuinely a single breaking event being re-reported with no new angle, or a pure product spec with no underlying system. The earlier prompt had a "60+ teachability threshold" that read more strictly than intended — Claude treated it as a conservative floor and dismissed sensitive subjects as "culturally-specific" or "shallow." The 2026-04-25 reframe dropped the threshold and embedded the Zeemish protocol at the top of the Curator prompt, so Curator now picks through the same lens the auditors and Drafter already used.
 
 ## 4. Drafter
 
