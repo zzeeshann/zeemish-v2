@@ -41,6 +41,7 @@ Extra rules for quizzes:
 - Questions should read in the same register as a teaching piece would — plain English, no academic jargon, no marketing flourish.
 - Explanations should be declarative, not hedged ("Because X causes Y" not "It could be argued that X might potentially cause Y").
 - No flattery or meta-commentary ("Great thinking!", "This is a tough one!").
+- The \`concept\` line is part of the quiz too — it must be a non-empty, voice-compliant sentence naming the underlying principle. A topic label ("Chokepoints"), a question, or a missing/blank value all fail voice. Cite it as a violation if it's empty or off-voice.
 
 Score 100 if you'd leave it untouched. Score 85 if minor polish. Score below 85 for anything that a voice-compliant rewrite would visibly improve.
 

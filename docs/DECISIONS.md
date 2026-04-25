@@ -2,6 +2,26 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Require `concept` on interactives schema, audit presence
+
+**Context / trigger:** Final SEO commit in the 2026-04-25 sweep. Initial framing was "every interactive page falls back to the generic Zeemish meta description; add a description field." Verification step (per the plan: "Don't proceed without doing this check") found the meta description was already per-quiz: [src/pages/interactives/[slug].astro:25](../src/pages/interactives/[slug].astro:25) passes `description={data.concept}` to BaseLayout, every existing JSON file has `concept` populated, and the previous SEO commit (`e9fe2d9`) made `<meta name="description">` always render. The premise of the original commit didn't hold — the work collapsed to "structure what's already there."
+
+**Decisions:**
+
+1. **Make `concept` required at the content-collection schema level (`z.string().min(1)`).** The Zod schema previously had `concept: z.string().optional()` even though the Generator emits it on every successful round and the structural validator already throws on empty before the file write ([interactive-generator.ts:650](../agents/src/interactive-generator.ts:650)). Belt-and-braces: schema-level required is defense in depth, and it formalises the SEO contract — every interactive page MUST have a meaningful description. All 7 existing JSON files already comply; backfill not needed.
+
+2. **Keep the field name `concept`, not rename to `description`.** "Concept" is the more precise word for what the field is — one sentence naming the underlying principle the quiz teaches. The Generator prompt's worked examples ("Information asymmetry in markets…", "Single-point-of-failure cascades…") frame it as a concept, not a description. Renaming would force churn across the schema, generator prompt, auditor prompt, page, 7 JSON files, D1 column, AGENTS.md, SCHEMA.md, and the CategoriserAgent's interactive-fetch query — all for a semantic downgrade. The page already passes `concept` AS `description` to BaseLayout; the SEO outcome is identical.
+
+3. **Field stays on the content collection (the JSON file), not promoted to D1.** D1's `interactives.concept` column is the convenience mirror — kept nullable for future minimally-authored interactives that might lack a concept. The content collection is the source of truth (per sub-task 4.2's content-home decision); the meta description reads from `getCollection('interactives')`, not D1. Migrating D1 to NOT NULL would be schema churn for zero reader benefit.
+
+4. **Add a small voice-and-presence check to the auditor prompt, not a new dimension.** One sentence appended to the existing voice extra-rules block: the `concept` line is itself audited — must be a non-empty, voice-compliant sentence (a topic label, a question, or blank fails). Doesn't bloat the prompt; doesn't add a fifth dimension; uses the voice scorer Claude is already running. Catches the failure mode the schema can't catch (a one-word "Chokepoints" passes `min(1)` but isn't a useful page subtitle).
+
+5. **Decline path verified safe before the schema flip.** Before tightening Zod, traced the Generator's decline path: when Claude returns the empty shape `{slug: "", title: "", concept: "", questions: []}`, [parseAndValidate](../agents/src/interactive-generator.ts:617) returns `null`, the loop short-circuits at line 315 (`if (!produced) { declinedInLoop = true; break; }`), and the function returns at the decline branch (line 350) BEFORE any file write. A declined output never produces a JSON file, so a tighter Zod schema can't break a build by reading one. `validateQuiz` itself also throws on empty `concept` at line 650 — that's the second layer. Schema-required is the third.
+
+**Trade-offs accepted:** D1 column stays nullable while the content collection is strict — readers go via the file (always non-empty); admin queries go via D1 (could in principle hit NULL, in practice never does because the Generator INSERT mirrors the JSON). If a future flow ever inserts a D1 row without going through the Generator, this asymmetry could surface — guarded by the same Generator-as-only-writer convention every other interactives column already trusts. The auditor's voice check on `concept` is one line of prompt overhead per audit; acceptable.
+
+**Files touched:** [src/content.config.ts](../src/content.config.ts), [agents/src/interactive-auditor-prompt.ts](../agents/src/interactive-auditor-prompt.ts), [docs/AGENTS.md](AGENTS.md), [docs/SCHEMA.md](SCHEMA.md). No new D1 migration. No backfill (all 7 existing JSON files already pass `min(1)`).
+
 ## 2026-04-25: JSON-LD Article schema + consistent meta description on every page
 
 **Context / trigger:** Two related fixes, one file. (1) `<meta name="description">` was conditionally rendered: `{description && <meta>...}` — pages that didn't pass an explicit description (login, auth/verify, dashboard/admin) had no description at all, while their `og:description` always rendered with a fallback. Search engines were getting empty meta descriptions on those pages. (2) Daily pieces had no structured data — no Article schema, no AudioObject. Google's rich-result eligibility (article cards, audio play-button surfacing in search) was missing entirely. Both are well-documented standards that cost zero dependencies.

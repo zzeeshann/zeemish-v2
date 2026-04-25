@@ -77,7 +77,16 @@ const interactives = defineCollection({
     slug: z.string(),
     type: z.enum(['quiz']),
     title: z.string(),
-    concept: z.string().optional(),
+    // Required, non-empty. One sentence naming the underlying principle
+    // the quiz teaches — feeds the page subtitle AND the per-page meta
+    // description (src/pages/interactives/[slug].astro passes it to
+    // BaseLayout). Generator emits it on every successful round; the
+    // structural validator already throws on empty before the file write
+    // (interactive-generator.ts validateQuiz), so a declined output never
+    // reaches Zod with concept=''. Schema-level requirement is defense
+    // in depth + an SEO contract: every interactive page has a
+    // meaningful description.
+    concept: z.string().min(1),
     sourcePieceId: z.string().uuid().optional(),
     interactiveId: z.string().uuid(),
     voiceScore: z.number().optional(),

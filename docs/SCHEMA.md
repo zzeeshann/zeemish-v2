@@ -292,7 +292,7 @@ Standalone teaching artefacts — first-class concept, not a piece sub-feature. 
 | slug | TEXT NOT NULL UNIQUE | kebab-case. Powers `/interactives/<slug>/`. Stored, not derived — renames don't break URLs. |
 | type | TEXT NOT NULL | `'quiz'` initially; extensible. Loose TEXT, no CHECK — consistent with `learnings.source` / `observer_events.severity`. |
 | title | TEXT NOT NULL | Display title. |
-| concept | TEXT | The essence — what this teaches. Nullable for minimally-authored cases. |
+| concept | TEXT | The essence — what this teaches. D1 column nullable; the **content-collection schema requires it** (`z.string().min(1)` in `src/content.config.ts`) since 2026-04-25 — every JSON file in `content/interactives/` must have a non-empty concept, which feeds the page subtitle AND meta description. Generator's structural validator throws on empty before file write; auditor flags topic-labels and off-voice phrasing. |
 | source_piece_id | TEXT | `daily_pieces.id` the Generator was triggered from. Nullable (standalone-authored interactives in future). Non-enforced FK. |
 | content_json | TEXT | Type-specific payload. **Nullable convenience mirror in v1** — sub-task 4.2 chose content-collection (git-versioned `content/interactives/<slug>.json`) as the authoritative source of truth. Writers leave `content_json` NULL; readers always read from the file via `getCollection('interactives')`. Column stays on the row for future admin queries that want to filter/search by content shape without joining to the file system. |
 | voice_score | INTEGER | 0–100 from InteractiveAuditor. |
