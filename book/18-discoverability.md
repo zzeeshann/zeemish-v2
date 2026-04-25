@@ -22,7 +22,7 @@ Three problems compounded the invisibility.
 
 **No previews.** When someone shares a Zeemish link on Twitter or in a Slack channel, the platform tries to fetch a preview — a small card with a title, description, and image. Zeemish was sending the right title and description, but the image was an SVG file, and no major social platform renders SVG previews. So every link to Zeemish was previewing as bare text or a broken thumbnail. The exact opposite of what a shared link is supposed to do.
 
-The fix was three commits, all on April 25.
+The fix was four commits, all on April 25.
 
 ## Sitemap: the machine-readable index
 
@@ -90,9 +90,11 @@ The fix consolidated both tags onto a single source of truth in the page layout.
 
 Small fix. Five lines of code. Closes the gap on every page.
 
+A fourth commit closed the same gap from the other direction. The interactive pages — those standalone-quiz URLs — were already feeding their meta description from a field called `concept`: the one-sentence summary of what each quiz teaches ("How a single narrow point in a system can determine the shape of everything downstream.", say, for the chokepoints quiz). But the field was *optional* in the schema. A future bug, or a future minimally-authored interactive, could ship with an empty concept and silently fall back to the generic site description. The fix made the field required at the schema level, added a structural check that rejects empty concepts before any file is written, and extended the auditor — the agent that judges quiz quality — to flag concepts that are blank or written like a topic label rather than a sentence. Three layers of defense, so an empty meta description never reaches a search engine. The bug never actually fired in production; the fix is the kind of belt-and-braces that pays off on the day a new interactive type lands and someone forgets to populate one field.
+
 ## Why this matters more than it sounds
 
-Each of these things — sitemap, RSS, OG image, JSON-LD, meta description — is a small, well-documented standard. None is novel. None requires a new dependency. The total code change for all three commits was under 400 lines.
+Each of these things — sitemap, RSS, OG image, JSON-LD, meta description — is a small, well-documented standard. None is novel. None requires a new dependency. The total code change across all four commits was under 500 lines.
 
 But the cumulative effect is the difference between a publication that exists and one that *can be found*. For a daily publication, the second matters more. A piece that nobody reads is a piece that doesn't compound — no engagement signal, no Zita questions, no learning, no growing audience. The whole self-improvement loop the previous chapter describes is downstream of someone finding the piece in the first place.
 
