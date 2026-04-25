@@ -32,7 +32,7 @@ SQL is old (invented in the 1970s) and it's still everywhere. If you learn any o
 
 **Cloudflare D1** is Cloudflare's version of a relational database. Under the hood it uses **SQLite**, which is a small, fast, reliable database engine that's in practically everything — your phone, your browser, your TV. D1 wraps SQLite so it can be used from Cloudflare Workers and replicated across regions.
 
-Zeemish has one D1 database called `zeemish`. It has eighteen tables. Chapter references them throughout.
+Zeemish has one D1 database called `zeemish`. It has nineteen tables. Chapter references them throughout.
 
 ## KV — fast keyed storage
 

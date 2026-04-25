@@ -44,7 +44,7 @@ content/daily-pieces/   Published daily pieces (YYYY-MM-DD-slug.mdx)
 src/pages/              Site routes (Astro)
 src/interactive/        Web Components (lesson-shell, audio-player, zita-chat, quiz-card)
 content/interactives/   Standalone interactive content (quizzes; Area 4)
-migrations/             D1 schema (22 migrations, 18 tables)
+migrations/             D1 schema (23 migrations, 19 tables)
 scripts/                Build, deploy, and ops scripts
 docs/                   Living documentation
 docs/handoff/           Original architecture briefs (frozen)

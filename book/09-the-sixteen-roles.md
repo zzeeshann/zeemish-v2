@@ -152,7 +152,7 @@ The effect compounds. Early pieces create the taxonomy because the list is short
 
 **Why "essence not reference":** If the quiz quizzed readers on the specific story (*what was the defendant's bet size?*, *which month did Schedule III reclassify?*), it would test memory of today's news, not understanding of the underlying pattern. The point of a quiz is to check whether a reader can recognise the concept somewhere else. So the quiz asks about the underlying shape — chokepoints, information asymmetry, cascades, legitimacy — not about the specific news event that made today's piece teachable. A stranger landing on the quiz's URL without having read the source piece should still find it useful.
 
-**What happens if it can't pass:** Three rounds exhausted without a clean pass, the quiz ships anyway with a `quality_flag='low'` marker. Readers see the same "Rough" tier tag that sub-85 daily pieces get. Admin UI flags it. Better to ship a refined-but-imperfect artefact than a 404.
+**What happens if it can't pass:** Three rounds exhausted without a clean pass, the quiz ships anyway with a `quality_flag='low'` marker. The "How this was made" drawer for the source piece names the rubric the auditor flagged ("essence-not-reference", "structure & pedagogy", and so on); admin UI marks the artefact FLAGGED LOW with a retry button. Better to ship a refined-but-imperfect artefact than a 404. Earlier copy on the drawer had borrowed the daily-piece "Rough" tier label and produced a contradiction the first time it surfaced — voice 88 (Polished tier, ≥85) sitting next to "Shipped as Rough" on the same line; replaced same-day with vocabulary that doesn't conflate two different rubrics.
 
 ## 15. Interactive Auditor
 
@@ -170,6 +170,8 @@ The four dimensions:
 **Claude call?** Yes. One call per round, covering all four dimensions together.
 
 **Why one auditor instead of four:** A quiz is small — maybe 300 words total. The three separate auditors that gate a daily piece exist because a 1,500-word MDX file is complex enough to benefit from parallel specialised judgment. A 300-word quiz isn't. One coherent pass is both cheaper (roughly four times fewer API calls) and more consistent than four parallel ones that might contradict each other.
+
+**What gets persisted:** The Generator's loop writes one row to `interactive_audit_results` per round per dimension — voice/structure/essence/factual × up to three rounds, so up to twelve rows per quiz. The shape mirrors the daily-piece `audit_results` table, with `passed`, `score` (voice only), and `notes` (the auditor's per-dimension violations and suggestions). Latest-round data drives the drawer's named-rubric copy on shipped-low artefacts; the rest is the forensic record a future admin per-quiz page will read.
 
 ## 16. Observer
 

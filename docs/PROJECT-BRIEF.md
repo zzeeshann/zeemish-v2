@@ -59,7 +59,7 @@ Quality gates: nothing publishes unless Voice Auditor, Fact Checker, AND Structu
 ## The stack
 
 - **Frontend:** Astro + MDX + Tailwind CSS + Web Components + TypeScript strict
-- **Backend:** Cloudflare Workers + D1 (SQLite, 18 tables) + R2 (audio + assets)
+- **Backend:** Cloudflare Workers + D1 (SQLite, 19 tables) + R2 (audio + assets)
 - **Agents:** Cloudflare Agents SDK — each agent is a Durable Object; post-publish work runs on DO alarms
 - **AI:** Anthropic Claude Sonnet 4.5 (single model across the pipeline)
 - **Audio:** ElevenLabs (Frederick Surrey, one locked voice)
