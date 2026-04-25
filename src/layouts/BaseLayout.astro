@@ -7,12 +7,90 @@ interface Props {
   description?: string;
   /** "article" for daily pieces, "website" for everything else (default). */
   ogType?: 'website' | 'article';
+  /** When set, emits a JSON-LD Article schema (and an AudioObject when
+   *  audioUrl is present). Daily-piece pages pass this; other pages
+   *  don't. Self-gating — no separate enable flag. */
+  article?: {
+    /** Unix-ms timestamp from MDX frontmatter `publishedAt`. */
+    publishedAt: number;
+    /** Path or absolute URL to a representative audio file. Daily pieces
+     *  pass the "hook" beat (or the first beat if no hook). One
+     *  AudioObject per Article in v1; per-beat array deferred. */
+    audioUrl?: string;
+  };
 }
 
-const { title, description, ogType = 'website' } = Astro.props;
-const ogDescription = description ?? `Educate yourself for humble decisions. Daily teaching, made by ${AGENT_COUNT} agents.`;
-const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
-const ogImageUrl = new URL('/og-image.png', Astro.site ?? Astro.url).toString();
+const { title, description, ogType = 'website', article } = Astro.props;
+
+// Single source of truth for the page description — used by
+// <meta name="description">, og:description, and twitter:description.
+// Always renders (the conditional emit was dropping the meta tag on
+// pages that didn't pass `description`, e.g. /login, /auth/verify,
+// admin dashboard).
+const metaDescription =
+  description ??
+  `Educate yourself for humble decisions. Daily teaching, made by ${AGENT_COUNT} agents.`;
+
+const siteOrigin = Astro.site ?? Astro.url;
+const canonicalUrl = new URL(Astro.url.pathname, siteOrigin).toString();
+const ogImageUrl = new URL('/og-image.png', siteOrigin).toString();
+
+// JSON-LD Article schema for daily pieces. Article (not NewsArticle —
+// Zeemish teaches, doesn't report) per Google's structured-data guide.
+// All fields recommended-only per the current docs (no `required`
+// fields), but the more we provide the richer the result card.
+let articleJsonLd: string | null = null;
+if (article) {
+  const isoPublished = new Date(article.publishedAt).toISOString();
+  const audioUrl = article.audioUrl
+    ? new URL(article.audioUrl, siteOrigin).toString()
+    : null;
+  const schema: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: title.replace(/ — Zeemish$/, ''),
+    description: metaDescription,
+    datePublished: isoPublished,
+    // Pieces are permanent (the hard rule) — modified date is always
+    // the publish date. If we ever start editing pieces this needs to
+    // become a separate field.
+    dateModified: isoPublished,
+    image: [ogImageUrl],
+    author: {
+      '@type': 'Organization',
+      name: 'Zeemish',
+      url: siteOrigin.toString(),
+    },
+    publisher: {
+      '@type': 'Organization',
+      name: 'Zeemish',
+      url: siteOrigin.toString(),
+      logo: {
+        '@type': 'ImageObject',
+        url: ogImageUrl,
+        width: 1200,
+        height: 630,
+      },
+    },
+    mainEntityOfPage: {
+      '@type': 'WebPage',
+      '@id': canonicalUrl,
+    },
+  };
+  if (audioUrl) {
+    schema.associatedMedia = {
+      '@type': 'AudioObject',
+      contentUrl: audioUrl,
+      encodingFormat: 'audio/mpeg',
+      name: schema.headline,
+      uploadDate: isoPublished,
+    };
+  }
+  // Defend against `</script>` injection if a future title or
+  // description ever contains the literal string. JSON.stringify
+  // doesn't escape `<` by default.
+  articleJsonLd = JSON.stringify(schema).replace(/</g, '\\u003c');
+}
 ---
 
 <html lang="en">
@@ -26,12 +104,12 @@ const ogImageUrl = new URL('/og-image.png', Astro.site ?? Astro.url).toString();
     </style>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
-    {description && <meta name="description" content={description} />}
+    <meta name="description" content={metaDescription} />
     <link rel="canonical" href={canonicalUrl} />
 
     <!-- Open Graph -->
     <meta property="og:title" content={title} />
-    <meta property="og:description" content={ogDescription} />
+    <meta property="og:description" content={metaDescription} />
     <meta property="og:type" content={ogType} />
     <meta property="og:url" content={canonicalUrl} />
     <meta property="og:image" content={ogImageUrl} />
@@ -40,8 +118,12 @@ const ogImageUrl = new URL('/og-image.png', Astro.site ?? Astro.url).toString();
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
-    <meta name="twitter:description" content={ogDescription} />
+    <meta name="twitter:description" content={metaDescription} />
     <meta name="twitter:image" content={ogImageUrl} />
+
+    {articleJsonLd && (
+      <script type="application/ld+json" set:html={articleJsonLd} />
+    )}
 
     <!-- Feed auto-discovery for Feedly / Inoreader / NetNewsWire / etc. -->
     <link rel="alternate" type="application/rss+xml" title="Zeemish daily pieces" href="/rss.xml" />

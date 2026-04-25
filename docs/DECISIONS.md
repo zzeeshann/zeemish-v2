@@ -2,6 +2,36 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: JSON-LD Article schema + consistent meta description on every page
+
+**Context / trigger:** Two related fixes, one file. (1) `<meta name="description">` was conditionally rendered: `{description && <meta>...}` — pages that didn't pass an explicit description (login, auth/verify, dashboard/admin) had no description at all, while their `og:description` always rendered with a fallback. Search engines were getting empty meta descriptions on those pages. (2) Daily pieces had no structured data — no Article schema, no AudioObject. Google's rich-result eligibility (article cards, audio play-button surfacing in search) was missing entirely. Both are well-documented standards that cost zero dependencies.
+
+**Decisions:**
+
+1. **Single `metaDescription` constant feeds `<meta name="description">`, `og:description`, and `twitter:description`.** Replaces three separate references that could drift. The constant uses the prop when set, falls back to a brand-default ("Educate yourself for humble decisions. Daily teaching, made by N agents."). Pages that previously had no description (login, auth/verify, dashboard/admin) now get the brand-default — consistent presence is more valuable than per-page bespoke copy on those low-content surfaces. Pages that already passed an explicit description are unchanged.
+
+2. **`<meta name="description">` always renders.** The conditional emit was the bug. Fix is one line — drop the `{description && ...}` wrapper, always emit using `metaDescription`. Verified: every page on the site now has a description tag matching its og:description.
+
+3. **Article schema, not NewsArticle.** Per Google's structured-data guide, both are valid for article-shaped content. Zeemish *teaches*; it doesn't *report*. NewsArticle implies primary reporting (datelines, beat coverage, breaking-news editorial discipline) — Zeemish takes today's news as a teaching anchor and explains the underlying concept. Calling our work NewsArticle would misrepresent the editorial intent to Google's classifier and risk being judged against news-quality signals (E-E-A-T for journalism, source authority, fact-check prominence). Article is the right fit; BlogPosting was also considered and rejected as too informal.
+
+4. **Single AudioObject per Article in v1.** Pieces have per-beat audio (3–6 clips each) but the JSON-LD emits one AudioObject pointing at a representative beat. Per-beat array (one AudioObject per clip) is the v2 ceiling but not necessary for SEO eligibility — Google needs to see "this article has audio narration", not enumerate every clip. Picker logic at [LessonLayout.astro](../src/layouts/LessonLayout.astro): prefer legacy `audioSrc` if set, else the `"hook"` beat (the standard opening across every piece in this codebase per Drafter's prompt structure), else first iteration order. Alphabetical fallback would have picked `"close.mp3"` on the 2026-04-25 piece — wrong semantically; the hook is the right choice.
+
+5. **`dateModified === datePublished`.** Pieces are permanent (the hard rule). The metadata-vs-content carve-out (DECISIONS 2026-04-18) does allow frontmatter edits — `voiceScore`, `audioBeats`, `qualityFlag`, `beatTitles` — but those are operational metadata, not editorial revisions. From a reader-facing perspective every piece is frozen at publish time. If we ever start editing pieces in a way that changes the teaching content, `dateModified` becomes a separate field. Until then, equating them is honest.
+
+6. **Self-gating via the `article` prop, not `ogType === 'article'`.** Interactives also use `ogType="article"` (they're standalone teaching artefacts) but they don't have a publish date or audio in the JSON-LD-able shape. Gating on `article` being non-null means daily pieces opt in by passing the prop; interactives opt out by not passing it. Cleaner than a boolean enable flag — the data presence IS the signal.
+
+7. **`</script>` injection defense via `\u003c` escape.** `JSON.stringify(schema)` doesn't escape `<` by default. If a future title or description ever contained the literal string `</script>` (defensive — currently impossible because Drafter writes plain English), the JSON-LD block would prematurely close and an attacker-controlled string could inject arbitrary script. One-line replace, no perf cost.
+
+8. **`headline` strips trailing `— Zeemish`.** BaseLayout receives `title` as `"The Cloud Has Weight — Zeemish"` (LessonLayout appends the brand for the `<title>` tag). The JSON-LD `headline` is the editorial title — Google indexes it as the article's name. Stripping the brand suffix gives Google "The Cloud Has Weight", which matches the `<h1>` and the printed-page brain-model of the headline. Same string would be wrong on `<title>` (browser tab needs brand context).
+
+9. **Image array with one entry rather than a bare URL.** Google's docs recommend multiple aspect ratios (16:9, 4:3, 1:1) — we only have one (the OG card at 1.9:1). An array with one entry is forward-compatible with adding more later; a bare URL would need a refactor when we add per-piece dynamic OG. One-item array now, drop more entries in when they exist.
+
+**Trade-offs accepted:** AudioObject points at one beat — not the full reading experience. A future v2 (when there's reader demand for podcast-style aggregation, or if Google starts surfacing per-beat audio play buttons) can split this into an array. Description on daily pieces is ~480 chars, longer than Google's ~155-char display limit — Google will truncate, the full text only matters for share-card previews where it's appropriate. Not refactored in this commit.
+
+**Verified end-to-end in dev preview:** every URL in the test grid (homepage, /library/, /login/, /auth/verify/, daily piece, interactive) returns 200 with `<meta name="description">` present and matching `og:description`. JSON-LD only emits on the daily piece page (not on /interactives despite shared `ogType="article"`). Parsed JSON-LD has all 9 expected fields including `associatedMedia` AudioObject pointing at `hook.mp3` (correct, not alphabetical `close.mp3`). Title strip works (`"The Cloud Has Weight"` not `"The Cloud Has Weight — Zeemish"`). All asset URLs absolutized via `Astro.site`. `pnpm build` clean.
+
+**Files:** [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro) (single metaDescription, JSON-LD block, defensive `</script>` escape), [src/layouts/LessonLayout.astro](../src/layouts/LessonLayout.astro) (publishedAt prop, audio URL picker, passes through `article` prop), [src/pages/daily/[date]/[slug].astro](../src/pages/daily/[date]/[slug].astro) (passes `publishedAt` + `audioSrc`).
+
 ## 2026-04-25: Replace SVG og:image with PNG for social platform compatibility
 
 **Context / trigger:** [BaseLayout.astro](../src/layouts/BaseLayout.astro) was advertising `/og-image.svg` as the Open Graph image. None of the major sharing platforms render SVG OG images: Twitter/X, LinkedIn, Facebook, WhatsApp, iMessage, Slack — they all silently drop the preview or show a broken thumbnail. Every Zeemish link shared since launch (2026-04-18) has been previewing as bare text or worse. Real user-visible bug, not polish.

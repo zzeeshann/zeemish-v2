@@ -9,6 +9,9 @@ interface Props {
   title: string;
   estimatedTime: string;
   audioBeats?: Record<string, string>;
+  /** Legacy single-clip audio path. Pre-Area-4-style pieces; current
+   *  pipeline emits per-beat clips into audioBeats instead. */
+  audioSrc?: string;
   beatCount?: number;
   subject?: string;
   date?: string;
@@ -17,6 +20,10 @@ interface Props {
    *  piece via piece_id. Migration 0020 added the column (2026-04-22);
    *  site-worker threading completes the loop in sub-task 3.2. */
   pieceId?: string;
+  /** Unix-ms timestamp from MDX frontmatter `publishedAt`. Threads down
+   *  to BaseLayout for the JSON-LD Article schema's datePublished /
+   *  dateModified fields. */
+  publishedAt: number;
   voiceScore?: number;
   qualityFlag?: 'low';
   /** Optional one-line description for social-share meta. */
@@ -32,7 +39,20 @@ interface Props {
   } | null;
 }
 
-const { title, estimatedTime, audioBeats, beatCount, subject, date, pieceId, voiceScore, qualityFlag, description, interactive } = Astro.props;
+const { title, estimatedTime, audioBeats, audioSrc, beatCount, subject, date, pieceId, publishedAt, voiceScore, qualityFlag, description, interactive } = Astro.props;
+
+// Pick a representative audio URL for the JSON-LD AudioObject (v1 emits
+// one per Article — array-per-beat is deferred). Prefer legacy
+// audioSrc when set; else the "hook" beat (the standard opening beat
+// across every piece in this codebase); else the first beat in
+// iteration order. Any beat works for SEO purposes — Google just needs
+// to see audio is present.
+let canonicalAudioUrl: string | undefined;
+if (audioSrc) {
+  canonicalAudioUrl = audioSrc;
+} else if (audioBeats) {
+  canonicalAudioUrl = audioBeats['hook'] ?? Object.values(audioBeats)[0];
+}
 const timeDisplay = String(estimatedTime).includes('min') ? estimatedTime : `${estimatedTime} min`;
 // Tier is a quiet, consistent signal shown in the metadata line — same
 // visual weight as the date. Every piece shows its tier (not just rough
@@ -54,7 +74,12 @@ if (date) {
 }
 ---
 
-<BaseLayout title={`${title} — Zeemish`} description={description} ogType="article">
+<BaseLayout
+  title={`${title} — Zeemish`}
+  description={description}
+  ogType="article"
+  article={{ publishedAt, audioUrl: canonicalAudioUrl }}
+>
   <nav class="text-sm text-zee-muted mb-6" aria-label="Breadcrumb">
     <a href="/daily/" class="hover:text-zee-primary transition-colors">Daily</a>
     <span class="mx-2 opacity-50">/</span>
