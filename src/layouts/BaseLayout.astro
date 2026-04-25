@@ -12,7 +12,7 @@ interface Props {
 const { title, description, ogType = 'website' } = Astro.props;
 const ogDescription = description ?? `Educate yourself for humble decisions. Daily teaching, made by ${AGENT_COUNT} agents.`;
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
-const ogImageUrl = new URL('/og-image.svg', Astro.site ?? Astro.url).toString();
+const ogImageUrl = new URL('/og-image.png', Astro.site ?? Astro.url).toString();
 ---
 
 <html lang="en">

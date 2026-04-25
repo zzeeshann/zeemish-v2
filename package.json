@@ -17,6 +17,7 @@
     "tailwindcss": "^3.4.0"
   },
   "devDependencies": {
+    "sharp": "^0.34.5",
     "typescript": "^5.8.0"
   },
   "pnpm": {

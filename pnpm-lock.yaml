@@ -24,6 +24,9 @@ importers:
         specifier: ^3.4.0
         version: 3.4.19(yaml@2.8.3)
     devDependencies:
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

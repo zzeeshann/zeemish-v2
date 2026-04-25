@@ -2,6 +2,32 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Replace SVG og:image with PNG for social platform compatibility
+
+**Context / trigger:** [BaseLayout.astro](../src/layouts/BaseLayout.astro) was advertising `/og-image.svg` as the Open Graph image. None of the major sharing platforms render SVG OG images: Twitter/X, LinkedIn, Facebook, WhatsApp, iMessage, Slack — they all silently drop the preview or show a broken thumbnail. Every Zeemish link shared since launch (2026-04-18) has been previewing as bare text or worse. Real user-visible bug, not polish.
+
+**Decisions:**
+
+1. **PNG over SVG for the format.** Platform support is the entire reason — the spec'd `og:image` MIME types in practice are `image/png` and `image/jpeg`. SVG is technically allowed by the OG spec but no production scraper renders it. PNG also embeds the rendered design (fonts, geometry, colours) into the served bytes, so what gets shared on Twitter is exactly what we authored — no font-fallback drift between platforms.
+
+2. **Static single PNG over per-piece dynamic OG.** Per-piece dynamic OG (headline + tier rendered to PNG at the edge via a Cloudflare Worker route + satori or similar) is the right ceiling but a separate project — needs an edge renderer, font shipping, cache strategy, and per-piece URL injection. v1 ships one PNG that brand-stamps every link the same way. Marked in CLAUDE.md "Remaining minor items" as a future Worker route project.
+
+3. **Hand-rolled SVG → PNG generation script over a build-time pipeline.** OG card design changes maybe twice a year. A build-step that re-renders the PNG on every `pnpm build` would be wasted compute. [scripts/generate-og-image.mjs](../scripts/generate-og-image.mjs) is a one-off: contains the SVG inline, renders to `public/og-image.png` via sharp, run manually when the design changes. Committed alongside the PNG so the design is reproducible — not a black-box artefact.
+
+4. **`sharp` declared as devDependency rather than imported via deep `.pnpm` path.** Sharp was already in the lockfile (transitive dep of Astro's image optimization). Adding `sharp` to `devDependencies` is a declaration not a new install — `pnpm add -D sharp` reused the existing version with zero new bytes downloaded. The "no new dependencies without justification" rule is honored: the dep was already present; we just made it explicitly addressable from project-root scripts. Alternative (importing from `node_modules/.pnpm/sharp@0.34.5/...`) would version-lock the import path and break on any pnpm update.
+
+5. **Drop the "Made by N agents" bottom strip from the design.** Existing SVG read "Daily teaching · made by 13 agents" — already stale (the count is 16 as of Area 4) and would go stale again every time the team grows. New design: cream background, "zeemish" wordmark top-left in deep teal, centered "Educate yourself for humble decisions." in dark ink with subtle gold underline accent, single gold dot top-right. No agent count. Cleaner; zero maintenance burden.
+
+6. **Fonts: system sans-serif fallback (Helvetica Neue on macOS) over embedded DM Sans.** Embedding the DM Sans font file in the SVG would require shipping the font alongside the generator script. The OG card is generated once per design change on the developer's Mac, where Helvetica Neue is the system default. Helvetica Neue and DM Sans are similar enough in geometric grotesque feel that the OG card stays on-brand. If the OG card ever moved to dynamic generation at the edge, font shipping would matter — for static one-off generation it's noise.
+
+7. **Delete `public/og-image.svg`.** Old shared links that cached the SVG URL won't render previews on social platforms anyway (point 1) — there's nothing to break. Keeping both files would just create future "which one's canonical" confusion. `scripts/post-build.sh` `_routes.json` exclude list updated `og-image.svg` → `og-image.png` so the PNG continues to bypass the worker for security headers (no cookies, no auth — pure static asset).
+
+**Trade-offs accepted:** When the team grows or the brand evolves, the PNG needs manual regeneration via `node scripts/generate-og-image.mjs`. That's a 5-second action documented in the script header and in CLAUDE.md. Acceptable cost for a v1 that brand-stamps every shared link consistently across every platform.
+
+**Verified:** Generated 1200×630 RGBA PNG at 19,550 bytes. Visual inspection: cream + teal + black + gold accents render exactly as designed; tagline centred; gold underline + dot accent dots in place; wordmark left-aligned. `pnpm build` clean (verification-step run after the rest of the wire-up).
+
+**Files:** [scripts/generate-og-image.mjs](../scripts/generate-og-image.mjs) (new), [public/og-image.png](../public/og-image.png) (new), [public/og-image.svg](../public/og-image.svg) (deleted), [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro) (extension change), [scripts/post-build.sh](../scripts/post-build.sh) (exclude list), [package.json](../package.json) (sharp declared as devDep), [CLAUDE.md](../CLAUDE.md) (Remaining minor items entry refreshed).
+
 ## 2026-04-25: Sitemap + RSS feed + robots.txt sitemap directive
 
 **Context / trigger:** A daily publication without machine-readable discoverability is the single biggest miss a content site can make. No sitemap meant Google Search Console had nothing to crawl on a schedule — new pieces were invisible to organic search until they were stumbled across. No RSS meant Zeemish couldn't reach feed readers (Feedly, Inoreader, NetNewsWire) or the various AI ingestion pipelines that consume RSS. Cost is small; distribution is real.

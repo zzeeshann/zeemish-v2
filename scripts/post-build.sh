@@ -22,7 +22,7 @@ cat > dist/_routes.json <<'EOF'
 {
   "version": 1,
   "include": ["/*"],
-  "exclude": ["/_astro/*", "/og-image.svg", "/robots.txt"]
+  "exclude": ["/_astro/*", "/og-image.png", "/robots.txt"]
 }
 EOF
 
