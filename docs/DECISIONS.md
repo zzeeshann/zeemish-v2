@@ -2,6 +2,47 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Surface Categoriser + Interactive in "How this was made" drawer
+
+**Context / trigger:** The transparency drawer at `/daily/<date>/<slug>/#made` advertises itself as **"the full creation story of this piece — timeline, auditors, rules."** Today it isn't. Three of the 16 agents leave no trace in the drawer: **Categoriser** (#13, since 2026-04-23 — writes to `categories` + `piece_categories`), **InteractiveGenerator** (#15, since 2026-04-24 — writes to `interactives` + sets `daily_pieces.interactive_id`), and **InteractiveAuditor** (#16, since 2026-04-24 — final state on the `interactives` row). All three run as Director alarms 1s after `publishing done` and log only to `observer_events`, not `pipeline_log`, so the drawer's existing TIMELINE block can't see them. The drawer's API queried 6 tables and skipped the 4 that hold this story. User caught it on the 2026-04-25 Maine piece; the "See if it landed →" link on the last beat (sub-task 4.6) proved a `categories` row + `interactives` row both existed for that pieceId — both invisible to the drawer.
+
+**Decisions:**
+
+1. **Two dedicated sections, not one combined "post-publish work" block.** Categories answers "where does this piece live in the library?" (taxonomic claim). Interactive answers "what's the quiz built from this piece?" (sibling artefact with its own URL). Bundling muddles both. The drawer already gives Audio its own section even though it's a single producer-agent's output — same one-section-per-concern rhythm. Two sections also let each gracefully omit independently — they have different rollout dates (2026-04-23 vs 2026-04-24), and at deploy time some pieces will have one and not the other.
+
+2. **Order: PIECE → TIMELINE → ROUNDS → RULES → CANDIDATES → AUDIO → CATEGORIES → INTERACTIVE → COMMIT → LEARNINGS.** Mirrors agent timing as the implicit story arc — Categoriser fires 1s post-publish, Generator a beat later, learnings synthesise across the day. Categories before Interactive because Categoriser's alarm fires first and because the taxonomic claim ("filed under …") is lighter context than the sibling-artefact claim that sends the reader to a new URL.
+
+3. **InteractiveAuditor visibility = final state only on the row, not per-round.** Surface `voice_score`, `revision_count`, `quality_flag` from the `interactives` row. Do NOT create the deferred `interactive_audit_results` table (FOLLOWUPS 2026-04-24 sub-task 4.1) to surface per-round audits. Drawer is reader-facing; per-round violation strings are operator-forensic for a 5-question quiz (much smaller surface area than a 600-word lesson). If admin ever needs per-round visibility, ship `interactive_audit_results` then, scoped to that consumer — schema-fits-the-need cuts both ways. Building a table whose only consumer would be a section we'd then want to collapse is the wrong direction.
+
+4. **No `interactive_engagement` aggregates in the drawer.** Per-user completion counts ("87% finished, average score 4/5") are operator-forensic and belong on the admin page. The drawer is a creation-story narrative, not a stats dashboard. Adding aggregates would conflate "how this was made" with "how this performed" — two different lenses, two different surfaces.
+
+5. **Failure / decline = silent omission.** A reader doesn't need to see "we considered an interactive but declined as redundant" — that's an internal QA judgement. Same as how Audio just disappears for pre-audio pieces. Failure visibility for operators lives in observer_events → admin (out of scope here). Three failure modes, one rule: empty array → no Categories section; null interactive → no Interactive section; `quality_flag='low'` → Interactive section renders WITH a muted "Shipped as Rough — auditor max-failed at 3 rounds" note (mirrors sub-task 4.5's reversal — a flagged-low artefact is a real artefact the reader can still try).
+
+6. **Type-agnostic copy on the Interactive section.** Renders as `A {type} titled "{title}"` — works for `quiz` today and any future type (`breathing`, `chart`, `game`) without code changes. The `type` string already lands on the `interactives` row per migration 0022's discriminator. CTA links to `/interactives/<slug>/` (sub-task 4.2's prerendered route).
+
+7. **piece_id-keyed queries, no date-keyed fallback.** Both new tables (`piece_categories` + `interactives.source_piece_id`) post-date the piece_id_backfill era — every row was written with piece_id. The `pieceIdFilter ? ... : ...` ternary pattern used elsewhere in the API is unnecessary here. If `pieceIdFilter` is null (stale cached drawer bundle), both sections silently omit — a small UX degradation for an edge case that goes away after the next page load. Worth the cleaner code over a fallback path that would need its own correctness reasoning.
+
+8. **Forward-flow link + transparency CTA = complementary, not duplicative.** Sub-task 4.6's "See if it landed →" link at end-of-piece is the *forward-flow* exit — the reader who finished reading takes one step sideways to the quiz. The drawer's Interactive CTA is the *transparency* surface — the reader explores how the piece was made and discovers the quiz as a sibling artefact with its own voice score and revision history. Both routes land at `/interactives/<slug>/`. The CTA is intentionally redundant with the end-of-piece prompt; the drawer reader may have skipped the last beat or arrived via #made deep-link.
+
+**Trade-offs accepted:**
+- Confidence shown as a soft trailing label (`87% confident`) rather than a bar — we don't want it reading as an audit score (Categoriser's confidence is a different signal from Voice Auditor's voice score).
+- Drawer teaser counts (`loadMadeTeaser`) NOT extended to surface "1 quiz / 2 categories" on the unopened-button affordance. Two more queries on every page render for marginal value; can revisit when we know readers want to see it pre-open.
+- No backfill for pre-2026-04-23 / pre-2026-04-24 pieces. Graceful omission is the intended behaviour — pre-Area-2 pieces drawer renders identically to today.
+- `daily_pieces.has_interactive` (deprecated per migration 0022) untouched.
+- Drawer subtitle copy ("the full creation story of this piece — timeline, auditors, rules") not rephrased even though the tagline now technically should mention categories + interactive too. Optional polish; the tagline is generally honest now and the drawer body proves it via the new sections.
+
+**Verified end-to-end in dev preview** (local D1 has no Categoriser/InteractiveGenerator data — those agents only run in prod, so renderer paths verified via stubbed fetch with prod-shape envelopes; API query syntax verified directly):
+- API returns 200 with `categories` + `interactive` fields present and correctly defaulted (`[]` / `null`).
+- With stubbed prod-shape data: 2 chips render with `/library/<slug>/` hrefs in confidence-DESC order (87% → 64%), Interactive CTA → `/interactives/chokepoints-and-cascades/`, copy reads "A quiz titled \"Chokepoints and Cascades\" · Voice 92/100 · 1 revision".
+- `qualityFlag='low'` test: muted "Shipped as Rough — auditor max-failed at 3 rounds. The reader can still try it." note renders above the CTA.
+- Plural variants: `0 revisions`, `1 revision`, `2 revisions` all render correctly.
+- Mobile 375px: 3 chips wrap to 3 separate rows, zero horizontal overflow.
+- Empty-case omission: when `categories=[]` and/or `interactive=null`, sections disappear entirely (no placeholder copy).
+- Section order on render: Categories before Interactive when both present, both between AUDIO and COMMIT.
+- Zero console errors, zero server errors, `pnpm build` clean.
+
+**Files:** [src/lib/made-by.ts](../src/lib/made-by.ts) (added `MadeCategory` + `MadeInteractive` types, extended `MadeEnvelope`), [src/pages/api/daily/[date]/made.ts](../src/pages/api/daily/[date]/made.ts) (two new piece_id-scoped queries — confidence-DESC join through `piece_categories` to `categories`, single-row select on `interactives WHERE source_piece_id = ?` using `idx_interactives_source_piece`), [src/interactive/made-drawer.ts](../src/interactive/made-drawer.ts) (two new render blocks between AUDIO and COMMIT, `renderCategory()` + `renderInteractiveSection()` helpers near existing `renderCandidate()`), [src/styles/made.css](../src/styles/made.css) (`.made-categories` flex-wrap chip bar with 44px min-height, `.made-category-chip` rounded-pill with confidence label, `.made-interactive-cta` brand-green CTA button).
+
 ## 2026-04-25: Favicon set + web manifest
 
 **Context / trigger:** The site shipped on 2026-04-18 with no favicon at all — `/favicon.ico` and `/favicon.svg` both 404. Browsers showed the generic globe icon in tabs, bookmarks, and history. Zishan handed over a 5-file design package (favicon.svg master, apple-touch-icon.png at 180×180, icon-192.png, icon-512.png, favicon-source-1024.png raster master) with brand colours #1A6B62 deep teal background + #FAF8F4 cream lowercase z. Already proofed by hand at 16, 32, and 512 px.

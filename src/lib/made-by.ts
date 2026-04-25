@@ -108,6 +108,36 @@ export interface MadeLearning {
   createdAt: number;
 }
 
+/**
+ * One library category Categoriser assigned to this piece. Confidence is
+ * the score Claude returned at categorisation time (0–100). Empty array
+ * means Categoriser hasn't run, declined, or pre-dates the agent — the
+ * drawer omits the section in all three cases.
+ */
+export interface MadeCategory {
+  slug: string;
+  name: string;
+  confidence: number;
+}
+
+/**
+ * The standalone interactive (Area 4 — currently quizzes) generated from
+ * this piece by InteractiveGenerator + InteractiveAuditor. `null` means
+ * Generator hasn't run, declined as redundant, or pre-dates the agent.
+ * `qualityFlag === 'low'` indicates a max-failed-but-shipped artefact
+ * (per the 2026-04-24 reversal); the drawer renders normally and notes
+ * the Rough tier so readers can still try it.
+ */
+export interface MadeInteractive {
+  slug: string;
+  type: string;
+  title: string;
+  voiceScore: number | null;
+  qualityFlag: 'low' | null;
+  revisionCount: number;
+  publishedAt: number | null;
+}
+
 export interface MadeEnvelope {
   date: string;
   piece: MadePiece | null;
@@ -115,6 +145,8 @@ export interface MadeEnvelope {
   rounds: MadeRound[];
   candidates: MadeCandidates;
   audio: MadeAudio;
+  categories: MadeCategory[];
+  interactive: MadeInteractive | null;
   learnings: MadeLearning[];
 }
 

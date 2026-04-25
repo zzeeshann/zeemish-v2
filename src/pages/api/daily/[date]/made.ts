@@ -11,6 +11,8 @@ import type {
   MadeAudio,
   MadeAudioBeat,
   MadeLearning,
+  MadeCategory,
+  MadeInteractive,
 } from '../../../../lib/made-by';
 
 export const prerender = false;
@@ -65,6 +67,8 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
       voiceId: null,
       generatedAt: null,
     },
+    categories: [],
+    interactive: null,
     learnings: [],
   };
 
@@ -290,6 +294,70 @@ export const GET: APIRoute = async ({ params, locals, url }) => {
       envelope.audio = audio;
     }
   } catch { /* leave audio empty */ }
+
+  // --- Categories Categoriser assigned -------------------------------
+  // Both tables (categories + piece_categories) post-date the piece_id
+  // backfill era, so no date-keyed fallback is needed. Empty array when
+  // the piece pre-dates Categoriser (pre-2026-04-23) or the agent
+  // failed/hasn't run yet — the drawer omits the section in all cases.
+  if (pieceIdFilter) {
+    try {
+      const cats = await db
+        .prepare(
+          `SELECT c.slug, c.name, pc.confidence
+             FROM piece_categories pc
+             JOIN categories c ON c.id = pc.category_id
+            WHERE pc.piece_id = ?
+            ORDER BY pc.confidence DESC, c.name ASC`,
+        )
+        .bind(pieceIdFilter)
+        .all<{ slug: string; name: string; confidence: number }>();
+      envelope.categories = cats.results.map<MadeCategory>((r) => ({
+        slug: r.slug,
+        name: r.name,
+        confidence: r.confidence,
+      }));
+    } catch { /* leave categories empty */ }
+  }
+
+  // --- Interactive (quiz today, future-compat for breathing/chart/game) ---
+  // Single row by source_piece_id — uses idx_interactives_source_piece.
+  // null when Generator declined as redundant, hasn't run yet, or the
+  // piece pre-dates the agent (pre-2026-04-24). qualityFlag === 'low'
+  // indicates a max-failed-but-shipped artefact (sub-task 4.5 reversal).
+  if (pieceIdFilter) {
+    try {
+      const row = await db
+        .prepare(
+          `SELECT slug, type, title, voice_score, quality_flag, revision_count, published_at
+             FROM interactives
+            WHERE source_piece_id = ?
+            LIMIT 1`,
+        )
+        .bind(pieceIdFilter)
+        .first<{
+          slug: string;
+          type: string;
+          title: string;
+          voice_score: number | null;
+          quality_flag: string | null;
+          revision_count: number | null;
+          published_at: number | null;
+        }>();
+      if (row) {
+        const interactive: MadeInteractive = {
+          slug: row.slug,
+          type: row.type,
+          title: row.title,
+          voiceScore: row.voice_score ?? null,
+          qualityFlag: row.quality_flag === 'low' ? 'low' : null,
+          revisionCount: row.revision_count ?? 0,
+          publishedAt: row.published_at ?? null,
+        };
+        envelope.interactive = interactive;
+      }
+    } catch { /* leave interactive null */ }
+  }
 
   // --- Learnings pinned to this piece ---------------------------------
   // Written post-publish by Learner.analysePiecePostPublish (P1.3) and

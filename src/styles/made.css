@@ -585,6 +585,83 @@ made-drawer[data-open] .made-panel {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Categories Categoriser assigned ------------------------------- */
+
+.made-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.made-category-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #E8E4DE;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.4);
+  color: #1A1A1A;
+  text-decoration: none;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  min-height: 44px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.made-category-chip:hover {
+  background: rgba(232, 228, 222, 0.7);
+  border-color: #1A6B62;
+}
+
+.made-category-chip:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 2px;
+}
+
+.made-category-name {
+  font-weight: 600;
+}
+
+.made-category-confidence {
+  font-size: 0.6875rem;
+  color: #6B6B6B;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+/* --- Interactive (sibling artefact built from this piece) ---------- */
+
+.made-interactive-low {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.made-interactive-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.5rem;
+  background: #1A6B62;
+  color: #FAF8F4;
+  text-decoration: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  transition: background 0.15s ease;
+}
+
+.made-interactive-cta:hover {
+  background: #145048;
+}
+
+.made-interactive-cta:focus-visible {
+  outline: 2px solid #1A6B62;
+  outline-offset: 2px;
+}
+
 /* --- Commit link ---------------------------------------------------- */
 
 .made-commit {

@@ -314,6 +314,28 @@ class MadeDrawer extends HTMLElement {
       `);
     }
 
+    // --- Categories Categoriser assigned ------------------------------
+    // Categoriser fires 1s after `publishing done`. Empty array = pre-
+    // 2026-04-23 piece, declined, or failed — section omits in all cases.
+    if (env.categories && env.categories.length > 0) {
+      html.push(`
+        <section class="made-section">
+          <h3 class="made-section-header">Filed under</h3>
+          <p class="made-section-note">
+            Categoriser placed this piece in ${env.categories.length} of the library's categories after publish.
+          </p>
+          <div class="made-categories">
+            ${env.categories.map(renderCategory).join('')}
+          </div>
+        </section>
+      `);
+    }
+
+    // --- Interactive (quiz/breathing/chart/game built from this piece) ---
+    if (env.interactive) {
+      html.push(renderInteractiveSection(env.interactive));
+    }
+
     // --- Commit link ---------------------------------------------------
     if (env.piece?.commitUrl || env.piece?.filePath) {
       const published = env.piece.publishedAt
@@ -545,6 +567,40 @@ function renderLearningGroup(title: string, observations: string[]): string {
         ${observations.map((obs) => `<li class="made-learning">${escapeHtml(obs)}</li>`).join('')}
       </ul>
     </div>
+  `;
+}
+
+function renderCategory(c: MadeEnvelope['categories'][number]): string {
+  const slug = encodeURIComponent(c.slug);
+  return `
+    <a class="made-category-chip" href="/library/${slug}/">
+      <span class="made-category-name">${escapeHtml(c.name)}</span>
+      <span class="made-category-confidence">${c.confidence}% confident</span>
+    </a>
+  `;
+}
+
+function renderInteractiveSection(i: NonNullable<MadeEnvelope['interactive']>): string {
+  const slug = encodeURIComponent(i.slug);
+  const typeLabel = i.type || 'interactive';
+  const revisionsLabel = i.revisionCount === 1 ? '1 revision' : `${i.revisionCount} revisions`;
+  const meta: string[] = [];
+  if (i.voiceScore != null) meta.push(`Voice ${i.voiceScore}/100`);
+  meta.push(revisionsLabel);
+  const lowNote = i.qualityFlag === 'low'
+    ? `<p class="made-interactive-low made-tier-rough">Shipped as <strong>Rough</strong> — auditor max-failed at 3 rounds. The reader can still try it.</p>`
+    : '';
+  return `
+    <section class="made-section">
+      <h3 class="made-section-header">The interactive built from this piece</h3>
+      <p class="made-section-note">
+        A ${escapeHtml(typeLabel)} titled "${escapeHtml(i.title)}" · ${meta.join(' · ')}
+      </p>
+      ${lowNote}
+      <a class="made-interactive-cta" href="/interactives/${slug}/">
+        Try the interactive →
+      </a>
+    </section>
   `;
 }
 
