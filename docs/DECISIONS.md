@@ -2,6 +2,32 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Favicon set + web manifest
+
+**Context / trigger:** The site shipped on 2026-04-18 with no favicon at all — `/favicon.ico` and `/favicon.svg` both 404. Browsers showed the generic globe icon in tabs, bookmarks, and history. Zishan handed over a 5-file design package (favicon.svg master, apple-touch-icon.png at 180×180, icon-192.png, icon-512.png, favicon-source-1024.png raster master) with brand colours #1A6B62 deep teal background + #FAF8F4 cream lowercase z. Already proofed by hand at 16, 32, and 512 px.
+
+**Decisions:**
+
+1. **Four runtime files in `public/`, one design master in `design/`.** The runtime set is `favicon.svg` + `apple-touch-icon.png` + `icon-192.png` + `icon-512.png` + `site.webmanifest`. The 1024 raster master is a designer source, not a runtime asset — readers don't need it served. Stashed at `design/favicon-source-1024.png` as a hand-authored master file kept in repo for future regeneration of additional sizes (multi-size .ico, larger PWA icons) without round-tripping back to the designer. New top-level `design/` directory because the existing `scripts/generate-og-image.mjs` pattern is "the script IS the source"; favicon doesn't have a script (vector + pre-rendered rasters are hand-authored), so a parallel folder of static design masters is the right shape.
+
+2. **Skip .ico.** Modern browsers (Chrome / Firefox / Safari / Edge desktop + iOS Safari + Android Chrome / Samsung Internet) all support PNG and SVG favicons. .ico is needed for IE11 and very old Safari — neither is in scope for a 2026 greenfield Cloudflare-Workers/Astro site. The SVG handles every modern tab-favicon surface (it scales without quality loss); the apple-touch covers iOS home-screen pinning; the manifest's PNG entries cover Android home-screen + PWA install. The 1024 master is parked in `design/` for the day this changes.
+
+3. **`<link rel="icon">` for the SVG only; PNGs reference via the manifest.** Modern pattern — browsers prefer the SVG when available, fall back to whatever the manifest declares for install/home-screen contexts. Adding bare `<link rel="icon" type="image/png" sizes="...">` tags for the 192/512 PNGs would be redundant noise the SVG already covers. Apple's `<link rel="apple-touch-icon">` stays explicit because iOS Safari doesn't read the manifest reliably for that purpose.
+
+4. **`display: "browser"` in the manifest.** The site is not a PWA — no offline mode, no app-shell, no sticky install affordance. `"browser"` is the honest declaration: "yes there's a manifest, no I'm not pretending to be an app." The alternative `"minimal-ui"` and `"standalone"` would change the rendered chrome on install (no URL bar, app-like frame) — misleading for a site whose value is reading and listening. Theme + icon are the manifest's reasons to exist; install-as-app is not.
+
+5. **`name === short_name === "Zeemish"`.** Both fields are required; the spec uses `short_name` when space is constrained (home-screen labels, narrow OS UI). "Zeemish" is already short — no abbreviation needed, no risk of truncation. Keeping them identical avoids a divergence that has to be maintained as the brand evolves.
+
+6. **`theme_color: "#1A6B62"` in both the manifest and a `<meta name="theme-color">` tag.** Duplicated because they apply in different contexts: the meta tag colours mobile browser chrome (Chrome's address bar tint on Android, Safari's status bar on iOS); the manifest field colours the splash screen on PWA install + the OS task switcher card. Both should match the brand. Two places, same value — drift is unlikely.
+
+7. **`background_color: "#FAF8F4"` (cream) in the manifest.** Used for the splash screen flash before the page renders. Matches the site's `zee-bg`. Picking white or anything else would create a visible flash-of-wrong-colour on slow first paint.
+
+8. **All five new asset paths added to `_routes.json` exclude list.** Static images + a JSON manifest don't need worker-applied security headers (no scripts, no auth touchable), and routing them through the worker would add ~10ms per request for zero benefit. Same pattern as the existing `og-image.png` and `robots.txt` exclusions. Keeps the worker's invocation count + bill lower.
+
+**Trade-offs accepted:** No `<link rel="mask-icon">` for legacy Safari pinned tabs — that surface is gone in Safari 18+ and the hassle of maintaining a monochrome SVG variant for it isn't worth the tail. No 32×32 or 16×16 PNG explicit overrides — the SVG renders at every size, and modern Chrome/Firefox/Safari rasterise it correctly for the small tab-icon contexts. If a 16-px sub-pixel rendering bug surfaces later on a specific browser, can revisit then. The design master sits in `design/` (24KB) — adds nothing to deployed bundle size since `public/` doesn't include `design/`.
+
+**Files touched:** [public/favicon.svg](../public/favicon.svg) (new), [public/apple-touch-icon.png](../public/apple-touch-icon.png) (new), [public/icon-192.png](../public/icon-192.png) (new), [public/icon-512.png](../public/icon-512.png) (new), [public/site.webmanifest](../public/site.webmanifest) (new), [design/favicon-source-1024.png](../design/favicon-source-1024.png) (new), [src/layouts/BaseLayout.astro](../src/layouts/BaseLayout.astro), [scripts/post-build.sh](../scripts/post-build.sh).
+
 ## 2026-04-25: Require `concept` on interactives schema, audit presence
 
 **Context / trigger:** Final SEO commit in the 2026-04-25 sweep. Initial framing was "every interactive page falls back to the generic Zeemish meta description; add a description field." Verification step (per the plan: "Don't proceed without doing this check") found the meta description was already per-quiz: [src/pages/interactives/[slug].astro:25](../src/pages/interactives/[slug].astro:25) passes `description={data.concept}` to BaseLayout, every existing JSON file has `concept` populated, and the previous SEO commit (`e9fe2d9`) made `<meta name="description">` always render. The premise of the original commit didn't hold — the work collapsed to "structure what's already there."
