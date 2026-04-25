@@ -15,7 +15,7 @@
         "question": "What determines whether displacement is perceived as a specific actor's fault versus a general systemic pressure?",
         "options": [
           "Whether the new claimant is a private corporation or a public entity",
-          "Whether the new claim represents a measurable fraction of total capacity, making displacement traceable to a single decision (correct)",
+          "Whether the new claim represents a measurable fraction of total capacity, making displacement traceable to a single decision",
           "Whether existing users were consulted before the new claim was approved",
           "Whether the displacement happens gradually over years or suddenly within weeks"
         ],
@@ -25,7 +25,7 @@
       {
         "question": "Why does adding capacity in fixed-step increments create different political dynamics than smooth, continuous expansion?",
         "options": [
-          "Fixed-step additions create discrete before/after states where winners and losers are identifiable, while continuous expansion diffuses benefits and costs across time (correct)",
+          "Fixed-step additions create discrete before/after states where winners and losers are identifiable, while continuous expansion diffuses benefits and costs across time",
           "Fixed-step projects require environmental review while continuous expansion does not",
           "Engineering constraints make fixed-step additions more expensive per unit of capacity",
           "Regulatory agencies only have jurisdiction over projects that exceed minimum size thresholds"
@@ -38,7 +38,7 @@
         "options": [
           "Fairness prioritizes equal distribution while efficiency prioritizes speed of implementation",
           "Fairness requires stakeholder consent processes while efficiency requires only technical analysis",
-          "Fairness asks 'who deserves this' based on distributional principles, while efficiency asks 'which use generates highest return' based on output measurement (correct)",
+          "Fairness asks 'who deserves this' based on distributional principles, while efficiency asks 'which use generates highest return' based on output measurement",
           "Fairness applies to public goods while efficiency applies to private markets"
         ],
         "correctIndex": 2,
@@ -47,7 +47,7 @@
       {
         "question": "When does proportional consumption create a coordination problem that pricing alone cannot resolve?",
         "options": [
-          "When the resource has already reached its supply ceiling, so higher prices cannot summon additional availability (correct)",
+          "When the resource has already reached its supply ceiling, so higher prices cannot summon additional availability",
           "When consumers lack perfect information about current pricing levels",
           "When the resource is publicly owned and therefore not subject to market mechanisms",
           "When demand elasticity is low and consumers continue purchasing despite price increases"
@@ -60,7 +60,7 @@
         "options": [
           "A hospital opening in a region where medical specialists are scarce, hiring 40% of available doctors and forcing other clinics to reduce services",
           "A reservoir allocation where a new industrial user receives a permit for 25% of annual flow, reducing agricultural allocations proportionally",
-          "A social media platform where each additional user increases the value of the network for all existing users through expanded connection possibilities (correct)",
+          "A social media platform where each additional user increases the value of the network for all existing users through expanded connection possibilities",
           "A zoning decision that converts 30% of a district's commercial space to residential, reducing retail density and foot traffic for remaining stores"
         ],
         "correctIndex": 2,
