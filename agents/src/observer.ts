@@ -286,7 +286,15 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
    *  and logZitaSynthesisMetered. Fires on both skipped and written
    *  paths — the skipped path (piece already categorised, idempotent
    *  re-run) logs no Claude call but still leaves a breadcrumb so
-   *  "did the categoriser run?" has a visible answer. */
+   *  "did the categoriser run?" has a visible answer.
+   *
+   *  Skipped path also surfaces the existing assignments (added
+   *  2026-04-25) so an admin looking at the feed can tell at a glance
+   *  whether the rows are correct or whether a buggy prior run wrote
+   *  them. Without this, a deploy-during-pipeline race that loses the
+   *  original "Categorised:" success log would leave the operator
+   *  reading "Categorisation skipped" with no way to know what's
+   *  actually attached. */
   async logCategoriserMetered(
     date: string,
     title: string,
@@ -299,14 +307,19 @@ export class ObserverAgent extends Agent<Env, ObserverState> {
       tokensIn: number;
       tokensOut: number;
       durationMs: number;
+      existingAssignments?: Array<{ name: string; slug: string; confidence: number }>;
     },
     pieceId: string | null = null,
   ): Promise<void> {
     if (metrics.skipped) {
+      const existing = metrics.existingAssignments ?? [];
+      const existingNote = existing.length > 0
+        ? ` Already assigned to: ${existing.map((a) => `${a.name} (${a.confidence}%)`).join(', ')}.`
+        : ' No existing assignments visible (race or stale state).';
       await this.writeEvent({
         severity: 'info',
         title: `Categorisation skipped: ${title}`,
-        body: `"${title}" (${date}) already has categories. No Claude call fired. Latency: ${metrics.durationMs}ms (DB only).`,
+        body: `"${title}" (${date}) already has categories. No Claude call fired.${existingNote} Latency: ${metrics.durationMs}ms (DB only).`,
         context: { date, ...metrics },
         piece_id: pieceId,
       });

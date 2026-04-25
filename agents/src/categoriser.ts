@@ -71,6 +71,19 @@ interface ResolvedAssignment {
   novelName?: string;
 }
 
+/** One row of the piece's pre-existing assignments — surfaced on the
+ *  idempotency-guard path so the observer feed shows what's actually
+ *  attached to the piece, not just "skipped". Added 2026-04-25 after
+ *  a deploy-during-pipeline race left a piece with rows but a
+ *  misleading "Categorisation skipped" log and no "Categorised:"
+ *  success log. See DECISIONS 2026-04-25 "Categoriser skipped log
+ *  surfaces existing assignments". */
+export interface ExistingAssignmentSummary {
+  name: string;
+  slug: string;
+  confidence: number;
+}
+
 /** Result surfaced back to Director so it can log success / novel /
  *  overflow events distinctly in the admin feed. */
 export interface CategoriserResult {
@@ -84,6 +97,10 @@ export interface CategoriserResult {
   tokensIn: number;
   tokensOut: number;
   durationMs: number;
+  /** Populated only on the skipped path. Empty on the success path
+   *  (the success log already names the just-written assignments via
+   *  novelCategoryNames). */
+  existingAssignments: ExistingAssignmentSummary[];
 }
 
 interface CategoriserState {
@@ -144,11 +161,30 @@ export class CategoriserAgent extends Agent<Env, CategoriserState> {
     const started = Date.now();
 
     // ── 1. Idempotence guard ─────────────────────────────────────
-    const existingAssignments = await this.env.DB
-      .prepare('SELECT COUNT(*) AS n FROM piece_categories WHERE piece_id = ?')
+    // Query the actual rows (not just COUNT) so the skipped log can
+    // surface what's already attached to the piece. Cost: one extra
+    // JOIN on a path that runs rarely (manual re-trigger, deploy race,
+    // alarm at-least-once retry). Without this surfacing, an admin
+    // looking at "Categorisation skipped" had no way to tell whether
+    // the rows were correct or whether a buggy prior run had attached
+    // the wrong category — they had to query D1 by hand.
+    const existingRows = await this.env.DB
+      .prepare(
+        `SELECT c.name AS name, c.slug AS slug, pc.confidence AS confidence
+         FROM piece_categories pc
+         JOIN categories c ON c.id = pc.category_id
+         WHERE pc.piece_id = ?
+         ORDER BY pc.confidence DESC`,
+      )
       .bind(pieceId)
-      .first<{ n: number }>();
-    if ((existingAssignments?.n ?? 0) > 0) {
+      .all<{ name: string; slug: string; confidence: number }>();
+    const existingAssignments: ExistingAssignmentSummary[] =
+      (existingRows.results ?? []).map((r) => ({
+        name: r.name,
+        slug: r.slug,
+        confidence: r.confidence,
+      }));
+    if (existingAssignments.length > 0) {
       return {
         pieceId,
         date,
@@ -160,6 +196,7 @@ export class CategoriserAgent extends Agent<Env, CategoriserState> {
         tokensIn: 0,
         tokensOut: 0,
         durationMs: Date.now() - started,
+        existingAssignments,
       };
     }
 
@@ -362,6 +399,7 @@ export class CategoriserAgent extends Agent<Env, CategoriserState> {
       tokensIn: response.usage?.input_tokens ?? 0,
       tokensOut: response.usage?.output_tokens ?? 0,
       durationMs: Date.now() - started,
+      existingAssignments: [],
     };
   }
 }

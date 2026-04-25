@@ -13,6 +13,30 @@ Format per entry:
 
 ---
 
+## [observing] 2026-04-25: Categoriser novel-category rate after floor 60→75 — track next 10 cron firings
+
+**Surfaced:** 2026-04-25 same-day Categoriser post-mortem on the firing-squads piece. The piece picked up a cross-domain stretch ("Commodity Shocks" at 70% confidence on a state-violence subject). Floor raised 60 → 75 same session to cut off the stretch zone. See DECISIONS 2026-04-25 "Tighten Categoriser reuse floor + surface existing assignments on skipped log + delete bad firing-squads → Commodity Shocks assignment".
+
+**Hypothesis:** Floor change shifts ambiguous-fit pieces away from the reuse bucket and toward either (a) a tighter clean reuse at 80+, (b) a novel category, or (c) zero-second-category (assignmentsWritten=1). Most pieces will end up in (a) or (c). A small minority will end up in (b) — that's the intended escape valve when the existing taxonomy genuinely doesn't cover the piece. The risk is over-correction: too many novel categories means the taxonomy proliferates, breaks the reuse-bias-was-holding argument that justified deferring sub-task 2.5 (admin categories page).
+
+**What to watch over the next 10 cron firings (≈5 days at `interval_hours=12`):**
+
+1. **Novel-category rate.** Query: `SELECT COUNT(*) FROM categories WHERE created_at >= <floor_change_commit_ts>`. If more than 3 novel categories created in the next 10 pieces (current rate: 7 in 12), the floor is too high; tune back to 70. If 1-2, the floor is well-calibrated. Zero is also fine (the existing taxonomy may be saturated for current news patterns).
+2. **Assignments-per-piece distribution.** Query: `SELECT piece_id, COUNT(*) FROM piece_categories WHERE created_at >= <floor_change_commit_ts> GROUP BY piece_id`. If the median drops below 1.5, Categoriser is being too cautious; the secondary-category slot is the natural place for cross-domain teaching that legitimately spans subjects. If pieces consistently get only 1 category, the floor may be cutting too aggressively.
+3. **Confidence distribution on existing-category reuses.** Query: `SELECT confidence FROM piece_categories pc JOIN categories c ON c.id = pc.category_id WHERE pc.created_at >= <floor_change_commit_ts> AND c.created_at < <floor_change_commit_ts>`. Should now cluster at 80+. Anything below 75 is a bug (floor isn't being respected); anything in the 75-79 band is the new ambiguous zone — watch for misclassifications there.
+4. **Sub-task 2.5 unblock signal.** If the catalogue hits ~30 categories before ~30 pieces, the reuse-bias argument that justified deferring sub-task 2.5 has broken; admin categories page becomes urgent. Current: 7 categories, 13 pieces (12 + firing-squads).
+
+**Investigation hints when resumed:**
+- Floor constant: [`agents/src/categoriser-prompt.ts:CATEGORISER_REUSE_CONFIDENCE_FLOOR`](agents/src/categoriser-prompt.ts).
+- The skipped-log surface change is unrelated to this observing entry — it just makes the data easier to read in the admin feed when re-runs happen. No effect on assignment shape.
+- Useful one-liner for quick health check: `wrangler d1 execute zeemish --remote --command "SELECT slug, name, piece_count FROM categories ORDER BY piece_count DESC"`.
+
+**Unblock condition:** 10 cron firings observed (≈2026-04-30 14:00 UTC). Move to `[resolved]` if novel-category creation rate ≤ 3/10 AND median assignments-per-piece is between 1 and 2 AND no confidence-band-violators in piece_categories. Otherwise tune the floor and reset the observation window.
+
+**Priority:** medium. Cron is firing every 12 hours; the data accrues on its own.
+
+---
+
 ## [observing] 2026-04-25: Curator pick rate after protocol-reframe — track next 7 cron firings
 
 **Surfaced:** 2026-04-25 same-day. Curator's 14:00 UTC slot declined every one of 50 candidates with the "60+ teachability threshold" boilerplate. Same-session fix dropped the threshold, embedded the Zeemish protocol at the top of `CURATOR_PROMPT`, replaced TEACHABILITY's biased examples with breadth-showing ones across 8 categories, reframed NO-CULTURE-WAR as voice-not-subject, and required skip reasons to name the specific condition rather than dismiss by category. See DECISIONS 2026-04-25 "Curator reframed around the Zeemish protocol; '60+ teachability threshold' dropped".

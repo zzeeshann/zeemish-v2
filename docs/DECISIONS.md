@@ -2,6 +2,41 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Tighten Categoriser reuse floor + surface existing assignments on skipped log + delete bad firing-squads → Commodity Shocks assignment
+
+**Context / trigger:** Post-mortem on the firing-squads piece (`piece_id=7eb5f8a3-…`, the 2026-04-25 14:00 UTC slot piece that the new Curator picked) surfaced two real Categoriser issues alongside one harmless deploy-timing artefact:
+
+1. **Misclassification.** Categoriser correctly created the novel category "State Violence & Justice Systems" at 75% confidence (the right primary). But it ALSO assigned "Commodity Shocks" at 70% confidence — a cross-domain stretch from the piece's secondary thread about pharmaceutical companies exiting the execution-drug supply ("supply running out" pattern-matched to "commodity shock"). Reader-visible: the piece would surface in [/library/commodity-shocks/](https://zeemish.io/library/commodity-shocks/) alongside oil-prices and jet-fuel pieces, off-brand for that filter.
+
+2. **Misleading observer feed.** The piece's Categoriser observer event read `"Categorisation skipped"` (with `assignmentsWritten:0, considered:0, durationMs:11ms`) — but `piece_categories` actually had 2 rows for the piece. Comparing against 12 prior pieces, every one had a `"Categorised:"` success event; this is the only one that doesn't. Deploy-during-pipeline race confirmed via timeline: today's agents-worker deploy at 14:19 UTC raced with the post-publish Categoriser alarm at 14:23:51. First invocation INSERTed both rows at 14:24:20 (~29s after fire, mostly Claude call), but the DO got evicted before `observer.logCategoriserMetered` could persist the success log — the catch-and-swallow pattern at [`director.ts:715-717`](agents/src/director.ts:715) means observer-write failures are silently lost. Cloudflare's at-least-once alarm semantics re-queued the alarm; the retry at 14:24:23 hit the idempotency guard, fired the misleading "skipped" event. Same root cause as today's two `"Durable Object reset because its code was updated"` audio failures (already documented in CLAUDE.md 2026-04-19 audio narrative).
+
+The deploy race itself isn't a bug to fix — at-least-once semantics + idempotency guards are the Cloudflare-native way to handle it, and CLAUDE.md already names the pattern. But the **observability is bad**: an admin reading the feed sees "skipped" with no detail and can't tell whether the piece is actually categorised or whether a buggy prior run attached the wrong category.
+
+**Decisions (three changes, one commit):**
+
+1. **Raise `CATEGORISER_REUSE_CONFIDENCE_FLOOR` from 60 → 75** in [`agents/src/categoriser-prompt.ts:20`](agents/src/categoriser-prompt.ts:20). The 60 floor was set in sub-task 2.2 (2026-04-23) when the taxonomy was empty and Categoriser needed permission to populate it. After 7 categories formed and 12 pieces categorised, the floor's job shifted from "let Categoriser build" to "stop Categoriser from stretching." 75 is high enough to require the piece's *primary* underlying subject to fit the reused category — secondary thematic echoes (this piece's pharma-supply-chain thread) won't clear it. Quantitative read: 11 of the prior 12 piece-category assignments are at 80+ confidence based on observer event logs; the 70-75 band has been the cross-domain stretch zone. Floor change cuts that band off cleanly.
+
+2. **Surface existing assignments on the skipped-path observer log.** New `ExistingAssignmentSummary` interface in [`agents/src/categoriser.ts`](agents/src/categoriser.ts). The idempotency guard query at line 147 changes from `SELECT COUNT(*)` to a `SELECT … JOIN categories` that returns the actual rows. `CategoriserResult` gains a required `existingAssignments: ExistingAssignmentSummary[]` field (empty on the success path, populated on the skipped path). [`logCategoriserMetered`](agents/src/observer.ts) extends the skipped-path body to read: *"Already assigned to: State Violence & Justice Systems (75%), Commodity Shocks (70%). No Claude call fired. Latency: 11ms (DB only)."* Fallback note when the array is empty: *"No existing assignments visible (race or stale state)"* — covers the edge case where the guard fires on a piece with no rows (theoretically impossible since the guard's whole reason for firing is `existingAssignments.length > 0`, but defensive).
+
+3. **D1 surgery: delete the firing-squads → Commodity Shocks row + decrement piece_count** for the `commodity-shocks` category. One-shot operational fix, runs after the floor change deploys (so a future re-trigger can't re-add it). Leaves "State Violence & Justice Systems" as the sole category for the piece — the right primary, the right shape.
+
+**Trade-offs:**
+
+- **Floor change cost: more novel categories created.** The reuse-bias was the primary mechanism keeping the taxonomy small (sub-task 2.5 admin curation page was deferred specifically because the bias was holding). At 75 the bias still holds but excludes cross-domain stretches; pieces that would have been borderline reused at 60-74 confidence now either go novel (taxonomy grows) or skip (no second category). Watch this for taxonomy proliferation — if the catalogue hits ~30 categories before ~30 pieces, sub-task 2.5 becomes urgent. Current state: 7 categories, 12 pieces. New observing entry in FOLLOWUPS tracks the next 10 cron firings for novel-category creation rate.
+- **Skipped-log change cost: one extra JOIN on a guarded path.** Path runs rarely (manual re-trigger, deploy race, alarm at-least-once retry). Cost is negligible; observability win is large.
+- **Surgery cost: none.** Categoriser's idempotency guard (now even more honest with the surfaced assignments) prevents future re-runs from re-attaching Commodity Shocks. Until someone manually deletes the State Violence & Justice Systems row first, the slot is taken.
+
+**Won't fix this session:**
+
+- **The deploy-during-pipeline race itself.** At-least-once semantics + idempotency guards are the platform-correct answer. Every off-pipeline alarm in the system (Categoriser, Reflection, Zita synthesis, Interactive Generator, audio) handles this via the same pattern. Adding deploy-pause coordination would require infrastructure changes outside this session's scope.
+- **Reflection / Drafter self-reflection / Zita synthesis don't (yet) have the same surface-on-skip pattern.** Categoriser's idempotency guard is the only one whose output benefits from naming what was already there. Reflection writes new learnings each run (no idempotency conflict); Zita synthesis is rate-limited differently. If the same observability issue surfaces on those agents, port the pattern then.
+
+**Verification:**
+
+- Typecheck clean on touched files (`agents/src/categoriser.ts`, `agents/src/categoriser-prompt.ts`, `agents/src/observer.ts`); 25 pre-existing server.ts SDK-typing errors per CLAUDE.md baseline unchanged.
+- D1 surgery verified post-execution: `SELECT count(*) FROM piece_categories WHERE piece_id='7eb5f8a3-…'` returns 1 (down from 2); `SELECT piece_count FROM categories WHERE slug='commodity-shocks'` returns 2 (down from 3).
+- Forward verification: next cron firing's Categoriser run with the new floor. If the piece picks 1 category cleanly at 80+ confidence, the floor change is working; if it forces an unwanted novel category, tune back down to 70.
+
 ## 2026-04-25: Curator reframed around the Zeemish protocol; "60+ teachability threshold" dropped
 
 **Context / trigger:** The 14:00 UTC slot on 2026-04-25 (`piece_id=fd5b4687…`) declined every one of 50 candidates. Curator's reason: "No teachable stories today. Most candidates are either low-teachability breaking news (Iran diplomacy, murder case, military strikes), culturally-specific political stories (DOJ internal procedures, SPLC donors, firing squads policy), or gaming/tech product announcements lacking universal underlying systems… No candidate reaches the 60+ teachability threshold." The day shipped one piece instead of two.

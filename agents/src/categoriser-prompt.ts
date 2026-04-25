@@ -16,8 +16,16 @@ export const CATEGORISER_MAX_ASSIGNMENTS = 3;
  *  creating a new category is the honest answer. Shown in the prompt
  *  so the reuse-bias has a numeric anchor. The agent does not
  *  post-hoc filter on this — Claude is told the rule and expected to
- *  follow it. */
-export const CATEGORISER_REUSE_CONFIDENCE_FLOOR = 60;
+ *  follow it.
+ *
+ *  Raised 60 → 75 on 2026-04-25 after the firing-squads piece (a
+ *  state-violence subject with a secondary pharma-supply-chain thread)
+ *  picked up "Commodity Shocks" at 70 confidence — a cross-domain
+ *  stretch from "supply running out" to "commodity shock". 75 is high
+ *  enough to require the piece's *primary* underlying subject to fit
+ *  the reused category, not merely a thematic echo from a secondary
+ *  beat. See DECISIONS 2026-04-25 "Tighten Categoriser reuse floor". */
+export const CATEGORISER_REUSE_CONFIDENCE_FLOOR = 75;
 
 export const CATEGORISER_PROMPT = `You categorise a just-published Zeemish daily piece by assigning it to 1–3 existing categories — or, only when nothing truly fits, proposing a single new one.
 
