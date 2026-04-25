@@ -2,6 +2,51 @@
 
 Append-only. Never edit old entries.
 
+## 2026-04-25: Curator reframed around the Zeemish protocol; "60+ teachability threshold" dropped
+
+**Context / trigger:** The 14:00 UTC slot on 2026-04-25 (`piece_id=fd5b4687…`) declined every one of 50 candidates. Curator's reason: "No teachable stories today. Most candidates are either low-teachability breaking news (Iran diplomacy, murder case, military strikes), culturally-specific political stories (DOJ internal procedures, SPLC donors, firing squads policy), or gaming/tech product announcements lacking universal underlying systems… No candidate reaches the 60+ teachability threshold." The day shipped one piece instead of two.
+
+The decline was the wrong outcome. Murder cases teach human psychology and the systems of grief and justice. Firing-squads policy teaches the philosophy of state violence and the design of execution methods. The Planned Parenthood Botox story (Curator's "mild potential, too shallow") teaches funding interdependencies and how organisations adapt under constraint. **Every story connects to a system.** Curator was gate-keeping against pieces that didn't pattern-match an institutional/supply-chain template — the opposite of "the cure is learning to see and work with the whole."
+
+Investigation showed four root causes in `agents/src/curator-prompt.ts`:
+
+1. **The "60+ threshold" is a ghost number.** The prompt told Claude to skip "if all score below 60" but never defined how to score. Claude invented a conservative floor and applied it.
+2. **TEACHABILITY's only worked examples were biased:** "Celebrity scandals: low. Supply chain disruptions: high." Three lines of prompt taught Claude to dismiss human-drama stories.
+3. **NO CULTURE WAR was being read as "skip politically charged subjects."** It was meant to be about voice (no tribal language) — but the way it was written, Curator was bouncing DOJ procedures, firing squads, and abortion-adjacent funding stories that Zeemish CAN teach about (without taking sides).
+4. **Curator had zero visibility into the Zeemish protocol.** It received 5 selection criteria and never saw "Most human suffering comes from treating connected things as separate." The Drafter, Voice Auditor, and Interactive Auditor all see the protocol via the voice contract; the gatekeeper agent that decides whether ANY piece runs at all did not.
+
+**Decisions:**
+
+1. **Embed the Zeemish protocol at the top of `CURATOR_PROMPT`.** Three-sentence version (with the new "Everything that follows is an attempt to show you what that means — and how to do it." third line that lands in the voice contract this same session). Same surface every editorial-decision agent should have. Curator is not a routing agent — it makes a judgement call every cron firing, and that judgement needs the protocol as the lens.
+
+2. **Replace TEACHABILITY's worked examples with breadth-showing pairs.** Eight categories now (crime/violence → human psychology; celebrity/culture → influence dynamics; supply chain → chokepoints; science discovery → pattern recognition; policy → institutional incentive design; business → market structure; tech announcement → adoption curves WITH a guard for pure-spec announcements; death/loss/dignity → philosophy). The framing line is explicit: "The question is never 'is this teachable?' — it is 'what does this teach?'" Examples are illustrative, not exhaustive — Claude is encouraged to find the connection in any candidate.
+
+3. **Drop "60+ threshold" entirely.** Replace with a "Default: PICK" section that names the narrow conditions under which a skip is justified: (a) the entire candidate set is one breaking event being re-reported with no new angle yet, (b) every candidate is a pure product/spec announcement with no underlying system to teach. "When in doubt, find the connection" is now the load-bearing instruction.
+
+4. **Reframe "NO CULTURE WAR" as "NO TRIBAL FRAMING (not 'no political subjects')".** The rule is about voice, not subject. Zeemish CAN teach about firing squads, abortion-adjacent funding, DOJ procedures, immigration, religion — by surfacing the system without taking a tribal side. "Skip the framing, not the subject" is the explicit instruction.
+
+5. **Soften DEPTH POTENTIAL.** Old: "Can the underlying concept fill 1000-1500 words of real teaching without padding?" — read as a gating question. New: "Almost every story has a concept rich enough for 1000-1500 words. Your job is to find it. Padding gets caught downstream by Voice and Structure auditors; missing pieces don't." Quality enforcement moves to where it already lives (the auditors); Curator stops doing pre-emptive editorial gate-keeping.
+
+6. **Tighten the decline reason.** Curator must NAME the specific condition (e.g., "all 50 candidates are reprints of the same wire-service breaking-news report with no analytical angle yet") rather than dismiss by category ("low-teachability", "shallow"). The prompt explicitly states: "If you cannot name the specific condition, you have not earned the skip — find the connection."
+
+**Trade-offs:**
+
+- **Cost: occasional Rough-tier pieces may ship that wouldn't have shipped before.** Voice Auditor's ≥85 gate, Structure Editor's beat-count check, and the Integrator's 3-revision loop still gate quality downstream. Tier surfacing on the live site (`audit-tier.ts`) labels pieces honestly: Polished (≥85), Solid (70–84), Rough (<70). The cost of one Rough-tier piece is lower than the cost of a no-piece day. The Maine piece for 2026-04-25 already published cleanly at 02:01 UTC — there was no quality argument for skipping the 14:00 slot.
+- **Cost: prompt grew from 30 lines to ~80.** Token spend per Curator invocation rises by ~500 input tokens. One Curator call per cron firing — at `interval_hours=12` that's 2/day = ~$0.0001/day on Sonnet 4.5. Negligible.
+- **Cost: Claude may now find a teaching angle on stories that genuinely don't have one.** Mitigated by (a) the explicit "narrow skip conditions" list, (b) downstream auditors catching thin pieces, (c) the FOLLOWUPS observing entry tracking pick rate over the next 7 cron firings.
+- **Win: the protocol is now load-bearing on the gatekeeper agent, not just the auditors.** This closes a long-standing asymmetry — Curator was the only editorial-decision agent without the protocol in its lens.
+- **Win: skip-reason quality goes up.** When the rare legitimate skip happens, the reason will name the specific condition, not pattern-match on category. Operators get a useful signal instead of "no teachable stories today" boilerplate.
+
+**Doc surfaces touched (same commit):** `content/voice-contract.md`, `agents/src/shared/voice-contract.ts`, `CLAUDE.md` all gain the third sentence ("Everything that follows is an attempt to show you what that means — and how to do it.") of the Zeemish protocol. Voice Auditor and Interactive Auditor pick up the extended protocol automatically on next run because they embed `${VOICE_CONTRACT}` directly.
+
+**Out of scope (intentional):** Scanner candidate selection (Scanner is doing its job — surfacing breadth; Curator was the chokepoint). Threshold value tuning (dropped entirely, no replacement number). Categoriser changes (separate taxonomy, separate concerns). README / homepage hero promotion of the protocol (user said "somewhere in the docs"; the three canonical surfaces — voice-contract.md + voice-contract.ts + CLAUDE.md + Curator prompt — are the right scope for this session).
+
+**Verification plan:**
+
+- Local typecheck on touched file clean (zero new errors; 25 pre-existing `server.ts` SDK-typing errors unchanged per CLAUDE.md baseline).
+- Forward verification at next 7 cron firings (FOLLOWUPS observing entry below). Pick rate should rise to ~95%+. If skip rate stays high, the prompt rewrite missed something and we tune. If the system over-corrects to consistent Rough-tier pieces, we tune Voice Auditor or revisit DEPTH POTENTIAL guidance.
+- Retroactive trigger of today's 14:00 UTC slot deferred to operator decision (one-shot production action; surfaces via dashboard "Trigger daily piece" button).
+
 ## 2026-04-25: Ship `interactive_audit_results` table — closes deferred 4.1, unblocks dimension-naming in drawer
 
 **Context / trigger:** The same-day "Drawer drops Rough tier label" fix landed honest copy ("The auditor flagged a concern beyond voice…") but couldn't say WHICH rubric the auditor flagged because the data wasn't persisted. The `logInteractiveGeneratorMetered` observer event already carried per-dimension pass/fail in its `context.finalAudit` JSON, but reading event-shape from the reader path would couple the drawer to event-context shape — fragile. Sub-task 4.1's deferred FOLLOWUP (`interactive_audit_results` table) had been logged on 2026-04-24 with two unblock conditions: "when 4.5 ships OR first debugging session needs the context." Both became true on 2026-04-25 — Phase-1 diagnosis of the 2026-04-25 Maine + 2026-04-24 FISA shipped-low artefacts showed the auditor over-firing on essence on cases the loosened prompt explicitly listed as "Do NOT fail for" (concept-match, structural analogies, worked numeric examples, thematic echo). Tuning the prompt is downstream — but tuning blind without round-by-round data would risk over-correcting. Schema-fits-the-need over query-layer bandaid.

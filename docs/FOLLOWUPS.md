@@ -13,6 +13,31 @@ Format per entry:
 
 ---
 
+## [observing] 2026-04-25: Curator pick rate after protocol-reframe — track next 7 cron firings
+
+**Surfaced:** 2026-04-25 same-day. Curator's 14:00 UTC slot declined every one of 50 candidates with the "60+ teachability threshold" boilerplate. Same-session fix dropped the threshold, embedded the Zeemish protocol at the top of `CURATOR_PROMPT`, replaced TEACHABILITY's biased examples with breadth-showing ones across 8 categories, reframed NO-CULTURE-WAR as voice-not-subject, and required skip reasons to name the specific condition rather than dismiss by category. See DECISIONS 2026-04-25 "Curator reframed around the Zeemish protocol; '60+ teachability threshold' dropped".
+
+**Hypothesis:** Pick rate should rise from current rate (1 skip in last few firings) to ~95%+. Skip should now only fire on the narrow conditions named in the new prompt (single breaking event re-reported with no new angle, or pure product/spec announcements with no system to teach).
+
+**What to watch over the next 7 cron firings (≈3.5 days at `interval_hours=12`):**
+
+1. **Pick rate.** Query: `SELECT step, status, data FROM pipeline_log WHERE step='skipped' AND created_at >= <reframe_commit_ts> ORDER BY created_at DESC`. If more than 1 skip in 7 firings, the prompt rewrite isn't strong enough — investigate the skip reasons and tune.
+2. **Voice score distribution.** Query: `SELECT date, slug, voice_score FROM daily_pieces WHERE published_at >= <reframe_commit_ts>`. If voice scores drift below 80 average (vs ≥85 historical), Curator is picking thin stories and Drafter is padding — the auditors are catching it but quality is degrading. Tune DEPTH POTENTIAL guidance back up.
+3. **Quality-flag rate.** Query: `SELECT date, slug, quality_flag FROM daily_pieces WHERE published_at >= <reframe_commit_ts>`. If `quality_flag='low'` rate rises above 1-in-10, same conclusion as #2 — picking too aggressively.
+4. **Skip reason quality.** When a skip does fire, read the reason in `pipeline_log.data`. New prompt requires it to NAME the specific condition (e.g., "all 50 candidates are reprints of X breaking event with no new angle"). If the reason is still category-dismissal boilerplate ("low-teachability", "shallow"), Claude is ignoring the new instruction — tune the wording.
+
+**Investigation hints when resumed:**
+- The reframe ships in `agents/src/curator-prompt.ts`. The decline path through `agents/src/curator.ts` and `agents/src/director.ts` is unchanged.
+- Doc surfaces (voice-contract.md + voice-contract.ts + CLAUDE.md) gained the third protocol sentence in the same commit.
+- Verify the prompt deployed correctly: `grep "Default: PICK" agents/src/curator-prompt.ts` after the agents-worker auto-deploy completes.
+- Consider running a one-shot test against today's 50 candidates from `daily_candidates WHERE date='2026-04-25'` (specifically piece_id `fd5b4687…`) once any tuning is needed — confirm the new prompt picks one of: murder case, firing squads, Planned Parenthood Botox, DOJ procedures.
+
+**Unblock condition:** 7 cron firings observed (≈2026-04-28 14:00 UTC). Move to `[resolved]` if pick rate ≥6/7 AND voice score average ≥85 AND quality_flag='low' rate is 0-1/7.
+
+**Priority:** medium. Cron is firing every 12 hours; the data accrues on its own.
+
+---
+
 ## [resolved] 2026-04-25: Submit zeemish.io sitemap to Google Search Console
 
 **Surfaced:** 2026-04-25 SEO foundations shipping (commit `b089d6d`). The `/sitemap.xml` endpoint is live and auto-updates on every request, but neither Google Search Console nor Bing Webmaster Tools knows the URL exists yet. Until submitted, organic indexing waits on whatever the crawlers happen to discover via inbound links — slow and uneven.
