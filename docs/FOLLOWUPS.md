@@ -13,18 +13,15 @@ Format per entry:
 
 ---
 
-## [open] 2026-04-25: Submit zeemish.io sitemap to Google Search Console + Bing Webmaster Tools
+## [resolved] 2026-04-25: Submit zeemish.io sitemap to Google Search Console
 
 **Surfaced:** 2026-04-25 SEO foundations shipping (commit `b089d6d`). The `/sitemap.xml` endpoint is live and auto-updates on every request, but neither Google Search Console nor Bing Webmaster Tools knows the URL exists yet. Until submitted, organic indexing waits on whatever the crawlers happen to discover via inbound links — slow and uneven.
 
 **Hypothesis:** This is a one-time human action, not code work. RUNBOOK has the step-by-step under "Submit sitemap to search engines". Verifying ownership uses a DNS TXT record on the Cloudflare zone (preferred over the HTML-file method since auto-deploy doesn't touch DNS).
 
-**Investigation hints when resumed:**
-- Search Console: https://search.google.com/search-console — add `https://zeemish.io` as a URL-prefix property, verify via DNS TXT, then Sitemaps → Add `sitemap.xml`. First crawl typically lands within 1–3 days.
-- Bing Webmaster Tools: https://www.bing.com/webmasters — same DNS TXT verification. Smaller share but free upside.
-- After first crawl, monitor the Coverage report for any URL-shape issues (404s, redirect chains). The Phase-4 `/daily/{date}/` → 404 transition (no 301 from old date-only URLs) might surface here as "Crawled — currently not indexed" entries.
+**Resolved:** 2026-04-25. Sitemap submitted to Google Search Console as a domain property (`zeemish.io`, not the URL-prefix variant — domain property covers `https://`, `http://`, and every subdomain in one go, which is the right shape for a single-origin site). Verified via DNS TXT on the Cloudflare zone. Sitemap processed successfully on first read; **31 pages discovered** (matches the SSR endpoint's enumeration of homepage + /daily/ + /library/ + 12 daily pieces × slug-inclusive URLs + 7 interactives + 3 category pages + the /daily/ and /library/ indexes). First crawl impressions and Coverage report data will accrue over 1–3 days. Monitor Coverage for any "Crawled — currently not indexed" entries from the pre-Phase-4 date-only URLs (separate FOLLOWUPS entry below covers the 301-redirect option).
 
-**Priority:** medium. Site has been live since 2026-04-18 with no indexed presence; every day of delay is teaching pieces invisible to organic search.
+**Bing Webmaster Tools — deferred by decision.** Skipping the Bing submission for now. Bing's organic share is small relative to the effort of maintaining a second webmaster property; can revisit if AI-search traffic (Bing powers Copilot's web grounding, You.com, etc.) gets interesting enough to warrant per-source visibility. No action queued; no FOLLOWUPS entry to track.
 
 ---
 
